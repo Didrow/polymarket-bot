@@ -129,7 +129,7 @@ SCAN_INTERVAL_SEC: int = 120   # Сканування кожні 2 хвилин�
 
 # ─────────────────────────────────────────────
 # EMAIL СПОВІЩЕННЯ (через Gmail SMTP, безкоштовно)
-EMAIL_ENABLED: bool = False        # True після налаштування App Password
+EMAIL_ENABLED: bool = True        # True після налаштування App Password
 EMAIL_SENDER: str = os.getenv("EMAIL_SENDER", "")      # твій gmail
 EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "") # куди слати
 # ─────────────────────────────────────────────
