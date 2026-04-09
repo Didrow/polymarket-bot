@@ -253,21 +253,21 @@ def fetch_open_meteo_forecast(city: str) -> Optional[WeatherForecast]:
 
 def get_best_forecast(city: str) -> Optional[WeatherForecast]:
     """
-    Отримати найкращий прогноз для міста:
-    - NOAA для США (вищa точність),
-    - Open-Meteo для решти світу.
-    З fallback: якщо основне джерело недоступне — використовуємо резервне.
+    Найкращий прогноз: GFS → NOAA → Open-Meteo (fallback).
     """
-    is_us_city = city in config.NOAA_CITIES
+    # Спочатку пробуємо GFS (топ-джерело)
+    forecast = fetch_gfs_forecast(city)
+    if forecast:
+        return forecast
 
+    # Якщо GFS не спрацював — старий порядок
+    is_us_city = city in config.NOAA_CITIES
     if is_us_city:
         forecast = fetch_noaa_forecast(city)
         if forecast:
             return forecast
-        logger.info(f"NOAA недоступне для {city}, використовую Open-Meteo")
 
     return fetch_open_meteo_forecast(city)
-
 
 def get_multi_source_consensus(city: str) -> Optional[WeatherForecast]:
     """
