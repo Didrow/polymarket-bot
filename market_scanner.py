@@ -202,6 +202,21 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
 
         raw_list = data if isinstance(data, list) else data.get("markets", [])
         logger.info(f"Gamma API: отримано {len(raw_list)} weather ринків")
+                # ── НОВЕ: ЛОГУЄМО ВСІ ОТРИМАНІ РИНКИ (для діагностики) ──
+        logger.info(f"🔍 Отримано {len(raw_list)} ринків. Перевіряємо фільтри...")
+        for raw in raw_list[:20]:  # показуємо тільки перші 20, щоб не засмічувати логи
+            hours = 999
+            vol = float(raw.get("volume", 0) or raw.get("volumeNum", 0) or 0)
+            question = raw.get("question", "Без назви")[:100]
+            try:
+                end_date_str = raw.get("endDate") or raw.get("end_date_iso")
+                if end_date_str:
+                    from datetime import datetime, timezone
+                    end = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                    hours = (end - datetime.now(timezone.utc)).total_seconds() / 3600
+                logger.info(f"   → Ринок: {question}... | vol=${vol:,.0f} | hours_to_end={hours:.1f}h")
+            except:
+                logger.info(f"   → Ринок: {question}... | vol=${vol:,.0f} | hours_to_end=???")
 
         for raw in raw_list:
             market = _parse_market(raw)
