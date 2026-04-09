@@ -306,3 +306,69 @@ def get_multi_source_consensus(city: str) -> Optional[WeatherForecast]:
         snow_mm=avg(f1.snow_mm, f2.snow_mm),
         wind_kmh=avg(f1.wind_kmh, f2.wind_kmh),
     )
+# ─────────────────────────────────────────────────────────────
+# GFS (Global Forecast System) — додано для топ-edge
+# ─────────────────────────────────────────────────────────────
+def fetch_gfs_forecast(city: str) -> Optional[WeatherForecast]:
+    """
+    Новий джерело: Open-Meteo GFS (включає ensemble probabilities).
+    Доповнює NOAA + Open-Meteo.
+    """
+    cache_key = f"gfs_{city}"
+    if cache_key in _weather_cache:
+        ts, data = _weather_cache[cache_key]
+        if time.time() - ts < config.WEATHER_CACHE_SEC:
+            return data
+
+    coords = _geocode_city(city)
+    if not coords:
+        return None
+
+    lat, lon = coords
+    try:
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": ["temperature_2m_max", "temperature_2m_min",
+                      "precipitation_sum", "precipitation_probability_max",
+                      "snowfall_sum"],
+            "temperature_unit": "celsius",
+            "precipitation_unit": "mm",
+            "timezone": "auto",
+            "forecast_days": 3
+        }
+        r = requests.get("https://api.open-meteo.com/v1/gfs", params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+
+        daily = data.get("daily", {})
+        if not daily:
+            return None
+
+        temp_high_c = daily["temperature_2m_max"][0]
+        temp_low_c = daily["temperature_2m_min"][0]
+        precip_mm = daily["precipitation_sum"][0]
+        precip_prob = (daily.get("precipitation_probability_max", [None])[0] or 0) / 100.0
+        snow_mm = daily.get("snowfall_sum", [None])[0]
+
+        forecast = WeatherForecast(
+            city=city,
+            source="gfs_open_meteo",
+            forecast_time=datetime.now(),
+            temp_high_c=temp_high_c,
+            temp_low_c=temp_low_c,
+            temp_high_f=temp_high_c * 9 / 5 + 32 if temp_high_c else None,
+            temp_low_f=temp_low_c * 9 / 5 + 32 if temp_low_c else None,
+            precip_mm=precip_mm,
+            precip_prob=precip_prob,
+            snow_mm=snow_mm,
+            raw_data=daily
+        )
+
+        _weather_cache[cache_key] = (time.time(), forecast)
+        logger.info(f"GFS {city}: high={temp_high_c}°C, precip_prob={precip_prob:.0%}")
+        return forecast
+
+    except Exception as e:
+        logger.warning(f"GFS error для {city}: {e}")
+        return None
