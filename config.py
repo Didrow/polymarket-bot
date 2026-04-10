@@ -25,10 +25,22 @@ CHAIN_ID: int = 137  # Polygon mainnet
 # ─────────────────────────────────────────────
 # МІСТА ТА РИНКИ
 # ─────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# МІСТА ТА РИНКИ (автоматичне розширення)
+# ─────────────────────────────────────────────
 TARGET_CITIES: List[str] = [
-    "New York", "NYC", "Chicago", "Seattle",
-    "Atlanta", "Dallas", "Miami", "Los Angeles",
-    "London", "Paris", "Berlin", "Toronto",
+    # США (основні)
+    "New York", "NYC", "Chicago", "Seattle", "Atlanta", "Dallas", "Miami",
+    "Los Angeles", "San Francisco", "Boston", "Houston", "Phoenix", "Denver",
+    # Європа
+    "London", "Paris", "Berlin", "Madrid", "Rome", "Amsterdam", "Brussels",
+    "Vienna", "Prague", "Warsaw", "Budapest", "Moscow", "Kyiv", "Istanbul",
+    # Канада та інші
+    "Toronto", "Vancouver", "Montreal", "Hong Kong", "Tokyo", "Sydney",
+    "Melbourne", "Singapore", "Dubai", "Bangkok", "Mexico City",
+    # Додаткові популярні для weather-ринків
+    "Las Vegas", "Orlando", "New Orleans", "Philadelphia", "Detroit",
+    "Minneapolis", "Salt Lake City", "Portland", "Austin", "Charlotte"
 ]
 
 WEATHER_KEYWORDS: List[str] = [
