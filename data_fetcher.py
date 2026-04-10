@@ -253,20 +253,26 @@ def fetch_open_meteo_forecast(city: str) -> Optional[WeatherForecast]:
 
 def get_best_forecast(city: str) -> Optional[WeatherForecast]:
     """
-    Найкращий прогноз: GFS → NOAA → Open-Meteo (fallback).
+    Найкращий прогноз: GFS → ECMWF → NOAA → Open-Meteo (fallback).
     """
-    # Спочатку пробуємо GFS (топ-джерело)
+    # 1. GFS (NOAA) — пріоритет
     forecast = fetch_gfs_forecast(city)
     if forecast:
         return forecast
 
-    # Якщо GFS не спрацював — старий порядок
+    # 2. ECMWF — друге найкраще
+    forecast = fetch_ecmwf_forecast(city)
+    if forecast:
+        return forecast
+
+    # 3. Старий порядок для США
     is_us_city = city in config.NOAA_CITIES
     if is_us_city:
         forecast = fetch_noaa_forecast(city)
         if forecast:
             return forecast
 
+    # 4. Open-Meteo як останній fallback
     return fetch_open_meteo_forecast(city)
 
 def get_multi_source_consensus(city: str) -> Optional[WeatherForecast]:
@@ -371,4 +377,69 @@ def fetch_gfs_forecast(city: str) -> Optional[WeatherForecast]:
 
     except Exception as e:
         logger.warning(f"GFS error для {city}: {e}")
+        return None
+# ─────────────────────────────────────────────────────────────
+# ECMWF (Європейський центр) — ще одне точне джерело
+# ─────────────────────────────────────────────────────────────
+def fetch_ecmwf_forecast(city: str) -> Optional[WeatherForecast]:
+    """
+    Новий джерело: ECMWF через Open-Meteo (дуже точний для Європи та глобально).
+    """
+    cache_key = f"ecmwf_{city}"
+    if cache_key in _weather_cache:
+        ts, data = _weather_cache[cache_key]
+        if time.time() - ts < config.WEATHER_CACHE_SEC:
+            return data
+
+    coords = _geocode_city(city)
+    if not coords:
+        return None
+
+    lat, lon = coords
+    try:
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": ["temperature_2m_max", "temperature_2m_min",
+                      "precipitation_sum", "precipitation_probability_max",
+                      "snowfall_sum"],
+            "temperature_unit": "celsius",
+            "precipitation_unit": "mm",
+            "timezone": "auto",
+            "forecast_days": 3
+        }
+        r = requests.get("https://api.open-meteo.com/v1/ecmwf", params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+
+        daily = data.get("daily", {})
+        if not daily:
+            return None
+
+        temp_high_c = daily["temperature_2m_max"][0]
+        temp_low_c = daily["temperature_2m_min"][0]
+        precip_mm = daily["precipitation_sum"][0]
+        precip_prob = (daily.get("precipitation_probability_max", [None])[0] or 0) / 100.0
+        snow_mm = daily.get("snowfall_sum", [None])[0]
+
+        forecast = WeatherForecast(
+            city=city,
+            source="ecmwf_open_meteo",
+            forecast_time=datetime.now(),
+            temp_high_c=temp_high_c,
+            temp_low_c=temp_low_c,
+            temp_high_f=temp_high_c * 9 / 5 + 32 if temp_high_c else None,
+            temp_low_f=temp_low_c * 9 / 5 + 32 if temp_low_c else None,
+            precip_mm=precip_mm,
+            precip_prob=precip_prob,
+            snow_mm=snow_mm,
+            raw_data=daily
+        )
+
+        _weather_cache[cache_key] = (time.time(), forecast)
+        logger.info(f"ECMWF {city}: high={temp_high_c}°C, precip_prob={precip_prob:.0%}")
+        return forecast
+
+    except Exception as e:
+        logger.warning(f"ECMWF error для {city}: {e}")
         return None
