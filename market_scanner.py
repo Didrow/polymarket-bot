@@ -1,7 +1,6 @@
 """
-market_scanner.py — Polymarket Weather Bot 2026
-Пошук активних weather-ринків через Gamma API.
-Без API ключів — публічний ендпоінт.
+market_scanner.py — Polymarket Weather Bot 2026 (оновлена версія 14.04.2026)
+Покращений пошук короткострокових weather-ринків (daily temperature тощо)
 """
 
 import re
@@ -31,20 +30,24 @@ class PolyMarket:
     volume_usd: float
     token_yes_id: str
     token_no_id: str
-    best_ask_yes: float       # Ціна купівлі YES (0–1)
-    best_bid_yes: float       # Ціна продажу YES (0–1)
-    midpoint_yes: float       # Середня ціна YES
+    best_ask_yes: float
+    best_bid_yes: float
+    midpoint_yes: float
     market_slug: str = ""
-    detected_city: str = ""   # Розпізнане місто
-    market_type: str = ""     # "temperature", "rain", "snow" тощо
-    threshold_value: Optional[float] = None  # Числовий поріг (наприклад 70°F)
-    is_above: Optional[bool] = None           # True = above, False = below
+    detected_city: str = ""
+    market_type: str = ""
+    threshold_value: Optional[float] = None
+    is_above: Optional[bool] = None
     raw: Dict = field(default_factory=dict)
 
 
 def _detect_city(text: str) -> str:
-    """Розпізнати місто з тексту ринку."""
+    """Розпізнати місто з тексту ринку (пріоритет London)."""
     text_lower = text.lower()
+    priority_cities = ["london", "nyc", "new york", "chicago", "la", "los angeles"]
+    for city in priority_cities:
+        if city in text_lower:
+            return city.title().replace("Nyc", "NYC")
     for city in config.TARGET_CITIES:
         if city.lower() in text_lower:
             return city
@@ -52,14 +55,13 @@ def _detect_city(text: str) -> str:
 
 
 def _detect_market_type(text: str) -> str:
-    """Визначити тип погодного ринку."""
+    """Визначити тип ринку."""
     text_lower = text.lower()
     if any(w in text_lower for w in ["rain", "precipitation", "rainfall"]):
         return "rain"
     if any(w in text_lower for w in ["snow", "snowfall"]):
         return "snow"
-    if any(w in text_lower for w in ["temperature", "degrees", "high temp",
-                                       "low temp", "fahrenheit", "celsius"]):
+    if any(w in text_lower for w in ["temperature", "degrees", "high temp", "low temp", "fahrenheit", "celsius"]):
         return "temperature"
     if "freeze" in text_lower or "frost" in text_lower:
         return "freeze"
@@ -69,15 +71,15 @@ def _detect_market_type(text: str) -> str:
 
 
 def _extract_threshold(text: str) -> Optional[float]:
-    """Витягти числовий поріг із тексту ринку (наприклад '75°F')."""
+    """Витягти числовий поріг (наприклад 75°F або 22°C)."""
     patterns = [
-        r'(\d+\.?\d*)\s*°?\s*[Ff]',    # 75°F, 75F
-        r'(\d+\.?\d*)\s*°?\s*[Cc]',    # 20°C
+        r'(\d+\.?\d*)\s*°?\s*[Ff]',
+        r'(\d+\.?\d*)\s*°?\s*[Cc]',
         r'above\s+(\d+\.?\d*)',
         r'below\s+(\d+\.?\d*)',
         r'exceed\s+(\d+\.?\d*)',
         r'reach\s+(\d+\.?\d*)',
-        r'(\d+\.?\d*)\s*(?:inches|mm|cm)',  # опади
+        r'(\d+\.?\d*)\s*(?:inches|mm|cm)',
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -90,32 +92,28 @@ def _extract_threshold(text: str) -> Optional[float]:
 
 
 def _is_above_market(text: str) -> Optional[bool]:
-    """Визначити напрям: above чи below."""
+    """Визначити above / below."""
     text_lower = text.lower()
-    if any(w in text_lower for w in ["above", "exceed", "higher", "over", "at least",
-                                       "reach", "or more", "hotter"]):
+    if any(w in text_lower for w in ["above", "exceed", "higher", "over", "at least", "reach", "or more", "hotter"]):
         return True
-    if any(w in text_lower for w in ["below", "under", "lower", "less than",
-                                       "cooler", "colder"]):
+    if any(w in text_lower for w in ["below", "under", "lower", "less than", "cooler", "colder"]):
         return False
     return None
 
 
 def _parse_market(raw: Dict) -> Optional[PolyMarket]:
-    """Парсинг одного ринку з Gamma API відповіді."""
+    """Парсинг одного ринку."""
     try:
-        # Перевірка кінцевої дати
         end_date_str = raw.get("endDate") or raw.get("end_date_iso")
         if not end_date_str:
             return None
 
-        # Парсинг дати
         for fmt in ["%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%S%z"]:
             try:
                 if end_date_str.endswith("Z"):
                     end_date = datetime.strptime(end_date_str, fmt).replace(tzinfo=timezone.utc)
                 else:
-                    end_date = datetime.fromisoformat(end_date_str)
+                    end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
                 break
             except ValueError:
                 continue
@@ -125,15 +123,14 @@ def _parse_market(raw: Dict) -> Optional[PolyMarket]:
         now = datetime.now(timezone.utc)
         hours_left = (end_date - now).total_seconds() / 3600
 
+        # Фільтр по часу — тепер більш гнучкий
         if hours_left <= 0 or hours_left > config.MAX_RESOLUTION_HOURS:
             return None
 
-        # Обсяг ринку
         volume = float(raw.get("volume", 0) or raw.get("volumeNum", 0) or 0)
         if volume < config.MIN_MARKET_VOLUME_USD:
             return None
 
-        # Токени YES/NO
         tokens = raw.get("tokens", [])
         token_yes = next((t for t in tokens if t.get("outcome", "").upper() == "YES"), None)
         token_no = next((t for t in tokens if t.get("outcome", "").upper() == "NO"), None)
@@ -141,7 +138,6 @@ def _parse_market(raw: Dict) -> Optional[PolyMarket]:
         if not token_yes or not token_no:
             return None
 
-        # Ціни
         best_ask_yes = float(token_yes.get("price", 0.5))
         best_bid_yes = 1 - float(token_no.get("price", 0.5))
         midpoint_yes = (best_ask_yes + best_bid_yes) / 2
@@ -176,18 +172,17 @@ def _parse_market(raw: Dict) -> Optional[PolyMarket]:
 
 def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     """
-    Отримати всі активні weather-ринки з Gamma API.
-    Фільтрує за: погодними ключовими словами, resolution < 72h, обсяг > мінімум.
+    Покращений пошук weather-ринків.
     """
     cache_key = "weather_markets"
     if not force_refresh and cache_key in _market_cache:
         ts, markets = _market_cache[cache_key]
-        if time.time() - ts < 60:  # Кеш 1 хвилина
+        if time.time() - ts < 60:
             return markets
 
-    all_markets = []
+    all_markets: List[PolyMarket] = []
 
-    # Запит через тег weather
+    # 1. Основний пошук по тегу weather
     try:
         url = f"{config.GAMMA_URL}/markets"
         params = {
@@ -198,94 +193,80 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
         }
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        data = r.json()
-
-        raw_list = data if isinstance(data, list) else data.get("markets", [])
-        logger.info(f"Gamma API: отримано {len(raw_list)} weather ринків")
-                # ── НОВЕ: ЛОГУЄМО ВСІ ОТРИМАНІ РИНКИ (для діагностики) ──
-        logger.info(f"🔍 Отримано {len(raw_list)} ринків. Перевіряємо фільтри...")
-        for raw in raw_list[:20]:  # показуємо тільки перші 20, щоб не засмічувати логи
-            hours = 999
-            vol = float(raw.get("volume", 0) or raw.get("volumeNum", 0) or 0)
-            question = raw.get("question", "Без назви")[:100]
-            try:
-                end_date_str = raw.get("endDate") or raw.get("end_date_iso")
-                if end_date_str:
-                    from datetime import datetime, timezone
-                    end = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                    hours = (end - datetime.now(timezone.utc)).total_seconds() / 3600
-                logger.info(f"   → Ринок: {question}... | vol=${vol:,.0f} | hours_to_end={hours:.1f}h")
-            except:
-                logger.info(f"   → Ринок: {question}... | vol=${vol:,.0f} | hours_to_end=???")
+        raw_list = r.json() if isinstance(r.json(), list) else r.json().get("markets", [])
+        logger.info(f"Gamma API (tag=weather): отримано {len(raw_list)} ринків")
 
         for raw in raw_list:
             market = _parse_market(raw)
             if market:
                 all_markets.append(market)
-
     except Exception as e:
-        logger.error(f"Gamma API weather tag error: {e}")
+        logger.error(f"Gamma API tag=weather error: {e}")
 
-    # Додатковий пошук за ключовими словами (якщо tag не дав результатів)
-    if len(all_markets) < 3:
-        for keyword in ["temperature", "rain", "snow", "weather"]:
-            try:
-                url = f"{config.GAMMA_URL}/markets"
-                params = {"keyword": keyword, "active": "true", "limit": 50}
-                r = requests.get(url, params=params, timeout=15)
-                if r.status_code == 200:
-                    raw_list = r.json()
-                    if isinstance(raw_list, list):
-                        for raw in raw_list:
-                            market = _parse_market(raw)
-                            if market and market.condition_id not in [m.condition_id for m in all_markets]:
-                                all_markets.append(market)
-            except Exception as e:
-                logger.debug(f"Keyword search '{keyword}' error: {e}")
+    # 2. Агресивний пошук по ключових словах (daily temperature, rain тощо)
+    search_keywords = [
+        "temperature", "rain", "snow", "precipitation",
+        "highest temperature", "lowest temperature",
+        "London", "NYC", "New York", "Chicago", "LA", "Los Angeles"
+    ]
+
+    for keyword in search_keywords:
+        try:
+            url = f"{config.GAMMA_URL}/markets"
+            params = {
+                "keyword": keyword,
+                "active": "true",
+                "closed": "false",
+                "limit": 100,
+                "order": "end_date"   # найближчі до закриття — перші
+            }
+            r = requests.get(url, params=params, timeout=15)
+            if r.status_code == 200:
+                raw_list = r.json() if isinstance(r.json(), list) else r.json().get("markets", [])
+                added = 0
+                for raw in raw_list:
+                    market = _parse_market(raw)
+                    if market and market.condition_id not in [m.condition_id for m in all_markets]:
+                        all_markets.append(market)
+                        added += 1
+                if added > 0:
+                    logger.info(f"✅ Keyword '{keyword}' → знайдено {added} нових ринків")
+        except Exception as e:
+            logger.debug(f"Keyword search '{keyword}' error: {e}")
 
     # Сортування: найближчі до закриття — найпріоритетніші
     all_markets.sort(key=lambda m: m.hours_to_resolution)
 
     logger.info(f"Знайдено {len(all_markets)} валідних weather-ринків (< {config.MAX_RESOLUTION_HOURS}h)")
-    for m in all_markets[:5]:
-        logger.info(f"  [{m.detected_city}] {m.question[:60]}... | {m.hours_to_resolution:.1f}h | "
-                    f"YES={m.midpoint_yes:.2f} | vol=${m.volume_usd:,.0f}")
+    
+    # Логування перших 8 ринків для діагностики
+    for m in all_markets[:8]:
+        logger.info(f"  [{m.detected_city or 'Unknown'}] {m.question[:70]}... | "
+                    f"{m.hours_to_resolution:.1f}h | YES={m.midpoint_yes:.3f} | vol=${m.volume_usd:,.0f}")
 
     _market_cache[cache_key] = (time.time(), all_markets)
     return all_markets
 
 
+# Допоміжні функції (залишаємо без змін)
 def get_orderbook_price(token_id: str) -> Optional[Dict]:
-    """
-    Отримати актуальний orderbook із CLOB API для точних цін.
-    Повертає best_ask, best_bid, midpoint.
-    """
     try:
         url = f"{config.CLOB_URL}/book"
         r = requests.get(url, params={"token_id": token_id}, timeout=10)
         r.raise_for_status()
         book = r.json()
-
         asks = book.get("asks", [])
         bids = book.get("bids", [])
-
         best_ask = float(asks[0]["price"]) if asks else None
         best_bid = float(bids[0]["price"]) if bids else None
         midpoint = (best_ask + best_bid) / 2 if (best_ask and best_bid) else None
-
-        return {
-            "best_ask": best_ask,
-            "best_bid": best_bid,
-            "midpoint": midpoint,
-            "spread": (best_ask - best_bid) if (best_ask and best_bid) else None,
-        }
+        return {"best_ask": best_ask, "best_bid": best_bid, "midpoint": midpoint}
     except Exception as e:
         logger.debug(f"Orderbook error для {token_id[:8]}...: {e}")
         return None
 
 
 def refresh_market_prices(market: PolyMarket) -> PolyMarket:
-    """Оновити ціни конкретного ринку з CLOB orderbook."""
     book = get_orderbook_price(market.token_yes_id)
     if book:
         market.best_ask_yes = book["best_ask"] or market.best_ask_yes
