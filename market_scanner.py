@@ -1,6 +1,5 @@
 """
-market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE VERSION 14.04.2026)
-Максимально агресивний пошук daily temperature ринків
+market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE AGGRESSIVE VERSION)
 """
 
 import re
@@ -44,8 +43,8 @@ def _detect_city(text: str) -> str:
     text_lower = text.lower()
     city_map = {
         "london": "London", "nyc": "NYC", "new york": "NYC", "chicago": "Chicago",
-        "la": "Los Angeles", "los angeles": "Los Angeles", "paris": "Paris",
-        "berlin": "Berlin", "miami": "Miami", "dallas": "Dallas"
+        "la": "Los Angeles", "los angeles": "Los Angeles", "seoul": "Seoul",
+        "paris": "Paris", "berlin": "Berlin", "miami": "Miami"
     }
     for key, city in city_map.items():
         if key in text_lower:
@@ -85,7 +84,7 @@ def _parse_market(raw: Dict) -> Optional[PolyMarket]:
         if not end_date_str:
             return None
 
-        for fmt in ["%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%S%z"]:
+        for fmt in ["%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%fZ"]:
             try:
                 if "Z" in end_date_str:
                     end_date = datetime.strptime(end_date_str, fmt).replace(tzinfo=timezone.utc)
@@ -146,7 +145,7 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
 
     all_markets: List[PolyMarket] = []
 
-    # 1. Базовий tag + keyword
+    # Базовий пошук
     for q in ["weather", "temperature"]:
         try:
             r = requests.get(f"{config.GAMMA_URL}/markets", params={
@@ -162,15 +161,16 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
         except Exception as e:
             logger.debug(f"Base search error: {e}")
 
-    # 2. Targeted daily temperature search (найважливіше!)
-    targeted_keywords = [
+    # Targeted daily temperature search (найважливіше для 2026)
+    targeted = [
         "highest temperature in London", "lowest temperature in London",
         "highest temperature in NYC", "highest temperature in New York",
-        "highest temperature in Chicago", "on April 14", "on April 15",
+        "highest temperature in Chicago", "highest temperature in LA",
+        "highest temperature in Seoul", "on April 14", "on April 15",
         "London on April", "NYC on April", "temperature today", "temperature tomorrow"
     ]
 
-    for kw in targeted_keywords:
+    for kw in targeted:
         try:
             r = requests.get(f"{config.GAMMA_URL}/markets", params={
                 "keyword": kw, "active": "true", "limit": 100, "order": "end_date"
@@ -181,7 +181,7 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
                     m = _parse_market(raw)
                     if m and m.condition_id not in [x.condition_id for x in all_markets]:
                         all_markets.append(m)
-                        logger.info(f"🎯 Targeted hit '{kw}': {m.question[:90]}... | {m.hours_to_resolution:.1f}h | vol=${m.volume_usd:,.0f}")
+                        logger.info(f"🎯 TARGETED HIT '{kw}': {m.question[:90]}... | {m.hours_to_resolution:.1f}h | vol=${m.volume_usd:,.0f} | YES={m.midpoint_yes:.3f}")
         except Exception as e:
             logger.debug(f"Targeted '{kw}' error: {e}")
 
@@ -189,13 +189,14 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     all_markets = list({m.condition_id: m for m in all_markets}.values())
     all_markets.sort(key=lambda m: m.hours_to_resolution)
 
-    logger.info(f"Знайдено {len(all_markets)} валідних weather-ринків (< {config.MAX_RESOLUTION_HOURS}h)")
+    count = len(all_markets)
+    logger.info(f"Знайдено {count} валідних weather-ринків (< {config.MAX_RESOLUTION_HOURS}h)")
 
-    if all_markets:
-        for m in all_markets[:12]:
-            logger.info(f"  [{m.detected_city or '???'}] {m.question[:80]}... | {m.hours_to_resolution:.1f}h | YES={m.midpoint_yes:.3f} | vol=${m.volume_usd:,.0f}")
-    else:
+    if count == 0:
         logger.warning("⚠️ Жодного weather-ринку не знайдено. Gamma API не віддає daily temperature.")
+    else:
+        for m in all_markets[:10]:
+            logger.info(f"  [{m.detected_city or '???'}] {m.question[:80]}... | {m.hours_to_resolution:.1f}h | YES={m.midpoint_yes:.3f} | vol=${m.volume_usd:,.0f}")
 
     _market_cache["weather_markets"] = (time.time(), all_markets)
     return all_markets
