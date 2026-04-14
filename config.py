@@ -58,6 +58,13 @@ MARKET_TAGS: List[str] = ["weather"]
 MAX_RESOLUTION_HOURS: int = 72         # ← було 72, тепер 10 днів (більше ринків)
 MIN_MARKET_VOLUME_USD: float = 1_000.0  # ← було 5000, тепер $1000 (більше ліквідних ринків)
 
+# === EXTREME TAIL STRATEGY (для 1-5¢ YES на London/NYC) ===
+ENABLE_EXTREME_TAIL: bool = True
+EXTREME_TAIL_MAX_ASK_YES: float = 0.05      # Купуємо тільки якщо YES ≤ 5 центів
+EXTREME_TAIL_MAX_SIZE_USD: float = 4.0      # Максимум $4 на одну таку угоду
+EXTREME_TAIL_CITIES: List[str] = ["London", "NYC"]   # Тільки ці міста
+EXTREME_TAIL_MIN_EDGE: float = 0.04         # Мінімальний edge для активації
+
 # ─────────────────────────────────────────────
 # EDGE (перевага)
 # ─────────────────────────────────────────────
