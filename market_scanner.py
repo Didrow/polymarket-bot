@@ -1,15 +1,5 @@
 """
-market_scanner.py — ВИПРАВЛЕНА ВЕРСІЯ v2 (квітень 2026)
-
-ЧОМУ НЕ ПРАЦЮВАЛА СТАРА ВЕРСІЯ:
-  Gamma API ?tag=weather повертав GTA VI, NHL — неправильний параметр.
-  Gamma API ?keyword= взагалі не підтримується.
-  Результат: завжди "Знайдено 0 валідних weather-ринків".
-
-ЯК ВИПРАВЛЕНО:
-  1. /events?tag_slug=weather  ← правильний параметр
-  2. Slug-шаблони: highest-temperature-in-{city}-on-{month}-{day}-{year}
-  3. /events?active=true з текстовою фільтрацією (fallback)
+market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE FIXED v3)
 """
 
 import re
@@ -23,6 +13,7 @@ import requests
 import config
 
 logger = logging.getLogger(__name__)
+
 _market_cache: Dict[str, Any] = {}
 
 WEATHER_CITIES = [
@@ -48,8 +39,7 @@ MONTH_NAMES = {
 
 WEATHER_KEYWORDS = [
     "temperature", "highest temperature", "lowest temperature",
-    "rain", "snow", "precipitation", "weather", "celsius",
-    "fahrenheit", "rainfall", "snowfall",
+    "rain", "snow", "precipitation", "weather", "celsius", "fahrenheit",
 ]
 
 
@@ -124,8 +114,7 @@ def _detect_city(text: str) -> str:
 
 def _parse_market(raw: Dict, hours_limit: float) -> Optional[PolyMarket]:
     try:
-        end_str = (raw.get("endDate") or raw.get("end_date_iso")
-                   or raw.get("end_date") or "")
+        end_str = (raw.get("endDate") or raw.get("end_date_iso") or raw.get("end_date") or "")
         if not end_str:
             return None
         end_date = _parse_dt(end_str)
@@ -215,13 +204,12 @@ def _markets_from_event(event: Dict, hours_limit: float) -> List[PolyMarket]:
 
 
 def _method1_events_tag(hours_limit: float) -> List[PolyMarket]:
-    """Метод 1: /events?tag_slug=weather — правильний параметр."""
+    """Метод 1: /events?tag_slug=weather"""
     found = []
     try:
         r = requests.get(
             f"{config.GAMMA_URL}/events",
-            params={"tag_slug": "weather", "active": "true",
-                    "closed": "false", "limit": 100, "order": "end_date_asc"},
+            params={"tag_slug": "weather", "active": "true", "closed": "false", "limit": 100, "order": "end_date_asc"},
             timeout=15,
         )
         if r.status_code == 200:
@@ -238,48 +226,32 @@ def _method1_events_tag(hours_limit: float) -> List[PolyMarket]:
 
 
 def _method2_slugs(hours_limit: float) -> List[PolyMarket]:
-    """Метод 2: slug-шаблони highest-temperature-in-{city}-on-{month}-{day}-{year}."""
+    """Метод 2: slug-шаблони highest-temperature-in-{city}-on-{month}-{day}-{year}"""
     found = []
     now = datetime.now(timezone.utc)
     slugs = []
-    for day_offset in range(0, 7):
+    for day_offset in range(0, 10):  # на 10 днів вперед
         d = now + timedelta(days=day_offset)
         mon = MONTH_NAMES[d.month]
         for city in WEATHER_CITIES:
-            slugs.append(
-                f"highest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}"
-            )
+            slugs.append(f"highest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}")
+            slugs.append(f"lowest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}")
 
     logger.info(f"Метод 2 (slugs): перевіряємо {len(slugs)} шаблонів...")
     hits = 0
     for slug in slugs:
         try:
-            r = requests.get(
-                f"{config.GAMMA_URL}/events",
-                params={"slug": slug, "active": "true"},
-                timeout=8,
-            )
+            r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug, "active": "true"}, timeout=8)
             if r.status_code == 200:
                 data = r.json()
-                if isinstance(data, list):
-                    events = data
-                elif isinstance(data, dict) and data:
-                    events = [data]
-                else:
-                    events = []
+                events = [data] if isinstance(data, dict) and data else (data if isinstance(data, list) else [])
                 for ev in events:
-                    if not ev:
-                        continue
-                    ms = _markets_from_event(ev, hours_limit)
-                    for pm in ms:
-                        found.append(pm)
-                        hits += 1
-                        logger.info(
-                            f"  ЗНАЙДЕНО [{pm.detected_city}] "
-                            f"{pm.question[:60]} | "
-                            f"{pm.hours_to_resolution:.1f}h | "
-                            f"YES={pm.midpoint_yes:.3f}"
-                        )
+                    if ev:
+                        ms = _markets_from_event(ev, hours_limit)
+                        for pm in ms:
+                            found.append(pm)
+                            hits += 1
+                            logger.info(f"  ЗНАЙДЕНО [{pm.detected_city}] {pm.question[:60]} | {pm.hours_to_resolution:.1f}h | YES={pm.midpoint_yes:.3f}")
         except Exception:
             pass
         time.sleep(0.05)
@@ -288,14 +260,13 @@ def _method2_slugs(hours_limit: float) -> List[PolyMarket]:
 
 
 def _method3_ending_soon(hours_limit: float) -> List[PolyMarket]:
-    """Метод 3: всі events ending soon, фільтр по назві."""
+    """Метод 3: ending soon + фільтр по ключових словах"""
     found = []
     try:
         for offset in range(0, 400, 100):
             r = requests.get(
                 f"{config.GAMMA_URL}/events",
-                params={"active": "true", "closed": "false",
-                        "order": "end_date_asc", "limit": 100, "offset": offset},
+                params={"active": "true", "closed": "false", "order": "end_date_asc", "limit": 100, "offset": offset},
                 timeout=15,
             )
             if r.status_code != 200:
@@ -307,25 +278,62 @@ def _method3_ending_soon(hours_limit: float) -> List[PolyMarket]:
             batch_found = 0
             for ev in events:
                 title = (ev.get("title") or ev.get("question") or "").lower()
-                slug  = (ev.get("slug") or "").lower()
+                slug = (ev.get("slug") or "").lower()
                 if any(kw in title or kw in slug for kw in WEATHER_KEYWORDS):
                     ms = _markets_from_event(ev, hours_limit)
                     found.extend(ms)
                     batch_found += len(ms)
             if batch_found:
                 logger.info(f"  Метод 3 offset={offset}: +{batch_found} ринків")
-            last_end = _parse_dt(events[-1].get("endDate", "") or "")
-            if last_end:
-                h = (last_end - datetime.now(timezone.utc)).total_seconds() / 3600
-                if h > hours_limit * 2:
-                    break
     except Exception as e:
         logger.debug(f"Метод 3 error: {e}")
     return found
 
 
+def _method4_direct_slugs(hours_limit: float) -> List[PolyMarket]:
+    """Метод 4: ПРЯМІ СЛУГИ (найнадійніший для daily temperature)"""
+    found = []
+    direct_slugs = [
+        "highest-temperature-in-london-on-april-15-2026",
+        "lowest-temperature-in-london-on-april-15-2026",
+        "highest-temperature-in-nyc-on-april-15-2026",
+        "highest-temperature-in-new-york-on-april-15-2026",
+        "highest-temperature-in-chicago-on-april-15-2026",
+        "highest-temperature-in-london-on-april-16-2026",
+        "highest-temperature-in-nyc-on-april-16-2026",
+        "highest-temperature-in-london-on-april-17-2026",
+        "highest-temperature-in-nyc-on-april-17-2026",
+        "highest-temperature-in-london-on-april-14-2026",
+        "highest-temperature-in-nyc-on-april-14-2026",
+        "highest-temp-in-london-on-april-15-2026",
+        "highest-temp-in-nyc-on-april-15-2026",
+    ]
+
+    logger.info(f"Метод 4 (direct slugs): перевіряємо {len(direct_slugs)} точних слугів...")
+    hits = 0
+    for slug in direct_slugs:
+        try:
+            r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug, "active": "true"}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                events = [data] if isinstance(data, dict) and data else (data if isinstance(data, list) else [])
+                for ev in events:
+                    if ev:
+                        ms = _markets_from_event(ev, hours_limit)
+                        for pm in ms:
+                            found.append(pm)
+                            hits += 1
+                            logger.info(f"✅ ПРЯМИЙ SLUG HIT: {slug} → [{pm.detected_city}] {pm.question[:70]} | {pm.hours_to_resolution:.1f}h | YES={pm.midpoint_yes:.3f}")
+        except Exception as e:
+            logger.debug(f"Direct slug {slug} error: {e}")
+        time.sleep(0.08)
+
+    logger.info(f"Метод 4 (direct slugs): знайдено {hits} ринків")
+    return found
+
+
 def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
-    """Головна функція: знайти всі weather-ринки (3 методи)."""
+    """Головна функція: 4 методи пошуку weather-ринків"""
     cache_key = "weather_markets"
     if not force_refresh and cache_key in _market_cache:
         ts, markets = _market_cache[cache_key]
@@ -351,26 +359,23 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     n2 = add(_method2_slugs(hours_limit))
     logger.info(f"Після методу 2 (slugs): +{n2} нових")
 
-    if len(all_markets) < 3:
+    if len(all_markets) < 5:
         n3 = add(_method3_ending_soon(hours_limit))
         logger.info(f"Після методу 3 (ending_soon): +{n3} нових")
+
+    # Метод 4 — найважливіший для daily temperature
+    n4 = add(_method4_direct_slugs(hours_limit))
+    logger.info(f"Після методу 4 (direct slugs): +{n4} нових")
 
     all_markets.sort(key=lambda m: m.hours_to_resolution)
     total = len(all_markets)
 
     if total == 0:
-        logger.warning(
-            f"Знайдено 0 ринків (ліміт {hours_limit:.0f}h). "
-            "Нові weather-ринки з'являються щодня ~00:00 UTC."
-        )
+        logger.warning(f"Знайдено 0 ринків (ліміт {hours_limit:.0f}h). Нові daily temperature ринки з'являються щодня ~00:00 UTC.")
     else:
         logger.info(f"РАЗОМ знайдено {total} weather-ринків:")
-        for pm in all_markets[:10]:
-            logger.info(
-                f"  [{pm.detected_city or '?'}] {pm.question[:70]} | "
-                f"{pm.hours_to_resolution:.1f}h | "
-                f"YES={pm.midpoint_yes:.3f} | vol=${pm.volume_usd:,.0f}"
-            )
+        for pm in all_markets[:12]:
+            logger.info(f"  [{pm.detected_city or '?'}] {pm.question[:75]} | {pm.hours_to_resolution:.1f}h | YES={pm.midpoint_yes:.3f} | vol=${pm.volume_usd:,.0f}")
 
     _market_cache[cache_key] = (time.time(), all_markets)
     return all_markets
@@ -378,8 +383,7 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
 
 def get_orderbook_price(token_id: str) -> Optional[Dict]:
     try:
-        r = requests.get(f"{config.CLOB_URL}/book",
-                         params={"token_id": token_id}, timeout=10)
+        r = requests.get(f"{config.CLOB_URL}/book", params={"token_id": token_id}, timeout=10)
         r.raise_for_status()
         book = r.json()
         asks = book.get("asks", [])
