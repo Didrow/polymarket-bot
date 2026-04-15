@@ -1,5 +1,5 @@
 """
-market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE FIXED v4)
+market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE FIXED v4.1)
 """
 
 import re
@@ -195,8 +195,8 @@ def _markets_from_event(event: Dict, hours_limit: float) -> List[PolyMarket]:
     return result
 
 
-# === Методи 1-3 (залишаємо без змін) ===
 def _method1_events_tag(hours_limit: float) -> List[PolyMarket]:
+    """Метод 1: /events?tag_slug=weather"""
     found = []
     try:
         r = requests.get(f"{config.GAMMA_URL}/events", params={"tag_slug": "weather", "active": "true", "closed": "false", "limit": 100, "order": "end_date_asc"}, timeout=15)
@@ -212,6 +212,7 @@ def _method1_events_tag(hours_limit: float) -> List[PolyMarket]:
 
 
 def _method2_slugs(hours_limit: float) -> List[PolyMarket]:
+    """Метод 2: slug-шаблони"""
     found = []
     now = datetime.now(timezone.utc)
     slugs = []
@@ -244,6 +245,7 @@ def _method2_slugs(hours_limit: float) -> List[PolyMarket]:
 
 
 def _method3_ending_soon(hours_limit: float) -> List[PolyMarket]:
+    """Метод 3: ending soon"""
     found = []
     try:
         for offset in range(0, 400, 100):
@@ -269,27 +271,40 @@ def _method3_ending_soon(hours_limit: float) -> List[PolyMarket]:
     return found
 
 
-# === МЕТОД 4 — ПРЯМІ СЛУГИ (оновлений динамічно) ===
 def _method4_direct_slugs(hours_limit: float) -> List[PolyMarket]:
+    """Метод 4 — максимально агресивний прямий пошук (оновлений)"""
     found = []
     now = datetime.now(timezone.utc)
     direct_slugs = []
 
-    for day_offset in range(0, 8):  # сьогодні + 7 днів вперед
+    for day_offset in range(0, 10):  # сьогодні + 9 днів вперед
         d = now + timedelta(days=day_offset)
         mon = MONTH_NAMES[d.month]
-        for city in ["london", "nyc", "new-york", "chicago"]:
-            base = f"highest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}"
-            direct_slugs.append(base)
-            direct_slugs.append(f"lowest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}")
-            direct_slugs.append(base.replace("highest-temperature", "highest-temp"))
-            direct_slugs.append(base.replace("highest-temperature", "highest-temperature-in"))
+        day_str = f"{d.day:02d}"
+        year = d.year
 
-    logger.info(f"Метод 4 (direct slugs): перевіряємо {len(direct_slugs)} точних слугів...")
+        for city in ["london", "nyc", "new-york", "chicago", "la", "los-angeles"]:
+            base = f"highest-temperature-in-{city}-on-{mon}-{d.day}-{year}"
+            variants = [
+                base,
+                f"highest-temperature-in-{city}-on-{mon}-{day_str}-{year}",
+                f"highest-temp-in-{city}-on-{mon}-{d.day}-{year}",
+                f"highest-temp-in-{city}-on-{mon}-{day_str}-{year}",
+                f"highest-temperature-{city}-{mon}-{d.day}-{year}",
+                f"highest-temperature-{city}-{mon}-{day_str}-{year}",
+                f"{city}-highest-temperature-on-{mon}-{d.day}-{year}",
+                f"london-highest-temp-april-{d.day}-{year}",
+                f"nyc-highest-temp-april-{d.day}-{year}",
+                f"highest-temperature-in-{city}-on-april-{d.day}-{year}",
+                f"highest-temp-{city}-{mon}-{d.day}-{year}",
+            ]
+            direct_slugs.extend(variants)
+
+    logger.info(f"Метод 4 (direct slugs): перевіряємо {len(direct_slugs)} варіантів...")
     hits = 0
     for slug in direct_slugs:
         try:
-            r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug, "active": "true"}, timeout=10)
+            r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug, "active": "true"}, timeout=8)
             if r.status_code == 200:
                 data = r.json()
                 events = [data] if isinstance(data, dict) and data else (data if isinstance(data, list) else [])
@@ -299,16 +314,17 @@ def _method4_direct_slugs(hours_limit: float) -> List[PolyMarket]:
                         for pm in ms:
                             found.append(pm)
                             hits += 1
-                            logger.info(f"✅ ПРЯМИЙ SLUG HIT: {slug} → [{pm.detected_city}] {pm.question[:70]} | {pm.hours_to_resolution:.1f}h | YES={pm.midpoint_yes:.3f}")
+                            logger.info(f"✅ ПРЯМИЙ SLUG HIT: {slug} → [{pm.detected_city}] {pm.question[:70]} | {pm.hours_to_resolution:.1f}h | YES={pm.midpoint_yes:.3f} | vol=${pm.volume_usd:,.0f}")
         except Exception as e:
             logger.debug(f"Direct slug {slug} error: {e}")
-        time.sleep(0.08)
+        time.sleep(0.06)
 
     logger.info(f"Метод 4 (direct slugs): знайдено {hits} ринків")
     return found
 
 
 def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
+    """Головна функція — 4 методи пошуку"""
     cache_key = "weather_markets"
     if not force_refresh and cache_key in _market_cache:
         ts, markets = _market_cache[cache_key]
