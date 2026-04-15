@@ -56,7 +56,7 @@ MARKET_TAGS: List[str] = ["weather"]
 # ПРАВИЛО 72 ГОДИН
 # ─────────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 240         # ← було 72, тепер 10 днів (більше ринків)
-MIN_MARKET_VOLUME_USD: float = 300.0  # ← було 5000, тепер $1000 (більше ліквідних ринків)
+MIN_MARKET_VOLUME_USD: float = 100.0  # ← було 5000, тепер $1000 (більше ліквідних ринків)
 
 # === EXTREME TAIL STRATEGY (для 1-5¢ YES на London/NYC) ===
 ENABLE_EXTREME_TAIL: bool = True
