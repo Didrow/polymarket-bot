@@ -40,22 +40,29 @@ SUSPICIOUS_PATTERNS = [
 
 def check_dedicated_wallet(private_key: str) -> bool:
     """
-    RULE 1: Перевірити, що гаманець — не основний.
-    Ніколи не використовуй гаманець з великим балансом для ботів!
+    RULE 1: Перевірити наявність ключа гаманця.
+    В DRY_RUN режимі ключ НЕ потрібен — симуляція не торгує реально.
     """
-    logger.info("🔐 RULE 1: Перевірка dedicated wallet...")
+    logger.info("🔐 RULE 1: Перевірка гаманця...")
 
+    # DRY_RUN = симуляція, реального гаманця не потрібно
+    if config.DRY_RUN:
+        logger.info("🧪 DRY_RUN=true: PRIVATE_KEY не потрібен для симуляції, пропускаємо")
+        return True
+
+    # Тільки для реальної торгівлі перевіряємо ключ
     if not private_key or private_key == "0xYOUR_DEDICATED_WALLET_PRIVATE_KEY_HERE":
-        logger.error("❌ PRIVATE_KEY не налаштовано! Встанови в .env файлі")
+        logger.error("❌ PRIVATE_KEY не налаштовано!")
+        logger.error("   Додай в Render: Environment Variables -> PRIVATE_KEY -> твій ключ")
+        logger.error("   (Для симуляції достатньо DRY_RUN=true — ключ не потрібен)")
         return False
 
     if len(private_key) < 60:
-        logger.error("❌ Некоректний формат PRIVATE_KEY")
+        logger.error("❌ Некоректний формат PRIVATE_KEY — перевір значення")
         return False
 
-    logger.info("✅ RULE 1: Приватний ключ знайдено (довжина коректна)")
-    logger.warning("⚠️  НАГАДУВАННЯ: Використовуй ТІЛЬКИ dedicated trading wallet!")
-    logger.warning("⚠️  НІКОЛИ не вводь ключ від основного гаманця з великим балансом!")
+    logger.info("✅ RULE 1: Приватний ключ знайдено")
+    logger.warning("⚠️  ТІЛЬКИ dedicated trading wallet — ніколи не основний!")
     return True
 
 
