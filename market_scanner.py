@@ -1,5 +1,5 @@
 """
-market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE FIXED v3)
+market_scanner.py — Polymarket Weather Bot 2026 (ULTIMATE FIXED v4)
 """
 
 import re
@@ -17,13 +17,12 @@ logger = logging.getLogger(__name__)
 _market_cache: Dict[str, Any] = {}
 
 WEATHER_CITIES = [
-    "london", "nyc", "new-york", "chicago", "paris", "berlin",
-    "tokyo", "seoul", "hong-kong", "singapore", "sydney", "toronto",
-    "los-angeles", "miami", "seattle", "boston", "atlanta", "dallas",
-    "houston", "denver", "amsterdam", "madrid", "rome", "istanbul",
-    "beijing", "shanghai", "taipei", "bangkok", "dubai", "mumbai",
-    "jakarta", "kuala-lumpur", "moscow", "warsaw", "vienna", "prague",
-    "melbourne", "auckland", "wellington", "cape-town", "lagos",
+    "london", "nyc", "new-york", "chicago", "paris", "berlin", "tokyo", "seoul",
+    "hong-kong", "singapore", "sydney", "toronto", "los-angeles", "miami",
+    "seattle", "boston", "atlanta", "dallas", "houston", "denver", "amsterdam",
+    "madrid", "rome", "istanbul", "beijing", "shanghai", "taipei", "bangkok",
+    "dubai", "mumbai", "jakarta", "kuala-lumpur", "moscow", "warsaw", "vienna",
+    "prague", "melbourne", "auckland", "wellington", "cape-town", "lagos",
     "mexico-city", "austin", "phoenix", "minneapolis", "portland",
     "salt-lake-city", "nashville", "charlotte", "orlando", "las-vegas",
     "san-francisco", "montreal", "vancouver", "shenzhen", "wuhan",
@@ -37,10 +36,7 @@ MONTH_NAMES = {
     9: "september", 10: "october", 11: "november", 12: "december",
 }
 
-WEATHER_KEYWORDS = [
-    "temperature", "highest temperature", "lowest temperature",
-    "rain", "snow", "precipitation", "weather", "celsius", "fahrenheit",
-]
+WEATHER_KEYWORDS = ["temperature", "highest temperature", "lowest temperature", "rain", "snow", "precipitation", "weather"]
 
 
 @dataclass
@@ -80,31 +76,27 @@ def _parse_dt(s: str) -> Optional[datetime]:
 def _detect_city(text: str) -> str:
     t = text.lower()
     cities = {
-        "london": "London", "new york": "NYC", "nyc": "NYC",
-        "chicago": "Chicago", "paris": "Paris", "berlin": "Berlin",
-        "tokyo": "Tokyo", "seoul": "Seoul", "hong kong": "Hong Kong",
-        "singapore": "Singapore", "sydney": "Sydney", "toronto": "Toronto",
-        "los angeles": "Los Angeles", "miami": "Miami", "seattle": "Seattle",
-        "boston": "Boston", "atlanta": "Atlanta", "dallas": "Dallas",
-        "houston": "Houston", "denver": "Denver", "amsterdam": "Amsterdam",
-        "madrid": "Madrid", "rome": "Rome", "istanbul": "Istanbul",
-        "beijing": "Beijing", "shanghai": "Shanghai", "taipei": "Taipei",
-        "bangkok": "Bangkok", "dubai": "Dubai", "melbourne": "Melbourne",
-        "auckland": "Auckland", "wellington": "Wellington",
-        "cape town": "Cape Town", "lagos": "Lagos",
-        "mexico city": "Mexico City", "austin": "Austin",
-        "shenzhen": "Shenzhen", "wuhan": "Wuhan", "chengdu": "Chengdu",
-        "chongqing": "Chongqing", "lucknow": "Lucknow", "jeddah": "Jeddah",
-        "helsinki": "Helsinki", "panama city": "Panama City",
-        "busan": "Busan", "kuala lumpur": "Kuala Lumpur",
-        "jakarta": "Jakarta", "mumbai": "Mumbai", "moscow": "Moscow",
-        "warsaw": "Warsaw", "vienna": "Vienna", "prague": "Prague",
-        "hanoi": "Hanoi", "buenos aires": "Buenos Aires",
-        "montreal": "Montreal", "vancouver": "Vancouver",
-        "phoenix": "Phoenix", "minneapolis": "Minneapolis",
-        "portland": "Portland", "nashville": "Nashville",
-        "charlotte": "Charlotte", "orlando": "Orlando",
-        "las vegas": "Las Vegas", "san francisco": "San Francisco",
+        "london": "London", "new york": "NYC", "nyc": "NYC", "chicago": "Chicago",
+        "paris": "Paris", "berlin": "Berlin", "tokyo": "Tokyo", "seoul": "Seoul",
+        "hong kong": "Hong Kong", "singapore": "Singapore", "sydney": "Sydney",
+        "toronto": "Toronto", "los angeles": "Los Angeles", "miami": "Miami",
+        "seattle": "Seattle", "boston": "Boston", "atlanta": "Atlanta",
+        "dallas": "Dallas", "houston": "Houston", "denver": "Denver",
+        "amsterdam": "Amsterdam", "madrid": "Madrid", "rome": "Rome",
+        "istanbul": "Istanbul", "beijing": "Beijing", "shanghai": "Shanghai",
+        "taipei": "Taipei", "bangkok": "Bangkok", "dubai": "Dubai",
+        "melbourne": "Melbourne", "auckland": "Auckland", "wellington": "Wellington",
+        "cape town": "Cape Town", "lagos": "Lagos", "mexico city": "Mexico City",
+        "austin": "Austin", "shenzhen": "Shenzhen", "wuhan": "Wuhan",
+        "chengdu": "Chengdu", "chongqing": "Chongqing", "lucknow": "Lucknow",
+        "jeddah": "Jeddah", "helsinki": "Helsinki", "panama city": "Panama City",
+        "busan": "Busan", "kuala lumpur": "Kuala Lumpur", "jakarta": "Jakarta",
+        "mumbai": "Mumbai", "moscow": "Moscow", "warsaw": "Warsaw",
+        "vienna": "Vienna", "prague": "Prague", "hanoi": "Hanoi",
+        "buenos aires": "Buenos Aires", "montreal": "Montreal",
+        "vancouver": "Vancouver", "phoenix": "Phoenix", "minneapolis": "Minneapolis",
+        "portland": "Portland", "nashville": "Nashville", "charlotte": "Charlotte",
+        "orlando": "Orlando", "las vegas": "Las Vegas", "san francisco": "San Francisco",
     }
     for key, city in cities.items():
         if key in t:
@@ -114,7 +106,7 @@ def _detect_city(text: str) -> str:
 
 def _parse_market(raw: Dict, hours_limit: float) -> Optional[PolyMarket]:
     try:
-        end_str = (raw.get("endDate") or raw.get("end_date_iso") or raw.get("end_date") or "")
+        end_str = raw.get("endDate") or raw.get("end_date_iso") or raw.get("end_date") or ""
         if not end_str:
             return None
         end_date = _parse_dt(end_str)
@@ -203,40 +195,32 @@ def _markets_from_event(event: Dict, hours_limit: float) -> List[PolyMarket]:
     return result
 
 
+# === Методи 1-3 (залишаємо без змін) ===
 def _method1_events_tag(hours_limit: float) -> List[PolyMarket]:
-    """Метод 1: /events?tag_slug=weather"""
     found = []
     try:
-        r = requests.get(
-            f"{config.GAMMA_URL}/events",
-            params={"tag_slug": "weather", "active": "true", "closed": "false", "limit": 100, "order": "end_date_asc"},
-            timeout=15,
-        )
+        r = requests.get(f"{config.GAMMA_URL}/events", params={"tag_slug": "weather", "active": "true", "closed": "false", "limit": 100, "order": "end_date_asc"}, timeout=15)
         if r.status_code == 200:
             data = r.json()
             events = data if isinstance(data, list) else data.get("events", [])
             logger.info(f"Метод 1 (tag_slug=weather): {len(events)} events")
             for ev in events:
                 found.extend(_markets_from_event(ev, hours_limit))
-        else:
-            logger.debug(f"Метод 1: HTTP {r.status_code}")
     except Exception as e:
         logger.debug(f"Метод 1 error: {e}")
     return found
 
 
 def _method2_slugs(hours_limit: float) -> List[PolyMarket]:
-    """Метод 2: slug-шаблони highest-temperature-in-{city}-on-{month}-{day}-{year}"""
     found = []
     now = datetime.now(timezone.utc)
     slugs = []
-    for day_offset in range(0, 10):  # на 10 днів вперед
+    for day_offset in range(0, 10):
         d = now + timedelta(days=day_offset)
         mon = MONTH_NAMES[d.month]
         for city in WEATHER_CITIES:
             slugs.append(f"highest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}")
             slugs.append(f"lowest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}")
-
     logger.info(f"Метод 2 (slugs): перевіряємо {len(slugs)} шаблонів...")
     hits = 0
     for slug in slugs:
@@ -260,15 +244,10 @@ def _method2_slugs(hours_limit: float) -> List[PolyMarket]:
 
 
 def _method3_ending_soon(hours_limit: float) -> List[PolyMarket]:
-    """Метод 3: ending soon + фільтр по ключових словах"""
     found = []
     try:
         for offset in range(0, 400, 100):
-            r = requests.get(
-                f"{config.GAMMA_URL}/events",
-                params={"active": "true", "closed": "false", "order": "end_date_asc", "limit": 100, "offset": offset},
-                timeout=15,
-            )
+            r = requests.get(f"{config.GAMMA_URL}/events", params={"active": "true", "closed": "false", "order": "end_date_asc", "limit": 100, "offset": offset}, timeout=15)
             if r.status_code != 200:
                 break
             data = r.json()
@@ -290,24 +269,21 @@ def _method3_ending_soon(hours_limit: float) -> List[PolyMarket]:
     return found
 
 
+# === МЕТОД 4 — ПРЯМІ СЛУГИ (оновлений динамічно) ===
 def _method4_direct_slugs(hours_limit: float) -> List[PolyMarket]:
-    """Метод 4: ПРЯМІ СЛУГИ (найнадійніший для daily temperature)"""
     found = []
-    direct_slugs = [
-        "highest-temperature-in-london-on-april-15-2026",
-        "lowest-temperature-in-london-on-april-15-2026",
-        "highest-temperature-in-nyc-on-april-15-2026",
-        "highest-temperature-in-new-york-on-april-15-2026",
-        "highest-temperature-in-chicago-on-april-15-2026",
-        "highest-temperature-in-london-on-april-16-2026",
-        "highest-temperature-in-nyc-on-april-16-2026",
-        "highest-temperature-in-london-on-april-17-2026",
-        "highest-temperature-in-nyc-on-april-17-2026",
-        "highest-temperature-in-london-on-april-14-2026",
-        "highest-temperature-in-nyc-on-april-14-2026",
-        "highest-temp-in-london-on-april-15-2026",
-        "highest-temp-in-nyc-on-april-15-2026",
-    ]
+    now = datetime.now(timezone.utc)
+    direct_slugs = []
+
+    for day_offset in range(0, 8):  # сьогодні + 7 днів вперед
+        d = now + timedelta(days=day_offset)
+        mon = MONTH_NAMES[d.month]
+        for city in ["london", "nyc", "new-york", "chicago"]:
+            base = f"highest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}"
+            direct_slugs.append(base)
+            direct_slugs.append(f"lowest-temperature-in-{city}-on-{mon}-{d.day}-{d.year}")
+            direct_slugs.append(base.replace("highest-temperature", "highest-temp"))
+            direct_slugs.append(base.replace("highest-temperature", "highest-temperature-in"))
 
     logger.info(f"Метод 4 (direct slugs): перевіряємо {len(direct_slugs)} точних слугів...")
     hits = 0
@@ -333,7 +309,6 @@ def _method4_direct_slugs(hours_limit: float) -> List[PolyMarket]:
 
 
 def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
-    """Головна функція: 4 методи пошуку weather-ринків"""
     cache_key = "weather_markets"
     if not force_refresh and cache_key in _market_cache:
         ts, markets = _market_cache[cache_key]
@@ -363,7 +338,6 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
         n3 = add(_method3_ending_soon(hours_limit))
         logger.info(f"Після методу 3 (ending_soon): +{n3} нових")
 
-    # Метод 4 — найважливіший для daily temperature
     n4 = add(_method4_direct_slugs(hours_limit))
     logger.info(f"Після методу 4 (direct slugs): +{n4} нових")
 
