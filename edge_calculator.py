@@ -74,33 +74,41 @@ def calculate_edge(market: PolyMarket) -> EdgeResult:
 
     estimated_prob = estimate_market_probability(market, forecast) if forecast else 0.50
 
+    # Жорсткий cap: ніколи не віримо в 0.00 або 1.00 на 100%
+    estimated_prob = max(0.02, min(0.98, estimated_prob))
+
     edge_yes = estimated_prob - market_prob
     edge_no = (1 - estimated_prob) - (1 - market_prob)
     confidence = _confidence_from_sources(forecast) if forecast else 0.70
 
     effective_edge = max(abs(edge_yes), abs(edge_no)) * confidence
 
-    # ── EXTREME TAIL YES (mahera777) ─────────────────
-    is_extreme_tail = (config.ENABLE_EXTREME_TAIL_YES and
-                       market.detected_city in config.EXTREME_TAIL_CITIES and
-                       market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES and
-                       edge_yes > 0)
+    # ── ФІЛЬТРИ ДЛЯ УНИКНЕННЯ ШУМУ ─────────────────
+    is_extreme_tail_yes = (config.ENABLE_EXTREME_TAIL_YES and
+                           market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES and
+                           edge_yes > config.EXTREME_TAIL_MIN_EDGE_YES)
 
-    # ── COLDMATH TAIL NO (@coldmath) ─────────────────
-    is_coldmath_tail = (config.ENABLE_COLDMATH_TAIL_NO and
-                        market.midpoint_yes <= (1 - config.COLDMATH_MIN_ASK_NO) and
-                        edge_no > config.COLDMATH_MIN_EDGE_NO)
+    is_coldmath_tail_no = (config.ENABLE_COLDMATH_TAIL_NO and
+                           market.midpoint_yes <= (1 - config.COLDMATH_MIN_ASK_NO) and
+                           edge_no > config.COLDMATH_MIN_EDGE_NO)
 
-    if is_coldmath_tail:
+    # Додатковий фільтр: пропускати ринки з market_prob < 0.03 або > 0.97, якщо обсяг низький
+    if (market.midpoint_yes < 0.03 or market.midpoint_yes > 0.97) and market.volume_usd < 2000:
+        reason = "LOW_VOLUME_EXTREME_BIN → skip (шум)"
+        return EdgeResult(market=market, forecast=forecast, estimated_prob=estimated_prob,
+                          market_prob=market_prob, edge=0.0, edge_direction="SKIP",
+                          confidence=confidence, reason=reason, is_tradeable=False)
+
+    if is_coldmath_tail_no:
         effective_edge = max(effective_edge, edge_no * 1.45)
         confidence = min(0.98, confidence + 0.15)
-        reason = f"COLDMATH TAIL NO @ {market.midpoint_yes:.3f} (потенціал 1-7%) | {forecast.source if forecast else 'unknown'}"
+        reason = f"COLDMATH TAIL NO @ {market.midpoint_yes:.3f} | {forecast.source if forecast else 'unknown'}"
         direction = "BUY_NO"
         is_tradeable = True
-    elif is_extreme_tail:
-        effective_edge = max(effective_edge, edge_yes * 1.50)
-        confidence = min(0.98, confidence + 0.12)
-        reason = f"EXTREME TAIL YES @ {market.best_ask_yes:.3f}¢ (потенціал ×20–100) | {forecast.source if forecast else 'unknown'}"
+    elif is_extreme_tail_yes:
+        effective_edge = max(effective_edge, edge_yes * 1.40)  # трохи зменшили буст
+        confidence = min(0.97, confidence + 0.10)
+        reason = f"EXTREME TAIL YES @ {market.best_ask_yes:.3f} | {forecast.source if forecast else 'unknown'}"
         direction = "BUY_YES"
         is_tradeable = True
     else:
@@ -134,3 +142,11 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             results.append(edge)
     logger.info(f"✅ Знайдено {len(results)} tradeable edge (hybrid coldmath + extreme-tail) з {len(markets)} ринків")
     return results
+    for market in markets:
+        if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
+            continue
+        if market.detected_city and market.detected_city not in config.TARGET_CITIES:
+            continue  # ← новий рядок
+        edge = calculate_edge(market)
+        if edge.is_tradeable:
+            results.append(edge)
