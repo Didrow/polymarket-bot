@@ -77,8 +77,8 @@ MAX_ORDERS_BATCH: int = 15
 # ─────────────────────────────────────────────
 # WEATHER API + SCAN
 # ─────────────────────────────────────────────
-MAX_RESOLUTION_HOURS: int = 720
-MIN_MARKET_VOLUME_USD: float = 10.0
+MAX_RESOLUTION_HOURS: int = 72
+MIN_MARKET_VOLUME_USD: float = 100.0
 SCAN_INTERVAL_SEC: int = 120
 
 # EMAIL
