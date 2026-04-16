@@ -241,12 +241,18 @@ def main():
     while _running:
         try:
             cycle_count += 1
-            logger.info(f"─── Цикл #{cycle_count} | {datetime.now().strftime('%H:%M:%S')} ───")
+            cap = safeguard.state.current_capital
+            pnl = safeguard.state.total_pnl
+            pnl_sign = "+" if pnl >= 0 else ""
+            logger.info(
+                f"─── Цикл #{cycle_count} | {datetime.now().strftime('%H:%M:%S')} | "
+                f"💰 Капітал: ${cap:.2f} | PnL: {pnl_sign}${pnl:.2f} ───"
+            )
 
             run_scan_cycle(safeguard, clob_client)
 
             # Щогодинний звіт
-            if time.time() - last_summary_time >= 3600:
+            if time.time() - last_summary_time >= 1800:  # Кожні 30 хвилин
                 safeguard.print_summary()
                 summary = safeguard.state
                 notifier.notify_daily_summary(
