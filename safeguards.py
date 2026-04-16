@@ -156,7 +156,8 @@ class SafeguardManager:
 
     # ─── Оновлення після угод ────────────────────────────────
 
-        def record_trade_open(self, size_usd: float):
+    def record_trade_open(self, size_usd: float):
+        """Записати відкриття угоди."""
         self._trade_count_hour += 1
         self.state.total_trades += 1
         if not config.DRY_RUN:                     # ← ВАЖЛИВО
@@ -164,6 +165,7 @@ class SafeguardManager:
         self.save_state()
 
     def record_trade_close(self, pnl_usd: float):
+        """Записати закриття угоди з PnL."""
         if not config.DRY_RUN:                     # ← ВАЖЛИВО
             self.state.current_capital += pnl_usd
             self.state.total_pnl += pnl_usd
@@ -175,8 +177,9 @@ class SafeguardManager:
         if self.state.current_capital > self.state.peak_capital:
             self.state.peak_capital = self.state.current_capital
         self.save_state()
-      
+
     def print_summary(self):
+        """Вивести щогодинний звіт у логи."""
         s = self.state
         logger.info("=" * 50)
         logger.info(f"📊 ЗВІТ БОТА")
