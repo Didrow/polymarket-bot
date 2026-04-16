@@ -35,19 +35,14 @@ class WeatherForecast:
     wind_kmh: Optional[float] = None     # Вітер (км/год)
     raw_data: Dict = None
 
-    def prob_above_temp_f(self, threshold: float) -> Optional[float]:
-        """
-        Оцінює ймовірність того, що max temp буде вище порогу (°F).
-        Використовує sigmoid-подібну апроксимацію навколо прогнозного значення.
-        """
+  def prob_above_temp_f(self, threshold: float) -> float:
+        """Виправлено: ніколи не повертає 0.00 або 1.00"""
         if self.temp_high_f is None:
-            return None
+            return 0.50
         diff = self.temp_high_f - threshold
-        # Нормальний розподіл із σ ≈ 4°F (типова похибка прогнозу NWS)
-        import math
-        sigma = 4.0
+        sigma = 4.0  # типова похибка NWS
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
-        return round(prob, 4)
+        return max(0.02, min(0.98, round(prob, 4)))  # жорсткі межі
 
     def prob_rain(self) -> Optional[float]:
         """Ймовірність дощу."""
