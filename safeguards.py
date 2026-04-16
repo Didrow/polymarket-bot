@@ -156,20 +156,25 @@ class SafeguardManager:
 
     # ─── Оновлення після угод ────────────────────────────────
 
-    def record_trade_open(self, size_usd: float):
+        def record_trade_open(self, size_usd: float):
         self._trade_count_hour += 1
         self.state.total_trades += 1
-        self.state.current_capital -= size_usd
+        if not config.DRY_RUN:                     # ← ВАЖЛИВО
+            self.state.current_capital -= size_usd
         self.save_state()
 
     def record_trade_close(self, pnl_usd: float):
-        self.state.current_capital += pnl_usd
-        self.state.total_pnl += pnl_usd
-        if pnl_usd > 0:
-            self.state.winning_trades += 1
-        else:
-            self.state.losing_trades += 1
-
+        if not config.DRY_RUN:                     # ← ВАЖЛИВО
+            self.state.current_capital += pnl_usd
+            self.state.total_pnl += pnl_usd
+            if pnl_usd > 0:
+                self.state.winning_trades += 1
+            else:
+                self.state.losing_trades += 1
+        # піковий капітал оновлюємо завжди (для статистики)
+        if self.state.current_capital > self.state.peak_capital:
+            self.state.peak_capital = self.state.current_capital
+        self.save_state()
         # Оновлення пікового капіталу
         if self.state.current_capital > self.state.peak_capital:
             self.state.peak_capital = self.state.current_capital
