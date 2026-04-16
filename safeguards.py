@@ -175,12 +175,7 @@ class SafeguardManager:
         if self.state.current_capital > self.state.peak_capital:
             self.state.peak_capital = self.state.current_capital
         self.save_state()
-        # Оновлення пікового капіталу
-        if self.state.current_capital > self.state.peak_capital:
-            self.state.peak_capital = self.state.current_capital
-
-        self.save_state()
-
+      
     def print_summary(self):
         s = self.state
         logger.info("=" * 50)
