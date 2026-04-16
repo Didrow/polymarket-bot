@@ -31,14 +31,14 @@ TARGET_CITIES: List[str] = ["London", "NYC"]
 # ─────────────────────────────────────────────
 ENABLE_EXTREME_TAIL: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05      # Купуємо тільки до 5¢
-EXTREME_TAIL_MAX_SIZE_USD: float = 4.0      # Максимум $4 на угоду
+EXTREME_TAIL_MAX_SIZE_USD: float = 1.0      # Максимум $1 на угоду
 EXTREME_TAIL_CITIES: List[str] = ["London", "NYC"]
 EXTREME_TAIL_MIN_EDGE: float = 0.04
 
 # ─────────────────────────────────────────────
 # EDGE
 # ─────────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.08
+MIN_EDGE_ENTRY: float = 0.06 # трохи м'якше для tail
 MIN_EDGE_HOLD: float = 0.05
 MAX_EDGE_CAP: float = 0.60
 
@@ -46,7 +46,7 @@ MAX_EDGE_CAP: float = 0.60
 # RISK MANAGEMENT
 # ─────────────────────────────────────────────
 INITIAL_CAPITAL: float = 100.0
-MAX_POSITION_PCT: float = 0.07
+MAX_POSITION_PCT: float = 0.015 # максимум 1.5% капіталу
 MAX_ACTIVE_POSITIONS: int = 5
 MAX_DRAWDOWN_PCT: float = 0.20
 STOP_LOSS_PCT: float = 0.13
@@ -78,7 +78,7 @@ MAX_ORDERS_BATCH: int = 15
 # WEATHER API + SCAN
 # ─────────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72
-MIN_MARKET_VOLUME_USD: float = 100.0
+MIN_MARKET_VOLUME_USD: float = 2000.0 # уникаємо ультра-мікро
 SCAN_INTERVAL_SEC: int = 120
 
 # EMAIL
