@@ -187,7 +187,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
         if not safeguard.check_hourly_trade_limit():
             break
 
-        size = edge_result.edge * current_capital * config.MAX_POSITION_PCT
+        size = getattr(edge_result, 'size_usd', edge_result.edge * current_capital * config.MAX_POSITION_PCT)
         if not safeguard.pre_trade_check(size, current_capital):
             continue
 
