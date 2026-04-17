@@ -57,5 +57,5 @@ CACHE_DIR: str = "cache"
 MAX_USDC_APPROVAL: float = 1000.0
 EMAIL_ENABLED: bool = False
 
-EXTREME_TAIL_CITIES: List[str] = ["NYC", "New York", "London", "Paris", "Berlin", "Tokyo"]
+EXTREME_TAIL_CITIES: List[str] = ["NYC", "New York", "Chicago", "Los Angeles", "London", "Paris", "Berlin", "Tokyo"]
 KNOWN_WHALE_WALLETS: List[str] = []
