@@ -32,7 +32,7 @@ TARGET_CITIES: List[str] = [
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05
 EXTREME_TAIL_MAX_SIZE_USD: float = 3.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.20     # ще жорсткіше
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.22     # ще жорсткіше
 
 ENABLE_COLDMATH_TAIL_NO: bool = True
 COLDMATH_MIN_ASK_NO: float = 0.93
@@ -43,9 +43,9 @@ COLDMATH_MAX_SIZE_USD: float = 10.0
 # ─────────────────────────────────────────────
 # EDGE + CONFIDENCE
 # ─────────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.13
+MIN_EDGE_ENTRY: float = 0.15
 MIN_EDGE_HOLD: float = 0.09
-MIN_CONFIDENCE: float = 0.85
+MIN_CONFIDENCE: float = 0.88
 
 # ─────────────────────────────────────────────
 # RISK
@@ -66,7 +66,7 @@ BASE_POSITION_USD: float = 5.0
 MIN_DATA_POINTS_FALLBACK: int = 5
 
 MAX_RESOLUTION_HOURS: int = 72
-MIN_MARKET_VOLUME_USD: float = 1500.0
+MIN_MARKET_VOLUME_USD: float = 2000.0
 SCAN_INTERVAL_SEC: int = 120
 OSINT_SCAN_INTERVAL_SEC: int = 300   # ← ЦЕЙ РЯДОК ОБОВ'ЯЗКОВИЙ!
 
