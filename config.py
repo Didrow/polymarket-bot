@@ -26,7 +26,24 @@ CHAIN_ID: int = 137
 # ─────────────────────────────────────────────
 # МІСТА
 # ─────────────────────────────────────────────
-TARGET_CITIES: List[str] = [ ... ]  # (залишаю ваш повний список без змін)
+TARGET_CITIES: List[str] = [
+    # США
+    "NYC", "New York", "Chicago", "Los Angeles", "San Francisco",
+    "Miami", "Dallas", "Houston", "Seattle", "Atlanta", "Boston",
+    "Denver", "Phoenix", "Las Vegas", "Austin", "Orlando", "Nashville",
+    # Європа
+    "London", "Paris", "Berlin", "Madrid", "Rome", "Amsterdam",
+    "Istanbul", "Moscow", "Vienna", "Prague", "Warsaw", "Helsinki",
+    "Edinburgh", "Dublin", "Brussels",
+    # Азія
+    "Tokyo", "Seoul", "Singapore", "Hong Kong", "Beijing", "Shanghai",
+    "Bangkok", "Taipei", "Dubai", "Mumbai", "Delhi", "Kuala Lumpur",
+    "Jakarta", "Osaka", "Busan", "Chengdu", "Shenzhen", "Chongqing",
+    "Wuhan", "Jeddah", "Karachi", "Lucknow",
+    # Інші
+    "Sydney", "Melbourne", "Toronto", "Vancouver", "Montreal",
+    "Wellington", "Auckland", "Cape Town", "Lagos", "Cairo",
+    "Buenos Aires", "Ankara",
 
 # ─────────────────────────────────────────────
 # EXTREME TAIL YES + COLDMATH TAIL NO
