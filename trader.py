@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import config
 from edge_calculator import EdgeResult
-from market_scanner import PolyMarket, get_orderbook_price
+from market_scanner import PolyMarket
 
 logger = logging.getLogger(__name__)
 
