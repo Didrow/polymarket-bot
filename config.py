@@ -1,14 +1,13 @@
 # polymarket-bot-main/config.py
 """
-config.py — Polymarket Weather Bot 2026 (виправлена версія з усіма missing vars)
+config.py — Polymarket Weather Bot 2026 (фінальна виправлена версія)
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List
 import os
 
 # ─────────────────────────────────────────────
-# РЕЖИМ РОБОТИ + COLDMATH MODE
+# РЕЖИМ РОБОТИ
 # ─────────────────────────────────────────────
 DRY_RUN: bool = True
 LOG_LEVEL: str = "INFO"
@@ -20,105 +19,71 @@ COLDMATH_MODE: bool = True
 # ─────────────────────────────────────────────
 CLOB_URL: str = "https://clob.polymarket.com"
 GAMMA_URL: str = "https://gamma-api.polymarket.com"
-POLY_WS_URL: str = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 CHAIN_ID: int = 137
 
 # ─────────────────────────────────────────────
-# МІСТА
+# МІСТА (повний список)
 # ─────────────────────────────────────────────
 TARGET_CITIES: List[str] = [
-    # США
-    "NYC", "New York", "Chicago", "Los Angeles", "San Francisco",
-    "Miami", "Dallas", "Houston", "Seattle", "Atlanta", "Boston",
-    "Denver", "Phoenix", "Las Vegas", "Austin", "Orlando", "Nashville",
-    # Європа
-    "London", "Paris", "Berlin", "Madrid", "Rome", "Amsterdam",
-    "Istanbul", "Moscow", "Vienna", "Prague", "Warsaw", "Helsinki",
-    "Edinburgh", "Dublin", "Brussels",
-    # Азія
-    "Tokyo", "Seoul", "Singapore", "Hong Kong", "Beijing", "Shanghai",
-    "Bangkok", "Taipei", "Dubai", "Mumbai", "Delhi", "Kuala Lumpur",
-    "Jakarta", "Osaka", "Busan", "Chengdu", "Shenzhen", "Chongqing",
-    "Wuhan", "Jeddah", "Karachi", "Lucknow",
-    # Інші
-    "Sydney", "Melbourne", "Toronto", "Vancouver", "Montreal",
-    "Wellington", "Auckland", "Cape Town", "Lagos", "Cairo",
-    "Buenos Aires", "Ankara",
+    "NYC", "New York", "Chicago", "Los Angeles", "San Francisco", "Miami",
+    "Dallas", "Houston", "Seattle", "Atlanta", "Boston", "Denver", "Phoenix",
+    "Las Vegas", "Austin", "Orlando", "Nashville", "London", "Paris", "Berlin",
+    "Madrid", "Rome", "Amsterdam", "Tokyo", "Seoul", "Singapore", "Hong Kong",
+    "Sydney", "Melbourne", "Toronto"
+]
 
 # ─────────────────────────────────────────────
 # EXTREME TAIL YES + COLDMATH TAIL NO
 # ─────────────────────────────────────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05
-EXTREME_TAIL_MAX_SIZE_USD: float = 1.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.04
+EXTREME_TAIL_MAX_SIZE_USD: float = 2.0      # трохи збільшили
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.12     # підняли, щоб менше шуму
 
 ENABLE_COLDMATH_TAIL_NO: bool = True
 COLDMATH_MIN_ASK_NO: float = 0.93
 COLDMATH_MAX_ASK_NO: float = 0.99
-COLDMATH_MIN_EDGE_NO: float = 0.035
-COLDMATH_MAX_SIZE_USD: float = 15.0
+COLDMATH_MIN_EDGE_NO: float = 0.04
+COLDMATH_MAX_SIZE_USD: float = 12.0
 
 # ─────────────────────────────────────────────
-# EDGE + RISK
+# EDGE + CONFIDENCE
 # ─────────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.09          # піднято з 0.06 для якості
-MIN_EDGE_HOLD: float = 0.05
-MAX_EDGE_CAP: float = 0.60
-MIN_CONFIDENCE: float = 0.75          # НОВА змінна
+MIN_EDGE_ENTRY: float = 0.10                # піднято
+MIN_EDGE_HOLD: float = 0.06
+MIN_CONFIDENCE: float = 0.78                # піднято
 
 # ─────────────────────────────────────────────
 # RISK MANAGEMENT
 # ─────────────────────────────────────────────
 INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.025
-MAX_ACTIVE_POSITIONS: int = 8
-MAX_DRAWDOWN_PCT: float = 0.20
-STOP_LOSS_PCT: float = 0.13
-CONFIRM_TRADE_ABOVE_USD: float = 20.0
+MAX_ACTIVE_POSITIONS: int = 6
+MAX_DRAWDOWN_PCT: float = 0.25
+STOP_LOSS_PCT: float = 0.15
+MIN_POSITION_USD: float = 2.0
 
 # ─────────────────────────────────────────────
-# VOLATILITY + LADDER
+# VOLATILITY
 # ─────────────────────────────────────────────
 TARGET_PORTFOLIO_VOL: float = 0.12
-LAMBDA_EWMA: float = 0.94
-MM_MODE: bool = True
-LADDER_LEVELS: int = 8
-POST_ONLY: bool = True
+MAX_VOL_NO_TRADE: float = 0.40
+BASE_POSITION_USD: float = 5.0
+MIN_DATA_POINTS_FALLBACK: int = 5
 
 # ─────────────────────────────────────────────
-# WEATHER + SCAN
+# SCAN
 # ─────────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72
-MIN_MARKET_VOLUME_USD: float = 1000.0
+MIN_MARKET_VOLUME_USD: float = 800.0
 SCAN_INTERVAL_SEC: int = 90
 OSINT_SCAN_INTERVAL_SEC: int = 300
 
-# EMAIL
-EMAIL_ENABLED: bool = True
+# EMAIL (якщо використовуєте)
+EMAIL_ENABLED: bool = False
 EMAIL_SENDER: str = os.getenv("EMAIL_SENDER", "")
 EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
 
 # БЕЗПЕКА
-SECURITY_WALLET_CHECK: bool = True
-SECURITY_AUDIT_DEPS: bool = True
 MAX_USDC_APPROVAL: float = 1000.0
-
-# ШЛЯХИ
-DATA_DIR: str = "data"
-LOGS_DIR: str = "logs"
-CACHE_DIR: str = "cache"
-
-# ─────────────────────────────────────────────
-# НОВІ ЗМІННІ (виправлення missing vars)
-# ─────────────────────────────────────────────
-MIN_POSITION_USD: float = 2.0
-WHALE_THRESHOLD_USD: float = 500.0
-KNOWN_WHALE_WALLETS: List[str] = []
-MAX_VOL_NO_TRADE: float = 0.40
-BASE_POSITION_USD: float = 5.0
-MIN_DATA_POINTS_FALLBACK: int = 5
-EXTREME_TAIL_CITIES: List[str] = [
-    "NYC", "New York", "London", "Paris", "Berlin", "Tokyo",
-    "Chicago", "Los Angeles", "San Francisco", "Miami"
-]
+EXTREME_TAIL_CITIES: List[str] = ["NYC", "New York", "London", "Paris", "Berlin", "Tokyo"]
