@@ -1,5 +1,5 @@
 """
-config.py — Polymarket Weather Bot 2026 (жорстка coldmath-версія v4)
+config.py — Polymarket Weather Bot 2026 (жорстка coldmath-версія v5)
 """
 
 from typing import List
@@ -20,19 +20,19 @@ GAMMA_URL: str = "https://gamma-api.polymarket.com"
 CHAIN_ID: int = 137
 
 # ─────────────────────────────────────────────
-# МІСТА (скорочено для швидкості)
+# МІСТА
 # ─────────────────────────────────────────────
 TARGET_CITIES: List[str] = [
     "NYC", "New York", "Chicago", "Los Angeles", "London", "Paris", "Berlin", "Tokyo"
 ]
 
 # ─────────────────────────────────────────────
-# COLDMATH + EXTREME TAIL (підвищено пороги)
+# COLDMATH + EXTREME TAIL
 # ─────────────────────────────────────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05
 EXTREME_TAIL_MAX_SIZE_USD: float = 3.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.18   # ← жорсткіше
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.20     # ще жорсткіше
 
 ENABLE_COLDMATH_TAIL_NO: bool = True
 COLDMATH_MIN_ASK_NO: float = 0.93
@@ -43,9 +43,9 @@ COLDMATH_MAX_SIZE_USD: float = 10.0
 # ─────────────────────────────────────────────
 # EDGE + CONFIDENCE
 # ─────────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.12
-MIN_EDGE_HOLD: float = 0.08
-MIN_CONFIDENCE: float = 0.82
+MIN_EDGE_ENTRY: float = 0.13
+MIN_EDGE_HOLD: float = 0.09
+MIN_CONFIDENCE: float = 0.85
 
 # ─────────────────────────────────────────────
 # RISK
@@ -68,10 +68,10 @@ MIN_DATA_POINTS_FALLBACK: int = 5
 MAX_RESOLUTION_HOURS: int = 72
 MIN_MARKET_VOLUME_USD: float = 1500.0
 SCAN_INTERVAL_SEC: int = 120
-OSINT_SCAN_INTERVAL_SEC: int = 300     # ← ДОДАНО, щоб не падало
+OSINT_SCAN_INTERVAL_SEC: int = 300   # ← ЦЕЙ РЯДОК ОБОВ'ЯЗКОВИЙ!
 
 # ─────────────────────────────────────────────
-# ШЛЯХИ (обов’язково)
+# ШЛЯХИ
 # ─────────────────────────────────────────────
 DATA_DIR: str = "data"
 LOGS_DIR: str = "logs"
