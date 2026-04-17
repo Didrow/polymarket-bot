@@ -21,7 +21,7 @@ TARGET_CITIES: List[str] = [
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05
 EXTREME_TAIL_MAX_SIZE_USD: float = 4.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.25     # сильно піднято
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.22     # сильно піднято
 
 ENABLE_COLDMATH_TAIL_NO: bool = True
 COLDMATH_MIN_ASK_NO: float = 0.93
@@ -29,7 +29,7 @@ COLDMATH_MAX_ASK_NO: float = 0.99
 COLDMATH_MIN_EDGE_NO: float = 0.06
 COLDMATH_MAX_SIZE_USD: float = 12.0
 
-MIN_EDGE_ENTRY: float = 0.18                # піднято
+MIN_EDGE_ENTRY: float = 0.16                # піднято
 MIN_EDGE_HOLD: float = 0.12
 MIN_CONFIDENCE: float = 0.88
 
