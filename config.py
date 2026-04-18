@@ -1,5 +1,13 @@
 """
-config.py — Polymarket Weather Bot 2026 (дуже жорстка coldmath-версія v6)
+config.py — Polymarket Weather Bot 2026 (coldmath v8 — фінальна робоча версія)
+
+ВИПРАВЛЕННЯ:
+  - MAX_POSITION_PCT: 0.025 → 0.05 (дозволяє $5 при $100 капіталі)
+  - MIN_POSITION_USD: 4.0 → 2.0
+  - BASE_POSITION_USD: 5.0 → 3.0
+  - MIN_MARKET_VOLUME_USD: 5000 для точних сигналів
+  - EXTREME_TAIL_MIN_EDGE_YES: підвищено до 0.40 (менше шуму)
+  - MAX_ACTIVE_POSITIONS: 5 → обмежуємо кількість відкритих угод
 """
 
 from typing import List
@@ -13,49 +21,66 @@ CLOB_URL: str = "https://clob.polymarket.com"
 GAMMA_URL: str = "https://gamma-api.polymarket.com"
 CHAIN_ID: int = 137
 
-TARGET_CITIES: List[str] = [
-    "NYC", "New York", "Chicago", "Los Angeles", "London", "Paris", "Berlin", "Tokyo"
-]
-
-# ── COLDMATH + EXTREME TAIL (дуже жорстко) ──
-ENABLE_EXTREME_TAIL_YES: bool = True
-EXTREME_TAIL_MAX_ASK_YES: float = 0.05
-EXTREME_TAIL_MAX_SIZE_USD: float = 4.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.22     # сильно піднято
-
-ENABLE_COLDMATH_TAIL_NO: bool = True
-COLDMATH_MIN_ASK_NO: float = 0.93
-COLDMATH_MAX_ASK_NO: float = 0.99
-COLDMATH_MIN_EDGE_NO: float = 0.06
-COLDMATH_MAX_SIZE_USD: float = 12.0
-
-MIN_EDGE_ENTRY: float = 0.16                # піднято
-MIN_EDGE_HOLD: float = 0.12
-MIN_CONFIDENCE: float = 0.88
-
+# ── КАПІТАЛ ──────────────────────────────────────────────────
 INITIAL_CAPITAL: float = 100.0
-MAX_POSITION_PCT: float = 0.025
-MAX_ACTIVE_POSITIONS: int = 4
-MAX_DRAWDOWN_PCT: float = 0.30
-STOP_LOSS_PCT: float = 0.18
-MIN_POSITION_USD: float = 4.0
+# ВИПРАВЛЕННЯ ГОЛОВНОЇ ПОМИЛКИ: 5% від $100 = $5 → дозволяє угоди
+MAX_POSITION_PCT: float = 0.05          # було 0.025 → safeguards блокував $4 на $100
+MIN_POSITION_USD: float = 2.0
+BASE_POSITION_USD: float = 3.0
+MAX_ACTIVE_POSITIONS: int = 5           # не більше 5 відкритих позицій
+MAX_DRAWDOWN_PCT: float = 0.25
+STOP_LOSS_PCT: float = 0.15
 
-TARGET_PORTFOLIO_VOL: float = 0.10
-MAX_VOL_NO_TRADE: float = 0.45
-BASE_POSITION_USD: float = 5.0
-MIN_DATA_POINTS_FALLBACK: int = 5
+# ── COLDMATH TAIL NO (BUY NO @ 93-99¢) ───────────────────────
+ENABLE_COLDMATH_TAIL_NO: bool = True
+COLDMATH_MIN_ASK_NO: float = 0.93      # NO price ≥ 0.93
+COLDMATH_MAX_ASK_NO: float = 0.99
+COLDMATH_MIN_EDGE_NO: float = 0.06     # мінімальний edge
+COLDMATH_MAX_SIZE_USD: float = 5.0     # $5 на угоду
 
+# ── EXTREME TAIL YES (BUY YES @ 1-5¢) ────────────────────────
+ENABLE_EXTREME_TAIL_YES: bool = True
+EXTREME_TAIL_MAX_ASK_YES: float = 0.05  # YES price ≤ 5¢
+EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # $3 на угоду
+# КЛЮЧОВЕ: підвищено щоб фільтрувати шум our_prob=0.98
+# Тільки ринки де edge > 40% і наш прогноз СПРАВДІ відрізняється
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.40
+
+# ── СТАНДАРТНИЙ EDGE ──────────────────────────────────────────
+MIN_EDGE_ENTRY: float = 0.18           # мінімальний edge для звичайних угод
+MIN_EDGE_HOLD: float = 0.10
+
+# ── MARKETS ───────────────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72
-MIN_MARKET_VOLUME_USD: float = 2500.0      # ще вище
+# Тільки ринки з достатнім об'ємом — менше шуму
+MIN_MARKET_VOLUME_USD: float = 5000.0
 SCAN_INTERVAL_SEC: int = 150
 OSINT_SCAN_INTERVAL_SEC: int = 300
 
+# ── ТЕХНІЧНЕ ─────────────────────────────────────────────────
 DATA_DIR: str = "data"
 LOGS_DIR: str = "logs"
 CACHE_DIR: str = "cache"
-
 MAX_USDC_APPROVAL: float = 1000.0
-EMAIL_ENABLED: bool = False
+TARGET_PORTFOLIO_VOL: float = 0.10
+MAX_VOL_NO_TRADE: float = 0.45
 
-EXTREME_TAIL_CITIES: List[str] = ["NYC", "New York", "Chicago", "Los Angeles", "London", "Paris", "Berlin", "Tokyo"]
+# Email
+EMAIL_ENABLED: bool = False
+EMAIL_SENDER: str = os.getenv("EMAIL_SENDER", "")
+EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
+
+# ── WHITELIST МІСТ (тільки якісні прогнози) ──────────────────
+# Для categorical ринків бот використовує prob_exact_temp_c
+# Тільки міста де прогноз точний і ринок ліквідний
+CITY_WHITELIST: List[str] = [
+    "London", "Paris", "Berlin", "NYC", "Chicago",
+    "Tokyo", "Seoul", "Singapore", "Sydney", "Toronto",
+    "Amsterdam", "Madrid", "Rome", "Vienna",
+    "Dubai", "Istanbul", "Bangkok",
+    "Buenos Aires", "Cape Town",
+    "Busan", "Lucknow",
+]
+
 KNOWN_WHALE_WALLETS: List[str] = []
+EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST

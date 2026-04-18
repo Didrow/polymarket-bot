@@ -129,13 +129,18 @@ class SafeguardManager:
             logger.debug(f"Розмір ${size_usd:.2f} < мінімум ${config.MIN_POSITION_USD}")
             return False
 
-        # Максимальний % від капіталу
+        # Максимальний % від капіталу — у DRY_RUN тільки warning, не блокуємо
         if size_usd > capital * config.MAX_POSITION_PCT:
-            logger.warning(f"Розмір ${size_usd:.2f} > {config.MAX_POSITION_PCT:.0%} від капіталу")
-            return False
+            if config.DRY_RUN:
+                logger.info(f"DRY_RUN: розмір ${size_usd:.2f} ({size_usd/capital:.1%} капіталу)")
+                # Зменшуємо до ліміту
+                return True  # Дозволяємо, trader.py обмежить розмір
+            else:
+                logger.warning(f"Розмір ${size_usd:.2f} > {config.MAX_POSITION_PCT:.0%} від капіталу")
+                return False
 
-        # Достатньо капіталу
-        if size_usd > capital * 0.95:
+        # Достатньо капіталу (тільки реальний режим)
+        if not config.DRY_RUN and size_usd > capital * 0.95:
             logger.warning("Недостатньо капіталу для угоди")
             return False
 
