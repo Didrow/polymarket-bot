@@ -183,7 +183,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
         return
 
     # ── 6. Відкриття позицій ─────────────────────────────────
-    for edge_result in tradeable[:3]:  # Не більше 3 нових позицій за цикл
+    for edge_result in tradeable[:2]:  # Не більше 2 нових позицій за цикл
         if not safeguard.check_hourly_trade_limit():
             break
 

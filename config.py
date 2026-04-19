@@ -33,7 +33,7 @@ STOP_LOSS_PCT: float = 0.15
 
 # ── COLDMATH TAIL NO (BUY NO @ 93-99¢) ───────────────────────
 ENABLE_COLDMATH_TAIL_NO: bool = True
-COLDMATH_MIN_ASK_NO: float = 0.93      # NO price ≥ 0.93
+COLDMATH_MIN_ASK_NO: float = 0.95      # підвищено — тільки NO ≥95¢      # NO price ≥ 0.93
 COLDMATH_MAX_ASK_NO: float = 0.99
 COLDMATH_MIN_EDGE_NO: float = 0.06     # мінімальний edge
 COLDMATH_MAX_SIZE_USD: float = 5.0     # $5 на угоду
@@ -47,11 +47,11 @@ EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # $3 на угоду
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.40
 
 # ── СТАНДАРТНИЙ EDGE ──────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.18           # мінімальний edge для звичайних угод
+MIN_EDGE_ENTRY: float = 0.25           # підвищено для фільтрації шуму           # мінімальний edge для звичайних угод
 MIN_EDGE_HOLD: float = 0.10
 
 # ── MARKETS ───────────────────────────────────────────────────
-MAX_RESOLUTION_HOURS: int = 72
+MAX_RESOLUTION_HOURS: int = 48         # ринки > 48h ненадійні
 # Тільки ринки з достатнім об'ємом — менше шуму
 MIN_MARKET_VOLUME_USD: float = 5000.0
 SCAN_INTERVAL_SEC: int = 150
@@ -73,13 +73,11 @@ EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
 # ── WHITELIST МІСТ (тільки якісні прогнози) ──────────────────
 # Для categorical ринків бот використовує prob_exact_temp_c
 # Тільки міста де прогноз точний і ринок ліквідний
+# Топ-10 міст з найточнішими прогнозами і найбільшими обсягами
 CITY_WHITELIST: List[str] = [
-    "London", "Paris", "Berlin", "NYC", "Chicago",
-    "Tokyo", "Seoul", "Singapore", "Sydney", "Toronto",
-    "Amsterdam", "Madrid", "Rome", "Vienna",
-    "Dubai", "Istanbul", "Bangkok",
-    "Buenos Aires", "Cape Town",
-    "Busan", "Lucknow",
+    "London", "Paris", "NYC", "Chicago",
+    "Tokyo", "Seoul", "Buenos Aires",
+    "Busan", "Lucknow", "Cape Town",
 ]
 
 KNOWN_WHALE_WALLETS: List[str] = []

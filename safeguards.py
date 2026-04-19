@@ -96,7 +96,7 @@ class SafeguardManager:
             return False
         return True
 
-    def check_hourly_trade_limit(self, max_per_hour: int = 20) -> bool:
+    def check_hourly_trade_limit(self, max_per_hour: int = 50) -> bool:  # підвищено
         """Не більше N угод на годину."""
         current_hour = datetime.now().hour
         if current_hour != self._hour_mark:
