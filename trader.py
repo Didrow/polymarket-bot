@@ -201,7 +201,12 @@ def place_trade(
     # Дедуплікація з перевіркою значної зміни ціни
     if market.condition_id in _active_positions:
         existing = _active_positions[market.condition_id]
-        price_now = market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else (1 - market.best_bid_yes)
+        # ВАЖЛИВО: використовуємо той самий метод розрахунку ціни що в entry_price
+        # щоб уникнути хибного 9900% price_change через best_bid=0
+        if edge_result.edge_direction == "BUY_YES":
+            price_now = market.best_ask_yes
+        else:
+            price_now = max(1.0 - market.midpoint_yes, 0.01)  # NO price = 1 - midpoint
         price_change = abs(price_now - existing.entry_price) / max(existing.entry_price, 0.001)
         # Переоткриваємо тільки якщо ціна змінилась > 30% (суттєва нова інформація)
         if price_change < 0.30:

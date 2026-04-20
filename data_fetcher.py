@@ -245,7 +245,7 @@ def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float,
 def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
     if city not in US_CITIES:
         return None
-    coords = _get_coords(city)
+    coords = _get_coords(city, prefer_airport=True)  # аеропортні координати точніші
     if not coords:
         return None
 
@@ -302,7 +302,7 @@ def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
 # ─────────────────────────────────────────────
 
 def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
-    coords = _get_coords(city)
+    coords = _get_coords(city, prefer_airport=True)
     if not coords:
         return None
 
@@ -371,7 +371,7 @@ def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherFore
     BUG-7 FIX: fallback model="" → 404. Тепер default = "forecast".
     Підтримувані моделі: "forecast", "gfs", "ecmwf"
     """
-    coords = _get_coords(city)
+    coords = _get_coords(city, prefer_airport=True)
     if not coords:
         return None
 
@@ -514,7 +514,7 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
 # CONSENSUS (всі джерела → зважене середнє)
 # ─────────────────────────────────────────────
 
-def get_best_forecast(city: str) -> Optional[WeatherForecast]:
+def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
     """
     BUG-6 FIX: власний TTL кеш замість lru_cache без TTL.
     Якщо перший запит повернув None — наступний через 15 хвилин спробує знову.
@@ -546,7 +546,22 @@ def get_best_forecast(city: str) -> Optional[WeatherForecast]:
     if fc:
         forecasts_w.append((fc, 0.25))
 
-    # 5. Стандартний forecast як останній fallback
+    # 5. METAR — real-time airport observation (динамічна вага)
+    metar = fetch_metar(city)
+    if metar:
+        # Динамічна вага: чим ближче до resolution, тим важливіше
+        if hours_to_resolution <= 2.0:
+            metar_w = 0.50
+        elif hours_to_resolution <= 6.0:
+            metar_w = 0.35
+        elif hours_to_resolution <= 12.0:
+            metar_w = 0.20
+        else:
+            metar_w = 0.08  # далеко — невелика вага
+        forecasts_w.append((metar, metar_w))
+        logger.debug(f"METAR {city}: вага={metar_w:.2f} ({hours_to_resolution:.1f}h до resolution)")
+
+    # 6. Стандартний forecast як останній fallback
     if not forecasts_w:
         fc = fetch_open_meteo(city, "forecast")
         if fc:
@@ -582,6 +597,6 @@ def get_best_forecast(city: str) -> Optional[WeatherForecast]:
     return result
 
 
-def get_multi_source_consensus(city: str) -> Optional[WeatherForecast]:
+def get_multi_source_consensus(city: str, hours: float = 24.0) -> Optional[WeatherForecast]:
     """Alias для сумісності."""
-    return get_best_forecast(city)
+    return get_best_forecast(city, hours)

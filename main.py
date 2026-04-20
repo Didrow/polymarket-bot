@@ -176,6 +176,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
     # ── 5. Розрахунок edge ──────────────────────────────────
     edge_results = scan_all_edges(markets)
     tradeable = [r for r in edge_results if r.is_tradeable]
+    safeguard.check_high_edge_warning(tradeable)  # попередження про аномальні edge
 
     # Логуємо відкриті позиції
     portfolio = get_portfolio_summary()
