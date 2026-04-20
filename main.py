@@ -177,6 +177,14 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
     edge_results = scan_all_edges(markets)
     tradeable = [r for r in edge_results if r.is_tradeable]
 
+    # Логуємо відкриті позиції
+    portfolio = get_portfolio_summary()
+    if portfolio["active_positions"] > 0:
+        logger.info(
+            f"📂 Відкриті позиції: {portfolio['active_positions']} | "
+            f"Unrealized PnL: ${portfolio['total_pnl']:+.2f}"
+        )
+
     if not tradeable:
         logger.info("Немає ринків з достатнім edge. Наступне сканування через "
                     f"{config.SCAN_INTERVAL_SEC}s")

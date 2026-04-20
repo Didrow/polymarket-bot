@@ -35,8 +35,8 @@ STOP_LOSS_PCT: float = 0.15
 ENABLE_COLDMATH_TAIL_NO: bool = True
 COLDMATH_MIN_ASK_NO: float = 0.95      # підвищено — тільки NO ≥95¢      # NO price ≥ 0.93
 COLDMATH_MAX_ASK_NO: float = 0.99
-COLDMATH_MIN_EDGE_NO: float = 0.06     # мінімальний edge
-COLDMATH_MAX_SIZE_USD: float = 5.0     # $5 на угоду
+COLDMATH_MIN_EDGE_NO: float = 0.12        # підвищено: вимагаємо сильніший edge     # мінімальний edge
+COLDMATH_MAX_SIZE_USD: float = 2.5         # знижено: макс $2.5 на NO tail угоду     # $5 на угоду
 
 # ── EXTREME TAIL YES (BUY YES @ 1-5¢) ────────────────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
@@ -44,7 +44,7 @@ EXTREME_TAIL_MAX_ASK_YES: float = 0.05  # YES price ≤ 5¢
 EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # $3 на угоду
 # КЛЮЧОВЕ: підвищено щоб фільтрувати шум our_prob=0.98
 # Тільки ринки де edge > 40% і наш прогноз СПРАВДІ відрізняється
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.40
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.55   # підвищено: тільки дуже сильні сигнали
 
 # ── СТАНДАРТНИЙ EDGE ──────────────────────────────────────────
 MIN_EDGE_ENTRY: float = 0.25           # підвищено для фільтрації шуму           # мінімальний edge для звичайних угод
@@ -54,7 +54,7 @@ MIN_EDGE_HOLD: float = 0.10
 MAX_RESOLUTION_HOURS: int = 48         # ринки > 48h ненадійні
 # Тільки ринки з достатнім об'ємом — менше шуму
 MIN_MARKET_VOLUME_USD: float = 5000.0
-SCAN_INTERVAL_SEC: int = 150
+SCAN_INTERVAL_SEC: int = 180               # підвищено для стабільності Render
 OSINT_SCAN_INTERVAL_SEC: int = 300
 
 # ── ТЕХНІЧНЕ ─────────────────────────────────────────────────

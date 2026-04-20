@@ -159,13 +159,14 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     # Kelly (25% Kelly для консервативності)
     win_loss = (1 - entry_price) / max(entry_price, 0.001)
     kelly_raw = edge_result.edge / max(win_loss, 0.01)
-    kelly_size = current_capital * kelly_raw * 0.25
+    kelly_size = current_capital * kelly_raw * 0.15   # консервативно: 15% Kelly
     kelly_size = max(config.MIN_POSITION_USD, min(kelly_size, config.MAX_POSITION_USD))
     logger.info(f"  Kelly size: ${kelly_size:.2f}")
 
     final = min(vol_size, kelly_size)
     final = max(final, config.MIN_POSITION_USD)
     final = min(final, config.MAX_POSITION_USD)
+    final = min(final, 4.0)  # глобальний ліміт: ніколи > $4 при $100 капіталі
 
     # Ліміти по типу стратегії
     if direction == "BUY_NO":
@@ -197,10 +198,17 @@ def place_trade(
     """
     market = edge_result.market
 
-    # Дедуплікація — не відкриваємо той самий ринок двічі
+    # Дедуплікація з перевіркою значної зміни ціни
     if market.condition_id in _active_positions:
-        logger.debug(f"Вже відкрито: {market.condition_id[:12]}")
-        return None
+        existing = _active_positions[market.condition_id]
+        price_now = market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else (1 - market.best_bid_yes)
+        price_change = abs(price_now - existing.entry_price) / max(existing.entry_price, 0.001)
+        # Переоткриваємо тільки якщо ціна змінилась > 30% (суттєва нова інформація)
+        if price_change < 0.30:
+            logger.info(f"⏭ Пропускаємо: {market.question[:50]} | ціна {existing.entry_price:.3f}→{price_now:.3f} ({price_change:.0%} < 30%)")
+            return None
+        else:
+            logger.info(f"Ціна змінилась {price_change:.0%} → переоткриваємо позицію")
 
     price = market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else (1 - market.best_bid_yes)
     price = max(price, 0.001)
@@ -239,11 +247,16 @@ def place_trade(
 
     try:
         order = clob_client.create_and_post_order({
-            "token_id": token_id,
-            "price": round(price, 4),
-            "size": round(size_usd, 2),
-            "side": "BUY",
+            "token_id":   token_id,
+            "price":      round(price, 4),
+            "size":       round(size_usd, 2),
+            "side":       "BUY",
+            "order_type": "limit",    # limit order (не market)
+            "post_only":  True,       # не брати ask одразу, чекати виконання
         })
+        if order:
+            order_id = order.get("orderID", order.get("id", ""))
+            logger.info(f"✅ Order placed: {order_id} | {edge_result.edge_direction} {size_usd:.2f}")
         if order:
             logger.info(f"✅ Реальна угода виконана: {order}")
             _active_positions[market.condition_id] = pos
@@ -258,18 +271,57 @@ def place_trade(
 # ПЕРЕВІРКА ТА ЗАКРИТТЯ ПОЗИЦІЙ (з resolution polling)
 # ══════════════════════════════════════════════════════════════════
 
+# Кеш mark-to-market: TTL 90 секунд (не запитуємо щоцикл)
+_mtm_price_cache: Dict[str, tuple] = {}   # {condition_id: (timestamp, price)}
+MTM_CACHE_TTL = 90  # секунд
+
+
+def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
+    """
+    Mark-to-market: поточна YES price через Gamma API.
+    Повертає None якщо недоступно.
+    """
+    # Перевіряємо кеш
+    cached = _mtm_price_cache.get(condition_id)
+    if cached and time.time() - cached[0] < MTM_CACHE_TTL:
+        return cached[1]
+
+    try:
+        r = requests.get(
+            f"{config.GAMMA_URL}/markets",
+            params={"conditionId": condition_id},
+            timeout=6
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        markets = data if isinstance(data, list) else data.get("markets", [])
+        if not markets:
+            return None
+        m = markets[0]
+        import json
+        prices_str = m.get("outcomePrices", None) or '["0.5","0.5"]'
+        prices = json.loads(prices_str) if isinstance(prices_str, str) else prices_str
+        if len(prices) >= 1:
+            price = float(prices[0])
+            _mtm_price_cache[condition_id] = (time.time(), price)
+            return price
+    except Exception as e:
+        logger.debug(f"Mark-to-market error {condition_id[:12]}: {e}")
+    return None
+
+
 def check_and_close_positions(clob_client) -> List[Position]:
     """
     Перевіряє кожну відкриту позицію:
-      1. Чи ринок розв'язаний (через Gamma API)?
-         → Розраховує реальний PnL і закриває
-      2. Чи перевищений stop-loss?
-         → Закриває
+      1. Чи ринок розв'язаний → PnL через resolve()
+      2. Mark-to-market через Gamma API → оновлює pnl_pct
+      3. Stop-loss якщо pnl_pct < -STOP_LOSS_PCT
     """
     closed = []
     for cid, pos in list(_active_positions.items()):
 
-        # Перевіряємо resolution
+        # 1. Перевіряємо resolution
         resolved = check_market_resolved(cid)
         if resolved is not None:
             pos.resolve(resolved)
@@ -283,9 +335,19 @@ def check_and_close_positions(clob_client) -> List[Position]:
             del _active_positions[cid]
             continue
 
-        # Stop-loss (тільки якщо є ринкова ціна)
+        # 2. Mark-to-market (Gamma API, не заглушка)
+        current_price = _get_market_price_from_gamma(cid)
+        if current_price is not None:
+            if pos.direction == "BUY_NO":
+                # NO position: прибуток коли YES падає
+                effective_price = 1.0 - current_price
+            else:
+                effective_price = current_price
+            pos.update_pnl(effective_price)
+
+        # 3. Stop-loss
         if pos.pnl_pct <= -config.STOP_LOSS_PCT:
-            logger.info(f"🔴 Stop-loss: {pos.direction} | PnL {pos.pnl_usd:+.2f}")
+            logger.info(f"🔴 Stop-loss: {pos.direction} | PnL ${pos.pnl_usd:+.2f} ({pos.pnl_pct:+.1%})")
             closed.append(pos)
             del _active_positions[cid]
 

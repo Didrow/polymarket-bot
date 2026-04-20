@@ -395,20 +395,20 @@ def get_best_forecast(city: str) -> Optional[WeatherForecast]:
     if fc:
         forecasts_w.append((fc, 0.45))
 
-    # 2. NASA POWER
+    # 2. NASA POWER (знижено: кліматичні avg, не оперативний прогноз)
     fc = fetch_nasa_power(city)
     if fc:
-        forecasts_w.append((fc, 0.20))
+        forecasts_w.append((fc, 0.10))
 
-    # 3. GFS
+    # 3. GFS (підвищено: реальний NWP прогноз оновлюється 4 рази/добу)
     fc = fetch_open_meteo(city, "gfs")
     if fc:
-        forecasts_w.append((fc, 0.20))
+        forecasts_w.append((fc, 0.30))
 
-    # 4. ECMWF
+    # 4. ECMWF (підвищено: найточніший NWP для Європи)
     fc = fetch_open_meteo(city, "ecmwf")
     if fc:
-        forecasts_w.append((fc, 0.15))
+        forecasts_w.append((fc, 0.25))
 
     # 5. Стандартний forecast як останній fallback
     if not forecasts_w:

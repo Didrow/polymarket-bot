@@ -358,6 +358,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             direction = "BUY_NO"
             eff_edge  = eff_no
             reason = f"NO {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
+
+        # Слабкий edge + низька впевненість → пропускаємо
+        if eff_edge < 0.40 and confidence < 0.85:
+            logger.debug(f"Слабкий edge {eff_edge:.1%} + confidence {confidence:.2f} < 0.85 → skip")
+            return None
+
         size_usd = max(
             config.MIN_POSITION_USD,
             min(
