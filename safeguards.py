@@ -96,6 +96,15 @@ class SafeguardManager:
             return False
         return True
 
+    def check_high_edge_warning(self, edge_results: list, threshold: float = 0.70) -> None:
+        """Попередження якщо за цикл > 3 угод з дуже високим edge."""
+        high_edge = [r for r in edge_results if r.edge > threshold]
+        if len(high_edge) > 3:
+            logger.warning(
+                f"⚠️ {len(high_edge)} угод з edge > {threshold:.0%} за цикл "
+                f"— можлива аномалія прогнозу!"
+            )
+
     def check_hourly_trade_limit(self, max_per_hour: int = 50) -> bool:  # підвищено
         """Не більше N угод на годину."""
         current_hour = datetime.now().hour

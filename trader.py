@@ -210,8 +210,17 @@ def place_trade(
         else:
             logger.info(f"Ціна змінилась {price_change:.0%} → переоткриваємо позицію")
 
-    price = market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else (1 - market.best_bid_yes)
-    price = max(price, 0.001)
+    if edge_result.edge_direction == "BUY_YES":
+        price = market.best_ask_yes  # платимо ASK за YES
+    else:
+        # BUY_NO: платимо ціну NO = 1 - YES bid
+        # midpoint_yes надійніше ніж best_bid_yes (уникаємо 0.00)
+        no_price = 1.0 - market.midpoint_yes
+        if no_price < 0.01:
+            logger.debug(f"NO price {no_price:.4f} < 0.01 — неліквідний ринок, пропускаємо")
+            return None  # не торгуємо якщо NO майже недоступне
+        price = no_price
+    price = max(price, 0.001)  # абсолютний мінімум
     size_usd = decide_position_size(edge_result, current_capital)
 
     token_id = (market.token_yes_id if edge_result.edge_direction == "BUY_YES"

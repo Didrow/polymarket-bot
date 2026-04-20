@@ -75,6 +75,45 @@ class WeatherForecast:
 # Координати міст (великий список)
 # ─────────────────────────────────────────────
 
+# ══════════════════════════════════════════════════════════════════
+# AIRPORT COORDINATES (точніші для weather market resolution)
+# Більшість Polymarket weather ринків вирішуються за аеропортною станцією
+# ══════════════════════════════════════════════════════════════════
+AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
+    # США — ICAO станції (використовують Wunderground/ASOS)
+    "NYC":           (40.6413, -73.7781),   # KJFK (JFK Airport)
+    "New York":      (40.6413, -73.7781),   # KJFK
+    "Chicago":       (41.9742, -87.9073),   # KORD (O'Hare)
+    "Los Angeles":   (33.9425, -118.4081),  # KLAX
+    "San Francisco": (37.6213, -122.3790),  # KSFO
+    "Miami":         (25.7959, -80.2870),   # KMIA
+    "Dallas":        (32.8998, -97.0403),   # KDFW
+    "Seattle":       (47.4502, -122.3088),  # KSEA
+    "Boston":        (42.3656, -71.0096),   # KBOS
+    "Denver":        (39.8561, -104.6737),  # KDEN
+    "Atlanta":       (33.6407, -84.4277),   # KATL
+    # Європа
+    "London":        (51.4775, -0.4614),    # EGLL (Heathrow)
+    "Paris":         (49.0097, 2.5479),     # LFPG (CDG)
+    "Berlin":        (52.3667, 13.5033),    # EDDB (Brandenburg)
+    "Madrid":        (40.4936, -3.5668),    # LEMD (Barajas)
+    "Amsterdam":     (52.3086, 4.7639),     # EHAM (Schiphol)
+    "Rome":          (41.8003, 12.2389),    # LIRF (Fiumicino)
+    "Istanbul":      (40.9769, 28.8146),    # LTFM
+    # Азія
+    "Tokyo":         (35.5494, 139.7798),   # RJTT (Haneda)
+    "Seoul":         (37.4602, 126.4407),   # RKSI (Incheon)
+    "Singapore":     (1.3644, 103.9915),    # WSSS (Changi)
+    "Dubai":         (25.2532, 55.3657),    # OMDB
+    "Bangkok":       (13.6811, 100.7472),   # VTBS (Suvarnabhumi)
+    # Інші
+    "Sydney":        (-33.9399, 151.1753),  # YSSY (Kingsford Smith)
+    "Toronto":       (43.6777, -79.6248),   # CYYZ (Pearson)
+    "Buenos Aires":  (-34.8222, -58.5358),  # SAEZ (Ezeiza)
+    "Cape Town":     (-33.9715, 18.6021),   # FACT
+    "Busan":         (35.1795, 128.9381),   # RKPK (Gimhae)
+}
+
 CITY_COORDS: Dict[str, Tuple[float, float]] = {
     # США (NOAA покриває)
     "NYC":           (40.7128, -74.0060),
@@ -167,7 +206,14 @@ US_CITIES = {
 }
 
 
-def _get_coords(city: str) -> Optional[Tuple[float, float]]:
+def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float, float]]:
+    """
+    Повертає координати міста.
+    prefer_airport=True: використовує координати аеропорту (точніше для weather markets).
+    """
+    # Спочатку перевіряємо аеропортні координати (точніші для resolution)
+    if prefer_airport and city in AIRPORT_COORDS:
+        return AIRPORT_COORDS[city]
     if city in CITY_COORDS:
         return CITY_COORDS[city]
     # Geocoding через Open-Meteo
@@ -371,6 +417,96 @@ def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherFore
         return fc
     except Exception as e:
         logger.debug(f"Open-Meteo/{model} error {city}: {e}")
+        return None
+
+
+
+# ══════════════════════════════════════════════════════════════════
+# METAR — Real-time airport observations (aviation.gov, безкоштовно)
+# Використовується для ринків з hours_to_resolution < 4h
+# ══════════════════════════════════════════════════════════════════
+
+# ICAO коди для наших міст
+CITY_TO_ICAO: Dict[str, str] = {
+    "NYC":          "KJFK",
+    "New York":     "KJFK",
+    "Chicago":      "KORD",
+    "Los Angeles":  "KLAX",
+    "San Francisco":"KSFO",
+    "Miami":        "KMIA",
+    "Dallas":       "KDFW",
+    "Seattle":      "KSEA",
+    "Boston":       "KBOS",
+    "Denver":       "KDEN",
+    "Atlanta":      "KATL",
+    "London":       "EGLL",
+    "Paris":        "LFPG",
+    "Berlin":       "EDDB",
+    "Amsterdam":    "EHAM",
+    "Istanbul":     "LTFM",
+    "Tokyo":        "RJTT",
+    "Seoul":        "RKSI",
+    "Singapore":    "WSSS",
+    "Dubai":        "OMDB",
+    "Sydney":       "YSSY",
+    "Toronto":      "CYYZ",
+    "Buenos Aires": "SAEZ",
+    "Busan":        "RKPK",
+}
+
+
+def fetch_metar(city: str) -> Optional[WeatherForecast]:
+    """
+    METAR: реальне спостереження з аеропорту прямо зараз.
+    Корисно для ринків що закриваються < 4 годин.
+    API: https://aviationweather.gov/api/data/metar
+    """
+    icao = CITY_TO_ICAO.get(city)
+    if not icao:
+        return None
+
+    key = f"metar_{city}"
+    cached = _cache_get(key)
+    if cached:
+        return cached
+
+    try:
+        r = requests.get(
+            "https://aviationweather.gov/api/data/metar",
+            params={"ids": icao, "format": "json", "hours": 1},
+            timeout=8,
+            headers={"User-Agent": "PolymarketWeatherBot/2026"}
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not data or not isinstance(data, list):
+            return None
+
+        obs = data[0]
+        # Температура в °C (METAR завжди °C)
+        temp_c = obs.get("temp")
+        if temp_c is None:
+            return None
+
+        temp_c = float(temp_c)
+        dewpoint = obs.get("dewp", temp_c - 5)
+
+        fc = WeatherForecast(
+            city=city,
+            timestamp=datetime.utcnow(),
+            temp_high_c=temp_c,       # поточна температура (не max!)
+            temp_low_c=float(dewpoint),
+            prob_rain=0.0,
+            prob_snow=0.0,
+            sources_used=["METAR"]
+        )
+        # Короткий кеш для METAR (30 хвилин)
+        _cache[key] = (time.time() - CACHE_TTL + 1800, fc)
+        logger.info(f"METAR {city} ({icao}): {temp_c:.1f}°C (real-time)")
+        return fc
+
+    except Exception as e:
+        logger.debug(f"METAR error {city} ({icao}): {e}")
         return None
 
 
