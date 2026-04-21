@@ -160,7 +160,7 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     win_loss = (1 - entry_price) / max(entry_price, 0.001)
     kelly_raw = edge_result.edge / max(win_loss, 0.01)
     # Консервативний Kelly: 0.15 базово, 0.10 для слабших NO сигналів
-    kelly_fraction = 0.10 if (edge_result.edge_direction == "BUY_NO" and edge_result.edge < 0.45) else 0.15
+    kelly_fraction = 0.08 if (edge_result.edge_direction == "BUY_NO" and edge_result.edge < 0.55) else (0.12 if edge_result.edge_direction == "BUY_NO" else 0.15)
     kelly_size = current_capital * kelly_raw * kelly_fraction
     kelly_size = max(config.MIN_POSITION_USD, min(kelly_size, config.MAX_POSITION_USD))
     logger.info(f"  Kelly size: ${kelly_size:.2f}")
@@ -210,9 +210,10 @@ def place_trade(
         else:
             price_now = max(1.0 - market.midpoint_yes, 0.01)  # NO price = 1 - midpoint
         price_change = abs(price_now - existing.entry_price) / max(existing.entry_price, 0.001)
-        # Переоткриваємо тільки якщо ціна змінилась > 30% (суттєва нова інформація)
-        if price_change < 0.30:
-            logger.info(f"⏭ Пропускаємо: {market.question[:50]} | ціна {existing.entry_price:.3f}→{price_now:.3f} ({price_change:.0%} < 30%)")
+        # Переоткриваємо тільки якщо ціна змінилась > 40% (суттєва нова інформація)
+        # 40% замість 30% для стабільності при дешевих NO позиціях ($0.01)
+        if price_change < 0.40:
+            logger.info(f"⏭ Пропускаємо: {market.question[:50]} | ціна {existing.entry_price:.3f}→{price_now:.3f} ({price_change:.0%} < 40%)")
             return None
         else:
             logger.info(f"Ціна змінилась {price_change:.0%} → переоткриваємо позицію")
@@ -323,10 +324,15 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
             # YES price завжди менше для «невизначених» ринків (0.0-1.0)
             # Обираємо більшу ціну як YES (majority bet)
             p0, p1 = float(prices[0]), float(prices[1])
-            # YES price = та що відповідає першому outcome (зазвичай prices[0])
-            # Але для надійності: YES = ціна ближча до 0.5 або визначена через conditionId
-            # Найпростіше: зберігаємо обидві і повертаємо prices[0] як YES
-            yes_price = p0
+            # Логування для діагностики
+            logger.debug(f"Gamma prices {condition_id[:8]}: p0={p0:.3f} p1={p1:.3f}")
+            # Валідація: ринок відкритий якщо sum ≈ 1.0 (market maker fee ~0.02)
+            price_sum = p0 + p1
+            if abs(price_sum - 1.0) > 0.15:  # Занадто далеко від 1.0 → resolved або помилка
+                logger.debug(f"Gamma prices sum={price_sum:.3f} — можливо resolved, skip MTM")
+                return None
+            # YES price = менша з двох (YES < 0.5 для BUY_NO ринків)
+            yes_price = min(p0, p1)  # YES price завжди ≤ NO price для наших ринків
             _mtm_price_cache[condition_id] = (time.time(), yes_price)
             return yes_price
         elif len(prices) == 1:
