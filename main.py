@@ -193,7 +193,16 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
 
     # ── 6. Відкриття позицій ─────────────────────────────────
     for edge_result in tradeable[:2]:  # Не більше 2 нових позицій за цикл
+        # Перевірка ліміту активних позицій
+        if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
+            logger.info(f"📊 Ліміт {config.MAX_ACTIVE_POSITIONS} позицій досягнуто — пропускаємо")
+            break
         if not safeguard.check_hourly_trade_limit():
+            break
+        # Перевіряємо ліміт активних позицій
+        portfolio = get_portfolio_summary()
+        if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
+            logger.info(f"📊 Ліміт позицій {config.MAX_ACTIVE_POSITIONS} — нові не відкриваємо")
             break
 
         size = getattr(edge_result, 'size_usd', edge_result.edge * current_capital * config.MAX_POSITION_PCT)

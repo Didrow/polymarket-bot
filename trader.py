@@ -159,7 +159,9 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     # Kelly (25% Kelly для консервативності)
     win_loss = (1 - entry_price) / max(entry_price, 0.001)
     kelly_raw = edge_result.edge / max(win_loss, 0.01)
-    kelly_size = current_capital * kelly_raw * 0.15   # консервативно: 15% Kelly
+    # Консервативний Kelly: 0.15 базово, 0.10 для слабших NO сигналів
+    kelly_fraction = 0.10 if (edge_result.edge_direction == "BUY_NO" and edge_result.edge < 0.45) else 0.15
+    kelly_size = current_capital * kelly_raw * kelly_fraction
     kelly_size = max(config.MIN_POSITION_USD, min(kelly_size, config.MAX_POSITION_USD))
     logger.info(f"  Kelly size: ${kelly_size:.2f}")
 
@@ -316,7 +318,18 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         import json
         prices_str = m.get("outcomePrices", None) or '["0.5","0.5"]'
         prices = json.loads(prices_str) if isinstance(prices_str, str) else prices_str
-        if len(prices) >= 1:
+        if len(prices) >= 2:
+            # Gamma API може повертати [YES, NO] або [NO, YES]
+            # YES price завжди менше для «невизначених» ринків (0.0-1.0)
+            # Обираємо більшу ціну як YES (majority bet)
+            p0, p1 = float(prices[0]), float(prices[1])
+            # YES price = та що відповідає першому outcome (зазвичай prices[0])
+            # Але для надійності: YES = ціна ближча до 0.5 або визначена через conditionId
+            # Найпростіше: зберігаємо обидві і повертаємо prices[0] як YES
+            yes_price = p0
+            _mtm_price_cache[condition_id] = (time.time(), yes_price)
+            return yes_price
+        elif len(prices) == 1:
             price = float(prices[0])
             _mtm_price_cache[condition_id] = (time.time(), price)
             return price

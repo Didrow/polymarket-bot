@@ -559,7 +559,8 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
         else:
             metar_w = 0.08  # далеко — невелика вага
         forecasts_w.append((metar, metar_w))
-        logger.debug(f"METAR {city}: вага={metar_w:.2f} ({hours_to_resolution:.1f}h до resolution)")
+        if metar_w > 0.10:
+            logger.debug(f"METAR {city}: вага={metar_w:.2f} ({hours_to_resolution:.1f}h до resolution)")
 
     # 6. Стандартний forecast як останній fallback
     if not forecasts_w:
