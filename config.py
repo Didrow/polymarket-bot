@@ -27,7 +27,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # було 0.025 → safeguards блокував $4 на $100
 MIN_POSITION_USD: float = 2.0
 BASE_POSITION_USD: float = 3.0
-MAX_ACTIVE_POSITIONS: int = 5           # не більше 5 відкритих позицій
+MAX_ACTIVE_POSITIONS: int = 4           # не більше 5 відкритих позицій
 MAX_DRAWDOWN_PCT: float = 0.25
 STOP_LOSS_PCT: float = 0.15
 
@@ -35,7 +35,7 @@ STOP_LOSS_PCT: float = 0.15
 ENABLE_COLDMATH_TAIL_NO: bool = True
 COLDMATH_MIN_ASK_NO: float = 0.95      # підвищено — тільки NO ≥95¢      # NO price ≥ 0.93
 COLDMATH_MAX_ASK_NO: float = 0.99
-COLDMATH_MIN_EDGE_NO: float = 0.25        # підвищено: відсіює weak NO tail        # підвищено: вимагаємо сильніший edge     # мінімальний edge
+COLDMATH_MIN_EDGE_NO: float = 0.22        # підвищено: відсіює weak NO tail        # підвищено: вимагаємо сильніший edge     # мінімальний edge
 COLDMATH_MAX_SIZE_USD: float = 2.0         # знижено: макс $2.5 на NO tail угоду     # $5 на угоду
 
 # ── EXTREME TAIL YES (BUY YES @ 1-5¢) ────────────────────────

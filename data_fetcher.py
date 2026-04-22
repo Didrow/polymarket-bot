@@ -546,23 +546,36 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
     if fc:
         forecasts_w.append((fc, 0.25))
 
-    # 5. METAR — real-time airport observation (динамічна вага)
+    # 5. METAR — real-time airport observation
+    # ВАЖЛИВО: METAR = поточна T, НЕ денний максимум!
+    # Busan вночі = 13°C, але денний max = 20°C → METAR спотворює прогноз.
+    # Включаємо ТІЛЬКИ якщо hours_to_resolution <= 6h (T зараз ≈ денному max)
+    # І тільки якщо gap між METAR і GFS <= 5°C (немає нічного ефекту).
     metar = fetch_metar(city)
-    if metar:
-        # Динамічна вага: чим ближче до resolution, тим важливіше
-        if hours_to_resolution <= 2.0:
-            metar_w = 0.50
-        elif hours_to_resolution <= 6.0:
-            metar_w = 0.35
-        elif hours_to_resolution <= 12.0:
-            metar_w = 0.20
-        else:
-            metar_w = 0.08  # далеко — невелика вага
-        forecasts_w.append((metar, metar_w))
-        if metar_w > 0.10:
-            logger.debug(f"METAR {city}: вага={metar_w:.2f} ({hours_to_resolution:.1f}h до resolution)")
-
-    # 6. Стандартний forecast як останній fallback
+    if metar and hours_to_resolution <= 6.0:
+        gfs_fc = next(
+            (fc for fc, _ in forecasts_w
+             if fc and fc.sources_used and
+             any("GFS" in s or "NOAA" in s for s in fc.sources_used)),
+            None
+        )
+        metar_ok = True
+        if gfs_fc:
+            gap = abs(metar.temp_high_c - gfs_fc.temp_high_c)
+            if gap > 5.0:
+                logger.debug(
+                    f"METAR {city}: gap {gap:.1f}°C > 5°C "
+                    f"(METAR={metar.temp_high_c:.1f} GFS={gfs_fc.temp_high_c:.1f}) — нічна T, skip"
+                )
+                metar_ok = False
+        if metar_ok:
+            metar_w = 0.50 if hours_to_resolution <= 2.0 else (
+                      0.35 if hours_to_resolution <= 4.0 else 0.20)
+            forecasts_w.append((metar, metar_w))
+            logger.info(
+                f"METAR {city}: {metar.temp_high_c:.1f}°C вага={metar_w:.2f} "
+                f"({hours_to_resolution:.1f}h)"
+            )
     if not forecasts_w:
         fc = fetch_open_meteo(city, "forecast")
         if fc:
