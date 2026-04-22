@@ -224,8 +224,8 @@ def place_trade(
         # BUY_NO: платимо ціну NO = 1 - YES bid
         # midpoint_yes надійніше ніж best_bid_yes (уникаємо 0.00)
         no_price = 1.0 - market.midpoint_yes
-        if no_price < 0.01:
-            logger.debug(f"NO price {no_price:.4f} < 0.01 — неліквідний ринок, пропускаємо")
+        if no_price < 0.015:  # market=1.00 → NO price = 0 → skip
+            logger.debug(f"NO price {no_price:.4f} < 0.015 — market майже вирішений, пропускаємо")
             return None  # не торгуємо якщо NO майже недоступне
         price = no_price
     price = max(price, 0.001)  # абсолютний мінімум

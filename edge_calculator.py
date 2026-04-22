@@ -262,6 +262,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
     market_prob = market.midpoint_yes
 
+    # Ринок практично вирішений якщо YES≈1.00 (NO price ≈ 0)
+    # Не відображаємо як tradeable — trader все одно заблокує
+    if (1.0 - market_prob) < 0.015:
+        logger.debug(f"SKIP: market YES={market_prob:.3f} → NO price < 0.015")
+        return None
+
     # ── SANITY CHECK (BUG-F захист) ──────────────────────────────
     # Якщо ринок "below X°F" і поріг у °C < forecast - 8°C
     # → ймовірність буде < 5% (не наш edge), пропускаємо
