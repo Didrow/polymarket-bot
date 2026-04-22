@@ -48,6 +48,10 @@ class Position:
     def update_pnl(self, current_price: float):
         self.current_price = current_price
         if self.entry_price > 0:
+            # Захист від хибного PnL: зміна > 500% = помилка API
+            raw_change = abs(current_price - self.entry_price) / self.entry_price
+            if raw_change > 5.0:
+                return  # Нереалістична зміна — залишаємо попередній PnL
             self.pnl_pct = (current_price - self.entry_price) / self.entry_price
             self.pnl_usd = self.pnl_pct * self.size_usd
 
@@ -285,9 +289,10 @@ MTM_CACHE_TTL = 90  # секунд
 def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     """
     Mark-to-market: поточна YES price через Gamma API.
-    Повертає None якщо недоступно.
+    ВИПРАВЛЕНО: bestAsk/bestBid замість outcomePrices.
+    outcomePrices = ОСТАННЯ УГОДА (може бути тиждень тому на tail ринках).
+    bestAsk/bestBid = РЕАЛЬНИЙ СТАКАН ПРЯМО ЗАРАЗ.
     """
-    # Перевіряємо кеш
     cached = _mtm_price_cache.get(condition_id)
     if cached and time.time() - cached[0] < MTM_CACHE_TTL:
         return cached[1]
@@ -305,36 +310,41 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         if not markets:
             return None
         m = markets[0]
-        import json
-        prices_str = m.get("outcomePrices", None) or '["0.5","0.5"]'
-        prices = json.loads(prices_str) if isinstance(prices_str, str) else prices_str
-        if len(prices) >= 2:
-            # Gamma API може повертати [YES, NO] або [NO, YES]
-            # YES price завжди менше для «невизначених» ринків (0.0-1.0)
-            # Обираємо більшу ціну як YES (majority bet)
-            p0, p1 = float(prices[0]), float(prices[1])
-            # Логування для діагностики
-            logger.debug(f"Gamma prices {condition_id[:8]}: p0={p0:.3f} p1={p1:.3f}")
-            # Валідація: ринок відкритий якщо sum ≈ 1.0 (market maker fee ~0.02)
-            price_sum = p0 + p1
-            if abs(price_sum - 1.0) > 0.15:  # Занадто далеко від 1.0 → resolved або помилка
-                logger.debug(f"Gamma prices sum={price_sum:.3f} — можливо resolved, skip MTM")
-                return None
-            # YES price = менша з двох (YES < 0.5 для BUY_NO ринків)
-            # Polymarket API: prices[0] = YES token (офіційна документація)
-            yes_price = p0
-            if yes_price > 0.99 or yes_price < 0.005:
-                return None  # resolved або помилка — skip
-            _mtm_price_cache[condition_id] = (time.time(), yes_price)
-            return yes_price
-        elif len(prices) == 1:
-            price = float(prices[0])
-            _mtm_price_cache[condition_id] = (time.time(), price)
-            return price
+
+        # Якщо ринок закритий — resolution polling сам зафіксує PnL
+        if m.get("closed", False) or m.get("resolved", False):
+            logger.debug(f"MTM skip: ринок {condition_id[:12]} closed/resolved")
+            return None
+
+        # ПРАВИЛЬНИЙ MTM: беремо поточний стан стакану
+        best_ask = float(m.get("bestAsk") or 0.0)
+        best_bid = float(m.get("bestBid") or 0.0)
+
+        logger.debug(
+            f"MTM {condition_id[:8]}: ask={best_ask:.3f} bid={best_bid:.3f}"
+        )
+
+        # Стакан порожній (ринок неліквідний або закривається) — зберігаємо старий PnL
+        if best_ask == 0.0 and best_bid == 0.0:
+            return None
+
+        # Midpoint як YES price
+        if best_ask > 0 and best_bid > 0:
+            yes_price = (best_ask + best_bid) / 2.0
+        else:
+            yes_price = best_ask if best_ask > 0 else best_bid
+
+        # Фільтруємо екстремальні значення (resolved або API помилка)
+        if yes_price > 0.99 or yes_price < 0.005:
+            logger.debug(f"MTM skip: extreme YES price={yes_price:.4f}")
+            return None
+
+        _mtm_price_cache[condition_id] = (time.time(), yes_price)
+        return yes_price
+
     except Exception as e:
         logger.debug(f"Mark-to-market error {condition_id[:12]}: {e}")
     return None
-
 
 def check_and_close_positions(clob_client) -> List[Position]:
     """
