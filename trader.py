@@ -201,22 +201,11 @@ def place_trade(
     market = edge_result.market
 
     # Дедуплікація з перевіркою значної зміни ціни
+    # Проста надійна дедуплікація: один ринок = одна позиція.
+    # Якщо ціна змінилась — resolution polling сам закриє позицію з правильним PnL.
     if market.condition_id in _active_positions:
-        existing = _active_positions[market.condition_id]
-        # ВАЖЛИВО: використовуємо той самий метод розрахунку ціни що в entry_price
-        # щоб уникнути хибного 9900% price_change через best_bid=0
-        if edge_result.edge_direction == "BUY_YES":
-            price_now = market.best_ask_yes
-        else:
-            price_now = max(1.0 - market.midpoint_yes, 0.01)  # NO price = 1 - midpoint
-        price_change = abs(price_now - existing.entry_price) / max(existing.entry_price, 0.001)
-        # Переоткриваємо тільки якщо ціна змінилась > 40% (суттєва нова інформація)
-        # 40% замість 30% для стабільності при дешевих NO позиціях ($0.01)
-        if price_change < 0.40:
-            logger.info(f"⏭ Пропускаємо: {market.question[:50]} | ціна {existing.entry_price:.3f}→{price_now:.3f} ({price_change:.0%} < 40%)")
-            return None
-        else:
-            logger.info(f"Ціна змінилась {price_change:.0%} → переоткриваємо позицію")
+        logger.debug(f"⏭ Skip: позиція вже відкрита | {market.question[:50]}")
+        return None
 
     if edge_result.edge_direction == "BUY_YES":
         price = market.best_ask_yes  # платимо ASK за YES
@@ -332,7 +321,10 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
                 logger.debug(f"Gamma prices sum={price_sum:.3f} — можливо resolved, skip MTM")
                 return None
             # YES price = менша з двох (YES < 0.5 для BUY_NO ринків)
-            yes_price = min(p0, p1)  # YES price завжди ≤ NO price для наших ринків
+            # Polymarket API: prices[0] = YES token (офіційна документація)
+            yes_price = p0
+            if yes_price > 0.99 or yes_price < 0.005:
+                return None  # resolved або помилка — skip
             _mtm_price_cache[condition_id] = (time.time(), yes_price)
             return yes_price
         elif len(prices) == 1:
@@ -378,9 +370,15 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 effective_price = current_price
             pos.update_pnl(effective_price)
 
-        # 3. Stop-loss
-        if pos.pnl_pct <= -config.STOP_LOSS_PCT:
-            logger.info(f"🔴 Stop-loss: {pos.direction} | PnL ${pos.pnl_usd:+.2f} ({pos.pnl_pct:+.1%})")
+        # 3. Stop-loss — динамічний для tail угод
+        # При entry < 10¢ (tail): шум може бути 20-30% → широкий стоп
+        # При entry ≥ 10¢ (normal): стандартний стоп
+        dynamic_sl = 0.70 if pos.entry_price < 0.10 else config.STOP_LOSS_PCT
+        if pos.pnl_pct <= -dynamic_sl:
+            logger.info(
+                f"🔴 Stop-loss ({dynamic_sl:.0%}): {pos.direction} | "
+                f"PnL ${pos.pnl_usd:+.2f} ({pos.pnl_pct:+.1%}) | entry={pos.entry_price:.3f}"
+            )
             closed.append(pos)
             del _active_positions[cid]
 
