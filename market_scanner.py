@@ -116,9 +116,16 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         if no_price <= 0:
             no_price = 0.001
 
-        best_ask = float(raw.get("bestAsk") or yes_price)
-        best_bid = float(raw.get("bestBid") or yes_price)
-        midpoint = (best_ask + best_bid) / 2
+        # ВИПРАВЛЕННЯ: "0.0 or yes_price" повертає yes_price навіть якщо стакан порожній!
+        # Правильно: явно перевіряємо None vs 0
+        _raw_ask = raw.get("bestAsk")
+        _raw_bid = raw.get("bestBid")
+        best_ask = float(_raw_ask) if _raw_ask is not None else 0.0
+        best_bid = float(_raw_bid) if _raw_bid is not None else 0.0
+        # Якщо немає продавців — купити можна тільки за 100¢ (неліквідний)
+        if best_ask == 0.0:
+            best_ask = 1.0
+        midpoint = (best_ask + best_bid) / 2.0
 
         question = raw.get("question", "") or raw.get("title", "")
         description = raw.get("description", "") or ""

@@ -48,10 +48,8 @@ class Position:
     def update_pnl(self, current_price: float):
         self.current_price = current_price
         if self.entry_price > 0:
-            # Захист від хибного PnL: зміна > 500% = помилка API
-            raw_change = abs(current_price - self.entry_price) / self.entry_price
-            if raw_change > 5.0:
-                return  # Нереалістична зміна — залишаємо попередній PnL
+            # MTM вже захищений в _get_market_price_from_gamma (bestAsk/bestBid)
+            # Tail YES може дати +900% — це не помилка, це прибуток
             self.pnl_pct = (current_price - self.entry_price) / self.entry_price
             self.pnl_usd = self.pnl_pct * self.size_usd
 
