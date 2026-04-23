@@ -51,19 +51,17 @@ class WeatherForecast:
     prob_snow: float = 0.0
     sources_used: List[str] = field(default_factory=list)
 
-    def prob_above_temp_c(self, threshold_c: float) -> float:
-        """
-        BUG-9 FIX: правильний нормальний розподіл.
-        Стара формула (обернена sigmoid) при temp=20,thr=18 давала 0.246!
-        Нова: при temp=20,thr=18 → 0.788 (правильно)
-        """
-        if self.temp_high_c == 0.0:
+    def prob_above_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
+        tc = self.temp_low_c if is_low else self.temp_high_c
+        if tc == 0.0:
             return 0.50
-        diff = self.temp_high_c - threshold_c
+        diff = tc - threshold_c
         sigma = 2.5
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
         return max(0.02, min(0.98, round(prob, 4)))
 
+    def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
+        return 1.0 - self.prob_above_temp_c(threshold_c, is_low)
     def prob_below_temp_c(self, threshold_c: float) -> float:
         return 1.0 - self.prob_above_temp_c(threshold_c)
 

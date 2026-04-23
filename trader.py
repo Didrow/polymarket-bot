@@ -327,15 +327,20 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
             f"MTM {condition_id[:8]}: ask={best_ask:.4f} bid={best_bid:.4f}"
         )
 
-        # КРИТИЧНО: якщо БУДЬ-ЯКА сторона стакану порожня → неможливо визначити
-        # чесну ціну. Заморожуємо старий PnL, не оновлюємо.
-        # bid=0 → yes_price=ask=0.99 → фейковий +16000% прибуток
-        # ask=0 → yes_price=bid=0.001 → фейковий стоп-лос
+        # КРИТИЧНО: якщо БУДЬ-ЯКА сторона стакану порожня → заморожуємо PnL
         if best_ask == 0.0 or best_bid == 0.0:
             logger.debug(f"MTM skip: однобокий стакан (ask={best_ask} bid={best_bid})")
             return None
 
-        # Чесна середина двосторонього стакану
+        # КРИТИЧНО: "пиловий стакан" — хтось забув bid=0.001 і ask=0.99
+        # midpoint = 0.495 → фіктивний +8000% на tail угоді за 0.7¢
+        # Ліквідний ринок має спред < 5%; порожній — > 25%
+        spread = best_ask - best_bid
+        if spread > 0.25:
+            logger.debug(f"MTM skip: пиловий стакан (spread={spread:.3f})")
+            return None
+
+        # Чесна середина нормального двостороннього стакану
         yes_price = (best_ask + best_bid) / 2.0
 
         # Фільтр resolved/екстремальних значень

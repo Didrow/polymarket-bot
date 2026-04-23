@@ -188,18 +188,20 @@ def estimate_market_probability(
         unit_label = f"{threshold_c:.0f}°C(fallback)"
 
     kind = _detect_market_kind(market.question)
-    tc = forecast.temp_high_c  # наш прогноз у °C
+    # КРИТИЧНО: 'lowest temperature' ринки → використовуємо temp_low_c!
+    is_low = 'lowest' in market.question.lower()
+    tc = forecast.temp_low_c if is_low else forecast.temp_high_c
 
     if tc == 0.0 or tc is None:
         return 0.50, threshold_c, kind
 
     # ── Above ────────────────────────────────────────────────────
     if kind == "above":
-        p = forecast.prob_above_temp_c(threshold_c)
+        p = forecast.prob_above_temp_c(threshold_c, is_low)
 
     # ── Below ────────────────────────────────────────────────────
     elif kind == "below":
-        p = forecast.prob_below_temp_c(threshold_c)
+        p = forecast.prob_below_temp_c(threshold_c, is_low)
 
     # ── Categorical bin ──────────────────────────────────────────
     else:
