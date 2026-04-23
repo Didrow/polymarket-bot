@@ -287,9 +287,12 @@ MTM_CACHE_TTL = 90  # секунд
 def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     """
     Mark-to-market: поточна YES price через Gamma API.
-    ВИПРАВЛЕНО: bestAsk/bestBid замість outcomePrices.
-    outcomePrices = ОСТАННЯ УГОДА (може бути тиждень тому на tail ринках).
-    bestAsk/bestBid = РЕАЛЬНИЙ СТАКАН ПРЯМО ЗАРАЗ.
+    Використовує bestAsk/bestBid (реальний стакан), НЕ outcomePrices.
+    
+    ЗАХИСТИ:
+    - Закритий ринок → None (resolution polling сам закриє)
+    - Порожній стакан (ask=0 або bid=0) → None (заморожуємо старий PnL)
+    - Однобокий стакан → None (не можна визначити чесну ціну)
     """
     cached = _mtm_price_cache.get(condition_id)
     if cached and time.time() - cached[0] < MTM_CACHE_TTL:
@@ -309,39 +312,42 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
             return None
         m = markets[0]
 
-        # Якщо ринок закритий — resolution polling сам зафіксує PnL
+        # Закритий/resolved ринок — чекаємо resolution polling
         if m.get("closed", False) or m.get("resolved", False):
-            logger.debug(f"MTM skip: ринок {condition_id[:12]} closed/resolved")
+            logger.debug(f"MTM skip: ринок {condition_id[:12]} closed")
             return None
 
-        # ПРАВИЛЬНИЙ MTM: беремо поточний стан стакану
-        best_ask = float(m.get("bestAsk") or 0.0)
-        best_bid = float(m.get("bestBid") or 0.0)
+        # Беремо реальний стакан (не outcomePrices — це остання угода)
+        _raw_ask = m.get("bestAsk")
+        _raw_bid = m.get("bestBid")
+        best_ask = float(_raw_ask) if _raw_ask is not None else 0.0
+        best_bid = float(_raw_bid) if _raw_bid is not None else 0.0
 
         logger.debug(
-            f"MTM {condition_id[:8]}: ask={best_ask:.3f} bid={best_bid:.3f}"
+            f"MTM {condition_id[:8]}: ask={best_ask:.4f} bid={best_bid:.4f}"
         )
 
-        # Стакан порожній (ринок неліквідний або закривається) — зберігаємо старий PnL
-        if best_ask == 0.0 and best_bid == 0.0:
+        # КРИТИЧНО: якщо БУДЬ-ЯКА сторона стакану порожня → неможливо визначити
+        # чесну ціну. Заморожуємо старий PnL, не оновлюємо.
+        # bid=0 → yes_price=ask=0.99 → фейковий +16000% прибуток
+        # ask=0 → yes_price=bid=0.001 → фейковий стоп-лос
+        if best_ask == 0.0 or best_bid == 0.0:
+            logger.debug(f"MTM skip: однобокий стакан (ask={best_ask} bid={best_bid})")
             return None
 
-        # Midpoint як YES price
-        if best_ask > 0 and best_bid > 0:
-            yes_price = (best_ask + best_bid) / 2.0
-        else:
-            yes_price = best_ask if best_ask > 0 else best_bid
+        # Чесна середина двосторонього стакану
+        yes_price = (best_ask + best_bid) / 2.0
 
-        # Фільтруємо екстремальні значення (resolved або API помилка)
+        # Фільтр resolved/екстремальних значень
         if yes_price > 0.99 or yes_price < 0.005:
-            logger.debug(f"MTM skip: extreme YES price={yes_price:.4f}")
+            logger.debug(f"MTM skip: extreme price={yes_price:.4f}")
             return None
 
         _mtm_price_cache[condition_id] = (time.time(), yes_price)
         return yes_price
 
     except Exception as e:
-        logger.debug(f"Mark-to-market error {condition_id[:12]}: {e}")
+        logger.debug(f"MTM error {condition_id[:12]}: {e}")
     return None
 
 def check_and_close_positions(clob_client) -> List[Position]:
@@ -378,13 +384,17 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 effective_price = current_price
             pos.update_pnl(effective_price)
 
-        # 3. Stop-loss — динамічний для tail угод
-        # При entry < 10¢ (tail): шум може бути 20-30% → широкий стоп
-        # При entry ≥ 10¢ (normal): стандартний стоп
-        dynamic_sl = 0.70 if pos.entry_price < 0.10 else config.STOP_LOSS_PCT
-        if pos.pnl_pct <= -dynamic_sl:
+        # 3. Stop-loss
+        # Tail угоди (entry < 10¢) — бінарні опціони: або $0 або profit.
+        # Стоп-лос їм шкодить: шум в стакані на рівні 0.3¢ = ±50% коливань.
+        # Чекаємо resolution — він і є "закриттям" tail угод.
+        if pos.entry_price < 0.10:
+            continue  # tail: без стоп-лосу
+
+        # Для звичайних позицій (entry ≥ 10¢) — стандартний стоп
+        if pos.pnl_pct <= -config.STOP_LOSS_PCT:
             logger.info(
-                f"🔴 Stop-loss ({dynamic_sl:.0%}): {pos.direction} | "
+                f"🔴 Stop-loss ({config.STOP_LOSS_PCT:.0%}): {pos.direction} | "
                 f"PnL ${pos.pnl_usd:+.2f} ({pos.pnl_pct:+.1%}) | entry={pos.entry_price:.3f}"
             )
             closed.append(pos)
