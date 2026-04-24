@@ -276,11 +276,15 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     kind = _detect_market_kind(market.question)
     _, unit = _parse_threshold_with_unit(market.question)
 
+    # Правильна температура для логів і sanity check
+    is_low = 'lowest' in market.question.lower()
+    tc = forecast.temp_low_c if is_low else forecast.temp_high_c
+
     if kind == "below" and unit == 'F':
-        temp_gap = forecast.temp_high_c - threshold_c
+        temp_gap = tc - threshold_c
         if temp_gap > 8.0:
             logger.debug(
-                f"SANITY SKIP °F below: forecast {forecast.temp_high_c:.1f}°C "
+                f"SANITY SKIP °F below: forecast {tc:.1f}°C "
                 f"> threshold {threshold_c:.1f}°C (+{temp_gap:.1f}°C gap) | {market.question[:50]}"
             )
             return None
@@ -291,7 +295,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     eff_yes  = edge_yes * confidence
     eff_no   = edge_no  * confidence
 
-    fc_temp = f"{forecast.temp_high_c:.1f}°C"
+    fc_temp = f"{tc:.1f}°C"
     src = "+".join(s.split("_")[0] for s in (forecast.sources_used or [])[:2])
     no_price = 1.0 - market_prob
 

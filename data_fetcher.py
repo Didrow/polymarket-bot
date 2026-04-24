@@ -62,8 +62,6 @@ class WeatherForecast:
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
         return 1.0 - self.prob_above_temp_c(threshold_c, is_low)
-    def prob_below_temp_c(self, threshold_c: float) -> float:
-        return 1.0 - self.prob_above_temp_c(threshold_c)
 
     def prob_rain_or_snow(self) -> float:
         return max(0.02, min(0.98, max(self.prob_rain, self.prob_snow)))
