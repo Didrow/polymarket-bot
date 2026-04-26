@@ -365,6 +365,17 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         if eff_yes >= eff_no:
             direction = "BUY_YES"
             eff_edge  = eff_yes
+            # Ghost-market guard: ринки з ask < 5¢ торгуються ТІЛЬКИ через
+            # EXTREME_TAIL_YES (edge >= EXTREME_TAIL_MIN_EDGE_YES).
+            # Якщо вони тут — значить edge недостатній для tail стратегії,
+            # але market_prob ≈ 0 створює хибний "великий" edge у standard path.
+            if market.best_ask_yes < config.EXTREME_TAIL_MAX_ASK_YES:
+                logger.debug(
+                    f"SKIP: standard BUY_YES best_ask={market.best_ask_yes:.4f} "
+                    f"< {config.EXTREME_TAIL_MAX_ASK_YES:.2f} — ghost market, "
+                    f"потрібен EXTREME_TAIL edge>={config.EXTREME_TAIL_MIN_EDGE_YES:.0%}"
+                )
+                return None
             reason = f"YES {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
         else:
             direction = "BUY_NO"
