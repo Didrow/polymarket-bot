@@ -105,7 +105,7 @@ class SafeguardManager:
                 f"— можлива аномалія прогнозу!"
             )
 
-    def check_hourly_trade_limit(self, max_per_hour: int = 50) -> bool:  # підвищено
+    def check_hourly_trade_limit(self, max_per_hour: int = 50) -> bool:
         """Не більше N угод на годину."""
         current_hour = datetime.now().hour
         if current_hour != self._hour_mark:
@@ -138,12 +138,11 @@ class SafeguardManager:
             logger.debug(f"Розмір ${size_usd:.2f} < мінімум ${config.MIN_POSITION_USD}")
             return False
 
-        # Максимальний % від капіталу — у DRY_RUN тільки warning, не блокуємо
+        # Максимальний % від капіталу
         if size_usd > capital * config.MAX_POSITION_PCT:
             if config.DRY_RUN:
                 logger.info(f"DRY_RUN: розмір ${size_usd:.2f} ({size_usd/capital:.1%} капіталу)")
-                # Зменшуємо до ліміту
-                return True  # Дозволяємо, trader.py обмежить розмір
+                return True
             else:
                 logger.warning(f"Розмір ${size_usd:.2f} > {config.MAX_POSITION_PCT:.0%} від капіталу")
                 return False
@@ -174,22 +173,31 @@ class SafeguardManager:
         """Записати відкриття угоди."""
         self._trade_count_hour += 1
         self.state.total_trades += 1
-        if not config.DRY_RUN:                     # ← ВАЖЛИВО
+        if not config.DRY_RUN:
             self.state.current_capital -= size_usd
         self.save_state()
 
     def record_trade_close(self, pnl_usd: float):
-        """Записати закриття угоди з PnL."""
-        if not config.DRY_RUN:                     # ← ВАЖЛИВО
+        """Записати закриття угоди з PnL.
+
+        ВИПРАВЛЕННЯ: статистика (winning_trades, losing_trades, total_pnl)
+        оновлюється ЗАВЖДИ — і в DRY_RUN, і в реальному режимі.
+        Тільки current_capital (реальний баланс гаманця) змінюється
+        виключно в реальному режимі.
+        """
+        # Статистика — завжди (DRY_RUN валідація потребує WIN/LOSS лічильників)
+        self.state.total_pnl += pnl_usd
+        if pnl_usd > 0:
+            self.state.winning_trades += 1
+        else:
+            self.state.losing_trades += 1
+
+        # Реальний баланс гаманця — тільки в живому режимі
+        if not config.DRY_RUN:
             self.state.current_capital += pnl_usd
-            self.state.total_pnl += pnl_usd
-            if pnl_usd > 0:
-                self.state.winning_trades += 1
-            else:
-                self.state.losing_trades += 1
-        # піковий капітал оновлюємо завжди (для статистики)
-        if self.state.current_capital > self.state.peak_capital:
-            self.state.peak_capital = self.state.current_capital
+            if self.state.current_capital > self.state.peak_capital:
+                self.state.peak_capital = self.state.current_capital
+
         self.save_state()
 
     def print_summary(self):
