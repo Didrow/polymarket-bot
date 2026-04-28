@@ -139,12 +139,28 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
             mtype = "snow"
 
         threshold = None
-        m = re.search(r'(\d+\.?\d*)\s*[°]?\s*[CcFf]', question)
-        if m:
-            try:
-                threshold = float(m.group(1))
-            except Exception:
-                pass
+        # Каскад патернів для вилучення температурного порогу.
+        # Порядок важливий: специфічні патерни йдуть першими.
+        _threshold_patterns = [
+            # P1: "20°C", "-5°F", "20 °C"  — явний градус + одиниця (найнадійніший)
+            r'(-?\d+\.?\d*)\s*°\s*[CcFf](?!\w)',
+            # P2: "20C", "20F"  — без пробілу, але з (?!\w) щоб не зачепити "Chicago", "Fahrenheit"
+            r'(-?\d+\.?\d*)[CcFf](?!\w)',
+            # P3: "be 20 on April" / "be 20 or below"  — Polymarket categorical без одиниці
+            r'\bbe\s+(-?\d+\.?\d*)\s+(?:on\b|or\b)',
+            # P4: "exceed 20", "above 20"  — порогові формулювання
+            r'\b(?:exceed|above|over)\s+(-?\d+\.?\d*)',
+            # P5: "below 20", "under 20"  — нижні пороги
+            r'\b(?:below|under)\s+(-?\d+\.?\d*)',
+        ]
+        for _pat in _threshold_patterns:
+            _m = re.search(_pat, question, re.IGNORECASE)
+            if _m:
+                try:
+                    threshold = float(_m.group(1))
+                    break
+                except Exception:
+                    pass
 
         is_above = None
         if any(w in full for w in ["above", "exceed", "or higher"]):
