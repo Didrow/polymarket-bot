@@ -414,3 +414,8 @@ def get_portfolio_summary() -> Dict:
         "active_positions": len(_active_positions),
         "total_pnl": total_pnl,
     }
+
+
+def get_active_positions() -> Dict:
+    """Повертає словник активних позицій (для збереження стану)."""
+    return _active_positions

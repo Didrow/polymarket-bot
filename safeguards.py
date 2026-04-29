@@ -31,6 +31,13 @@ class BotState:
     halt_reason: str = ""
     start_time: str = datetime.now(timezone.utc).isoformat()
     last_update: str = datetime.now(timezone.utc).isoformat()
+    # Збереження відкритих позицій між рестартами (v24-fix)
+    # Формат: {condition_id: {question, direction, entry_price, size_usd, shares, entry_time, edge_at_entry, city, market_type}}
+    open_positions: Dict = None
+
+    def __post_init__(self):
+        if self.open_positions is None:
+            self.open_positions = {}
 
     @property
     def win_rate(self) -> float:
@@ -82,6 +89,59 @@ class SafeguardManager:
                 json.dump(asdict(self.state), f, indent=2)
         except Exception as e:
             logger.error(f"Помилка збереження стану: {e}")
+
+    def save_positions(self, active_positions: dict):
+        """Зберігає відкриті позиції в bot_state.json (захист від рестарту)."""
+        try:
+            serialized = {}
+            for cid, pos in active_positions.items():
+                serialized[cid] = {
+                    "question":      pos.question,
+                    "direction":     pos.direction,
+                    "token_id":      pos.token_id,
+                    "entry_price":   pos.entry_price,
+                    "size_usd":      pos.size_usd,
+                    "shares":        pos.shares,
+                    "entry_time":    pos.entry_time.isoformat() if hasattr(pos.entry_time, 'isoformat') else str(pos.entry_time),
+                    "edge_at_entry": pos.edge_at_entry,
+                    "city":          pos.city,
+                    "market_type":   pos.market_type,
+                }
+            self.state.open_positions = serialized
+            self.save_state()
+        except Exception as e:
+            logger.error(f"Помилка збереження позицій: {e}")
+
+    def restore_positions(self) -> dict:
+        """Відновлює позиції з bot_state.json після рестарту."""
+        import trader as _trader
+        from datetime import timezone as _tz
+        restored = {}
+        try:
+            for cid, d in self.state.open_positions.items():
+                entry_time = datetime.fromisoformat(d["entry_time"]) if "entry_time" in d else datetime.now(timezone.utc)
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                pos = _trader.Position(
+                    condition_id=cid,
+                    question=d.get("question", ""),
+                    direction=d.get("direction", "BUY_NO"),
+                    token_id=d.get("token_id", ""),
+                    entry_price=float(d.get("entry_price", 0)),
+                    current_price=float(d.get("entry_price", 0)),
+                    size_usd=float(d.get("size_usd", 0)),
+                    shares=float(d.get("shares", 0)),
+                    entry_time=entry_time,
+                    edge_at_entry=float(d.get("edge_at_entry", 0)),
+                    city=d.get("city", ""),
+                    market_type=d.get("market_type", "temperature"),
+                )
+                restored[cid] = pos
+            if restored:
+                logger.info(f"♻️  Відновлено {len(restored)} позицій після рестарту")
+        except Exception as e:
+            logger.error(f"Помилка відновлення позицій: {e}")
+        return restored
 
     # ─── Circuit Breakers ─────────────────────────────────────
 

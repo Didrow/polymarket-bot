@@ -37,7 +37,7 @@ import notifier
 from safeguards import SafeguardManager
 from market_scanner import fetch_weather_markets
 from edge_calculator import scan_all_edges
-from trader import place_trade, check_and_close_positions, get_portfolio_summary
+from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions
 from osint_module import scan_all_osint
 
 # ─── Логування ───────────────────────────────────────────────
@@ -254,6 +254,12 @@ def main():
     clob_client = init_clob_client()
     safeguard = SafeguardManager()
 
+    # ♻️ Відновлення позицій після рестарту (v24-fix: state persistence)
+    import trader as _trader
+    restored = safeguard.restore_positions()
+    if restored:
+        _trader._active_positions.update(restored)
+
     # Email startup notification
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
 
@@ -274,6 +280,9 @@ def main():
             )
 
             run_scan_cycle(safeguard, clob_client)
+
+            # Зберігаємо позиції після кожного циклу (захист від рестарту)
+            safeguard.save_positions(_trader._active_positions)
 
             # Щогодинний звіт
             if time.time() - last_summary_time >= 1800:  # Кожні 30 хвилин

@@ -227,12 +227,19 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     Розраховує edge для ринку.
 
     Фільтри (в порядку застосування):
+      0. Тільки temperature-ринки (блокуємо rain/snow — у них немає порогу °C)
       1. Місто у whitelist
       2. hours_to_resolution: 2–48h (не занадто пізно і не дуже далеко)
       3. Volume ≥ MIN_MARKET_VOLUME_USD
       4. Прогноз доступний і confidence ≥ 0.70
       5. Sanity check: якщо ринок у °F і прогноз тепло — не купуємо "below cold"
     """
+    # ── Фільтр 0: тільки температурні ринки ──────────────────
+    # Rain/snow-ринки не мають числового порогу → edge_calculator підставляє
+    # 0°C(fallback) і генерує хибні сигнали 80-87% edge. Блокуємо їх тут.
+    if market.market_type != "temperature":
+        return None
+
     city = market.detected_city
     if not city:
         return None
