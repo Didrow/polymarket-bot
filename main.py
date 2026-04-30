@@ -133,7 +133,7 @@ def init_clob_client():
 
 
 # ─── Один цикл сканування ────────────────────────────────────
-def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
+def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 0) -> None:
     """
     Один цикл бота:
     1. Перевірити безпеку
@@ -185,6 +185,15 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client) -> None:
             f"📂 Відкриті позиції: {portfolio['active_positions']} | "
             f"Unrealized PnL: ${portfolio['total_pnl']:+.2f}"
         )
+        # Детальний дамп позицій кожні 10 циклів для діагностики resolution
+        if cycle_count % 10 == 0:
+            for cid, pos in _trader._active_positions.items():
+                age_h = (datetime.now(timezone.utc) - pos.entry_time).total_seconds() / 3600
+                logger.info(
+                    f"  📌 {pos.direction} | {pos.question[:55]} | "
+                    f"entry={pos.entry_price:.4f} | size=${pos.size_usd:.2f} | "
+                    f"age={age_h:.1f}h | cid={cid[:20]}"
+                )
 
     if not tradeable:
         logger.info("Немає ринків з достатнім edge. Наступне сканування через "
@@ -279,7 +288,7 @@ def main():
                 f"💰 Капітал: ${cap:.2f} | PnL: {pnl_sign}${pnl:.2f} ───"
             )
 
-            run_scan_cycle(safeguard, clob_client)
+            run_scan_cycle(safeguard, clob_client, cycle_count)
 
             # Зберігаємо позиції після кожного циклу (захист від рестарту)
             safeguard.save_positions(_trader._active_positions)

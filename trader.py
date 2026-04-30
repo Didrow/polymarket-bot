@@ -75,53 +75,162 @@ class Position:
 # ══════════════════════════════════════════════════════════════════
 
 _resolution_cache: Dict[str, Optional[bool]] = {}
+_resolution_attempt_count: Dict[str, int] = {}
 
 
-def check_market_resolved(condition_id: str) -> Optional[bool]:
+def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
+    """Витягує resolved_yes з outcomePrices різних форматів."""
+    import json as _json
+    try:
+        if isinstance(outcome_prices, str):
+            prices = _json.loads(outcome_prices)
+        else:
+            prices = outcome_prices
+        if len(prices) >= 2:
+            yes_p = float(prices[0])
+            no_p  = float(prices[1])
+            if yes_p >= 0.99:
+                return True
+            if no_p >= 0.99:
+                return False
+            # Іноді значення 1 / 0 замість 0.99/0.01
+            if yes_p == 1.0:
+                return True
+            if no_p == 1.0:
+                return False
+    except Exception:
+        pass
+    return None
+
+
+def check_market_resolved(condition_id: str, position: "Position" = None) -> Optional[bool]:
     """
     Перевіряє чи ринок розв'язаний через Gamma API.
     Повертає True (YES win), False (NO win), None (ще відкритий).
+
+    Стратегії (в порядку спроб):
+      S1: GET /markets?conditionId=X
+      S2: GET /markets?id=X          (деякі ринки не мають conditionId)
+      S3: Timeout failsafe            (позиція відкрита > 42h → force-close)
     """
     if condition_id in _resolution_cache:
         return _resolution_cache[condition_id]
 
-    try:
-        r = requests.get(
-            f"{config.GAMMA_URL}/markets",
-            params={"conditionId": condition_id},
-            timeout=8
-        )
-        if r.status_code != 200:
+    _resolution_attempt_count[condition_id] = _resolution_attempt_count.get(condition_id, 0) + 1
+    attempt = _resolution_attempt_count[condition_id]
+
+    # ── S1: запит за conditionId ──────────────────────────────
+    def _try_query(param_name: str, param_val: str) -> Optional[bool]:
+        try:
+            r = requests.get(
+                f"{config.GAMMA_URL}/markets",
+                params={param_name: param_val},
+                timeout=10
+            )
+            if r.status_code != 200:
+                logger.info(f"🔍 Resolution S{param_name}: HTTP {r.status_code} | cid={condition_id[:16]}")
+                return None
+
+            data = r.json()
+            markets = data if isinstance(data, list) else data.get("markets", [])
+
+            if not markets:
+                logger.info(f"🔍 Resolution {param_name}={param_val[:16]}: empty response (0 ринків)")
+                return None
+
+            m = markets[0]
+            is_closed   = m.get("closed", False)
+            is_resolved = m.get("resolved", False)
+            is_active   = m.get("active", True)       # деякі API повертають active=false
+            end_date    = m.get("endDate", "")
+            outcome_prices = m.get("outcomePrices")
+            winner_idx  = m.get("winnerIndex")
+            question_short = m.get("question", "")[:50]
+
+            # Логуємо раз на 10 спроб (щоб не спамити) або на перших 3
+            if attempt <= 3 or attempt % 10 == 0:
+                logger.info(
+                    f"🔍 Resolution attempt #{attempt} | {param_name}={param_val[:16]} | "
+                    f"closed={is_closed} resolved={is_resolved} active={is_active} | "
+                    f"endDate={end_date[:16]} | prices={outcome_prices} | "
+                    f"winnerIdx={winner_idx} | q={question_short}"
+                )
+
+            # Ринок ще відкритий
+            if not is_closed and is_resolved is not True and is_active is not False:
+                return None
+
+            # Визначаємо переможця
+            # МЕТОД 1: tokens[].winner=True — офіційний метод Polymarket API (пріоритет)
+            tokens = m.get("tokens", [])
+            if tokens:
+                for token in tokens:
+                    if token.get("winner") is True:
+                        outcome = token.get("outcome", "").strip().upper()
+                        result = (outcome == "YES")
+                        logger.info(f"✅ Resolution via tokens.winner: outcome={outcome} → {'YES' if result else 'NO'} | cid={condition_id[:16]}")
+                        _resolution_cache[condition_id] = result
+                        return result
+
+            # МЕТОД 2: outcomePrices (ціни після resolution = 1.0 / 0.0)
+            result = _parse_outcome_prices(outcome_prices)
+            if result is not None:
+                logger.info(f"✅ Resolution via outcomePrices: {'YES' if result else 'NO'} | cid={condition_id[:16]}")
+                _resolution_cache[condition_id] = result
+                return result
+
+            # МЕТОД 3: winnerIndex
+            if winner_idx is not None:
+                result = (int(winner_idx) == 0)
+                logger.info(f"✅ Resolution via winnerIndex={winner_idx}: {'YES' if result else 'NO'} | cid={condition_id[:16]}")
+                _resolution_cache[condition_id] = result
+                return result
+
+            logger.info(f"⚠️  Market closed/resolved but winner unclear | prices={outcome_prices} idx={winner_idx}")
             return None
 
-        data = r.json()
-        markets = data if isinstance(data, list) else data.get("markets", [])
-        if not markets:
+        except Exception as e:
+            logger.info(f"🔍 Resolution query error ({param_name}): {e} | cid={condition_id[:16]}")
             return None
 
-        m = markets[0]
-        if not m.get("closed", False) and not m.get("resolved", False):
-            return None  # ще відкритий
+    # S1
+    result = _try_query("conditionId", condition_id)
+    if result is not None:
+        return result
 
-        # Визначаємо winner
-        outcome_prices = m.get("outcomePrices")
-        if outcome_prices:
-            import json
-            prices = json.loads(outcome_prices) if isinstance(outcome_prices, str) else outcome_prices
-            if len(prices) >= 2:
-                resolved_yes = float(prices[0]) >= 0.99
-                _resolution_cache[condition_id] = resolved_yes
-                return resolved_yes
+    # S2: пробуємо як id
+    result = _try_query("id", condition_id)
+    if result is not None:
+        return result
 
-        # Альтернативний спосіб через winnerIndex
-        winner = m.get("winnerIndex")
-        if winner is not None:
-            resolved_yes = int(winner) == 0  # 0 = YES wins
-            _resolution_cache[condition_id] = resolved_yes
-            return resolved_yes
-
-    except Exception as e:
-        logger.debug(f"Resolution check error {condition_id[:12]}: {e}")
+    # ── S3: Timeout failsafe ──────────────────────────────────
+    # Якщо позиція відкрита > 42 годин і Gamma API досі не повертає resolution —
+    # форсуємо закриття на основі поточної ринкової ціни.
+    # (Захист від "висячих" позицій в DRY_RUN)
+    if position is not None:
+        age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
+        if age_hours > 42:
+            # Якщо YES < 0.05 → ринок практично вирішений як NO (BUY_NO виграє)
+            # Якщо YES > 0.95 → ринок практично вирішений як YES
+            if position.current_price <= 0.05:
+                logger.info(
+                    f"⏰ TIMEOUT FAILSAFE ({age_hours:.1f}h) → YES≈0 → resolved=NO | "
+                    f"{position.direction} | {position.question[:50]}"
+                )
+                _resolution_cache[condition_id] = False
+                return False
+            elif position.current_price >= 0.95:
+                logger.info(
+                    f"⏰ TIMEOUT FAILSAFE ({age_hours:.1f}h) → YES≈1 → resolved=YES | "
+                    f"{position.direction} | {position.question[:50]}"
+                )
+                _resolution_cache[condition_id] = True
+                return True
+            else:
+                logger.info(
+                    f"⏰ TIMEOUT: позиція відкрита {age_hours:.1f}h але ціна={position.current_price:.3f} — "
+                    f"не можемо визначити winner, чекаємо ще | {position.question[:50]}"
+                )
 
     return None
 
@@ -366,7 +475,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
     for cid, pos in list(_active_positions.items()):
 
         # 1. Перевіряємо resolution
-        resolved = check_market_resolved(cid)
+        resolved = check_market_resolved(cid, position=pos)
         if resolved is not None:
             pos.resolve(resolved)
             result = "✅ WIN" if pos.pnl_usd > 0 else "❌ LOSS"
