@@ -122,11 +122,19 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     # ── S1: запит за conditionId ──────────────────────────────
     def _try_query(param_name: str, param_val: str) -> Optional[bool]:
         try:
-            r = requests.get(
-                f"{config.GAMMA_URL}/markets",
-                params={param_name: param_val},
-                timeout=10
-            )
+            # v26: пробуємо direct path /markets/{id} (надійніше ніж ?conditionId=)
+            if param_name == "conditionId":
+                url = f"{config.GAMMA_URL}/markets"
+                r = requests.get(url, params={"conditionId": param_val}, timeout=10)
+                if r.status_code != 200:
+                    # Fallback: direct path
+                    r = requests.get(f"{config.GAMMA_URL}/markets/{param_val}", timeout=10)
+            else:
+                r = requests.get(
+                    f"{config.GAMMA_URL}/markets",
+                    params={param_name: param_val},
+                    timeout=10
+                )
             if r.status_code != 200:
                 logger.info(f"🔍 Resolution S{param_name}: HTTP {r.status_code} | cid={condition_id[:16]}")
                 return None
@@ -209,7 +217,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     # (Захист від "висячих" позицій в DRY_RUN)
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
-        if age_hours > 42:
+        if age_hours > 72:  # v26: збільшено до 72h
             # Якщо YES < 0.05 → ринок практично вирішений як NO (BUY_NO виграє)
             # Якщо YES > 0.95 → ринок практично вирішений як YES
             if position.current_price <= 0.05:
@@ -463,6 +471,48 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     except Exception as e:
         logger.debug(f"MTM error {condition_id[:12]}: {e}")
     return None
+
+
+# ══════════════════════════════════════════════════════════════════
+# CLEANUP: очищення фіктивних/застарілих позицій при старті
+# ══════════════════════════════════════════════════════════════════
+
+WEATHER_KEYWORDS = [
+    "temperature", "celsius", "fahrenheit", "cold", "warm", "hot",
+    "weather", "rain", "snow", "wind", "humidity", "degrees",
+    "london", "paris", "tokyo", "new york", "chicago", "seoul",
+    "busan", "buenos aires", "lucknow", "cape town", "nyc",
+]
+
+def cleanup_stale_positions() -> List[str]:
+    """
+    v26: Видаляє позиції які:
+    1. НЕ є weather ринками (non-weather markets — наприклад political)
+    2. Відкриті > 120h і resolution недоступний
+    Повертає список видалених cid.
+    """
+    removed = []
+    now = datetime.now(timezone.utc)
+    for cid, pos in list(_active_positions.items()):
+        question_lower = pos.question.lower()
+        is_weather = any(kw in question_lower for kw in WEATHER_KEYWORDS)
+        age_hours = (now - pos.entry_time).total_seconds() / 3600
+
+        if not is_weather:
+            logger.warning(
+                f"🧹 CLEANUP: non-weather позиція видалена | "
+                f"{pos.direction} | {pos.question[:60]} | age={age_hours:.1f}h"
+            )
+            del _active_positions[cid]
+            removed.append(cid)
+        elif age_hours > 120:
+            logger.warning(
+                f"🧹 CLEANUP: застаріла позиція (age={age_hours:.1f}h > 120h) видалена | "
+                f"{pos.direction} | {pos.question[:60]}"
+            )
+            del _active_positions[cid]
+            removed.append(cid)
+    return removed
 
 def check_and_close_positions(clob_client) -> List[Position]:
     """

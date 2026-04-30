@@ -86,7 +86,7 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
 
         now = datetime.now(timezone.utc)
         hours_left = (end_date - now).total_seconds() / 3600
-        if hours_left < -2 or hours_left > hours_limit:
+        if hours_left <= 0 or hours_left > hours_limit:
             return None
 
         volume = 0.0

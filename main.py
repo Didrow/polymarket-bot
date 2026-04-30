@@ -37,7 +37,8 @@ import notifier
 from safeguards import SafeguardManager
 from market_scanner import fetch_weather_markets
 from edge_calculator import scan_all_edges
-from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions
+from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions, cleanup_stale_positions
+import trader as _trader  # v26-fix: global module ref (NameError fix)
 from osint_module import scan_all_osint
 
 # ─── Логування ───────────────────────────────────────────────
@@ -263,11 +264,14 @@ def main():
     clob_client = init_clob_client()
     safeguard = SafeguardManager()
 
-    # ♻️ Відновлення позицій після рестарту (v24-fix: state persistence)
-    import trader as _trader
+    # ♻️ Відновлення позицій після рестарту
     restored = safeguard.restore_positions()
     if restored:
         _trader._active_positions.update(restored)
+    # v26: очищення фіктивних/non-weather позицій
+    removed = cleanup_stale_positions()
+    if removed:
+        logger.warning(f"🧹 Очищено {len(removed)} фіктивних позицій при старті: {removed}")
 
     # Email startup notification
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
