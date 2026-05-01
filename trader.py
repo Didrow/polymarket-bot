@@ -206,10 +206,11 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     if result is not None:
         return result
 
-    # S2: пробуємо як id
-    result = _try_query("id", condition_id)
-    if result is not None:
-        return result
+    # S2: пробуємо як id (тільки якщо НЕ hex-хеш — 0x... завжди дає 422)
+    if not condition_id.startswith("0x"):
+        result = _try_query("id", condition_id)
+        if result is not None:
+            return result
 
     # ── S3: Timeout failsafe ──────────────────────────────────
     # Якщо позиція відкрита > 42 годин і Gamma API досі не повертає resolution —
@@ -376,16 +377,21 @@ def place_trade(
             "price":      round(price, 4),
             "size":       round(size_usd, 2),
             "side":       "BUY",
-            "order_type": "limit",    # limit order (не market)
-            "post_only":  True,       # не брати ask одразу, чекати виконання
+            "order_type": "FOK",      # v27: Fill-or-Kill — виконати повністю або скасувати
+            "post_only":  False,      # v27: False — дозволяємо взяти зустрічний ордер одразу
         })
         if order:
             order_id = order.get("orderID", order.get("id", ""))
-            logger.info(f"✅ Order placed: {order_id} | {edge_result.edge_direction} {size_usd:.2f}")
-        if order:
-            logger.info(f"✅ Реальна угода виконана: {order}")
-            _active_positions[market.condition_id] = pos
-            return pos
+            # Перевіряємо реальне виконання — не додаємо позицію за невиконаний ордер
+            status     = order.get("status", "")
+            filled_pct = float(order.get("sizeMatched", 0)) / max(float(order.get("size", size_usd)), 0.001)
+            if status in ("matched", "filled") or filled_pct >= 0.5:
+                logger.info(f"✅ Угода виконана: {order_id} | filled={filled_pct:.0%} | {edge_result.edge_direction} {size_usd:.2f}")
+                _active_positions[market.condition_id] = pos
+                return pos
+            else:
+                logger.warning(f"⚠️ Ордер не виконався (status={status}, filled={filled_pct:.0%}): {order_id}")
+                return None
     except Exception as e:
         logger.error(f"CLOB order error: {e}")
 

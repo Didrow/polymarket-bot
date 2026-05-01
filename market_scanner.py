@@ -132,11 +132,13 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         slug = raw.get("slug", "") or ""
         full = f"{question} {description} {slug}".lower()
 
-        mtype = "temperature"
+        mtype = "unknown"   # v27: default unknown — відсіює GTA VI, Russia-Ukraine і т.д.
         if any(w in full for w in ["rain", "precipitation"]):
             mtype = "rain"
         elif any(w in full for w in ["snow", "snowfall"]):
             mtype = "snow"
+        elif any(w in full for w in ["temperature", "°c", "°f", "highest", "lowest", "degrees"]):
+            mtype = "temperature"
 
         threshold = None
         # Каскад патернів для вилучення температурного порогу.
