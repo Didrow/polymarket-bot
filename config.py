@@ -87,3 +87,9 @@ EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST
 MIN_DATA_POINTS_FALLBACK: int = 5      # trader.py: мін. точок для volatility calc
 MAX_POSITION_USD: float = 10.0         # trader.py: абсолютний макс. розмір позиції
 WHALE_THRESHOLD_USD: float = 5000.0   # osint_module.py: поріг whale-угоди
+
+# ── JSONBIN.IO (хмарне збереження стану) ─────────────────────
+# Отримай безкоштовно на https://jsonbin.io
+# Встанови в Railway: Settings → Variables
+JSONBIN_KEY:    str = os.getenv("JSONBIN_KEY", "")     # X-Master-Key
+JSONBIN_BIN_ID: str = os.getenv("JSONBIN_BIN_ID", "")  # ID bin-а
