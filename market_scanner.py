@@ -132,7 +132,11 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         slug = raw.get("slug", "") or ""
         full = f"{question} {description} {slug}".lower()
 
-        mtype = "unknown"   # v27: default unknown — відсіює GTA VI, Russia-Ukraine і т.д.
+        # v28: явний skip для space weather (теж має тег 'weather' на Polymarket)
+        if "space weather" in full or "spaceweather" in full or "geomagnetic" in full:
+            return None
+
+        mtype = "unknown"   # default unknown — відсіює GTA VI, Russia-Ukraine і т.д.
         if any(w in full for w in ["rain", "precipitation"]):
             mtype = "rain"
         elif any(w in full for w in ["snow", "snowfall"]):

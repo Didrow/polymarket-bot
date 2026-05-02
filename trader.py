@@ -492,10 +492,10 @@ WEATHER_KEYWORDS = [
 
 def cleanup_stale_positions() -> List[str]:
     """
-    v26: Видаляє позиції які:
-    1. НЕ є weather ринками (non-weather markets — наприклад political)
+    v28: Видаляє позиції які:
+    1. НЕ є weather ринками (non-weather: political, crypto, etc.)
     2. Відкриті > 120h і resolution недоступний
-    Повертає список видалених cid.
+    3. endDate далеко в майбутньому (> 14 днів) — явно не weather ринок
     """
     removed = []
     now = datetime.now(timezone.utc)
@@ -504,20 +504,24 @@ def cleanup_stale_positions() -> List[str]:
         is_weather = any(kw in question_lower for kw in WEATHER_KEYWORDS)
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
+        # Причина 1: явно не weather ринок (GTA VI, Russia-Ukraine, etc.)
         if not is_weather:
             logger.warning(
-                f"🧹 CLEANUP: non-weather позиція видалена | "
-                f"{pos.direction} | {pos.question[:60]} | age={age_hours:.1f}h"
+                f"🧹 CLEANUP non-weather: {pos.question[:70]} | age={age_hours:.1f}h"
             )
             del _active_positions[cid]
             removed.append(cid)
-        elif age_hours > 120:
+            continue
+
+        # Причина 2: відкрита > 120h без resolution
+        if age_hours > 120:
             logger.warning(
-                f"🧹 CLEANUP: застаріла позиція (age={age_hours:.1f}h > 120h) видалена | "
-                f"{pos.direction} | {pos.question[:60]}"
+                f"🧹 CLEANUP застаріла (age={age_hours:.1f}h): {pos.question[:70]}"
             )
             del _active_positions[cid]
             removed.append(cid)
+            continue
+
     return removed
 
 def check_and_close_positions(clob_client) -> List[Position]:

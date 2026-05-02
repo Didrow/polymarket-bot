@@ -28,28 +28,35 @@ STATE_FILE = os.path.join(config.DATA_DIR, "bot_state.json")
 _JSONBIN_KEY    = os.getenv("JSONBIN_KEY", "")
 _JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID", "")
 _JSONBIN_BASE   = "https://api.jsonbin.io/v3/b"
-_JSONBIN_TTL    = 8
+_JSONBIN_TTL    = 15  # v28: збільшено timeout
 
 
-def _jsonbin_save(data: dict) -> bool:
+def _jsonbin_save(data: dict, _retries: int = 2) -> bool:
+    """v28: retry 2 рази при timeout."""
     if not _JSONBIN_KEY or not _JSONBIN_BIN_ID:
         return False
-    try:
-        r = _req.put(
-            f"{_JSONBIN_BASE}/{_JSONBIN_BIN_ID}",
-            json=data,
-            headers={
-                "Content-Type": "application/json",
-                "X-Master-Key": _JSONBIN_KEY,
-                "X-Bin-Versioning": "false",
-            },
-            timeout=_JSONBIN_TTL,
-        )
-        if r.status_code == 200:
-            return True
-        logger.warning(f"JSONBin save HTTP {r.status_code}: {r.text[:120]}")
-    except Exception as e:
-        logger.warning(f"JSONBin save error: {e}")
+    import time as _time
+    for attempt in range(_retries + 1):
+        try:
+            r = _req.put(
+                f"{_JSONBIN_BASE}/{_JSONBIN_BIN_ID}",
+                json=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Master-Key": _JSONBIN_KEY,
+                    "X-Bin-Versioning": "false",
+                },
+                timeout=_JSONBIN_TTL,
+            )
+            if r.status_code == 200:
+                return True
+            logger.warning(f"JSONBin save HTTP {r.status_code}: {r.text[:80]}")
+            return False
+        except Exception as e:
+            if attempt < _retries:
+                _time.sleep(2)
+            else:
+                logger.warning(f"JSONBin save error (спроба {attempt+1}/{_retries+1}): {e}")
     return False
 
 
