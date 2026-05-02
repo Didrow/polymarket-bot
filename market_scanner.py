@@ -132,8 +132,12 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         slug = raw.get("slug", "") or ""
         full = f"{question} {description} {slug}".lower()
 
-        # v28: явний skip для space weather (теж має тег 'weather' на Polymarket)
-        if "space weather" in full or "spaceweather" in full or "geomagnetic" in full:
+        # v28: явний skip для non-temperature weather ринків що мають тег 'weather'
+        _skip_keywords = [
+            "space weather", "spaceweather", "geomagnetic",
+            "earthquake", "magnitude", "seismic",
+        ]
+        if any(kw in full for kw in _skip_keywords):
             return None
 
         mtype = "unknown"   # default unknown — відсіює GTA VI, Russia-Ukraine і т.д.
