@@ -273,6 +273,11 @@ def main():
     restored = safeguard.restore_positions()
     if restored:
         _trader._active_positions.update(restored)
+      # v28-fix: cleanup non-weather позицій при кожному старті
+    removed = cleanup_stale_positions()
+    if removed:
+        logger.warning(f"🧹 Очищено {len(removed)} фіктивних позицій при старті: {removed}")
+        safeguard.save_positions(_trader._active_positions)
     # v26: очищення фіктивних/non-weather позицій
     removed = cleanup_stale_positions()
     if removed:
