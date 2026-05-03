@@ -53,7 +53,7 @@ MIN_EDGE_HOLD: float = 0.10
 # ── MARKETS ───────────────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72         # v26: збільшено для ринків May 1-3
 # Тільки ринки з достатнім об'ємом — менше шуму
-MIN_MARKET_VOLUME_USD: float = 5000.0
+MIN_MARKET_VOLUME_USD: float = 1000.0
 SCAN_INTERVAL_SEC: int = 180               # підвищено для стабільності Render
 OSINT_SCAN_INTERVAL_SEC: int = 300
 
