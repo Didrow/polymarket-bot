@@ -27,7 +27,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # було 0.025 → safeguards блокував $4 на $100
 MIN_POSITION_USD: float = 2.0
 BASE_POSITION_USD: float = 3.0
-MAX_ACTIVE_POSITIONS: int = 4           # не більше 5 відкритих позицій
+MAX_ACTIVE_POSITIONS: int = 6           # не більше 6 відкритих позицій
 MAX_DRAWDOWN_PCT: float = 0.25
 STOP_LOSS_PCT: float = 0.15
 
