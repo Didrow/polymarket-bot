@@ -273,11 +273,6 @@ def main():
     restored = safeguard.restore_positions()
     if restored:
         _trader._active_positions.update(restored)
-      # v28-fix: cleanup non-weather позицій при кожному старті
-    removed = cleanup_stale_positions()
-    if removed:
-        logger.warning(f"🧹 Очищено {len(removed)} фіктивних позицій при старті: {removed}")
-        safeguard.save_positions(_trader._active_positions)
     # v26: очищення фіктивних/non-weather позицій
     removed = cleanup_stale_positions()
     if removed:
@@ -336,30 +331,6 @@ def main():
     safeguard.save_state()
 
 
-
-# ── Health-check HTTP сервер для Render.com ──────────────────
-# Render потребує відповіді на HTTP запити щоб знати що сервіс живий.
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-class _HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK - Polymarket Weather Bot running")
-    def log_message(self, *args):
-        pass  # Мовчазний режим - не засмічувати логи
-
-def _start_health_server():
-    try:
-        server = HTTPServer(("", 10000), _HealthHandler)
-        server.serve_forever()
-    except Exception as e:
-        pass  # Не критично якщо health server не запустився
-
-# Запустити у фоновому потоці (daemon=True - зупиниться разом з ботом)
-_health_thread = threading.Thread(target=_start_health_server, daemon=True)
-_health_thread.start()
 
 if __name__ == "__main__":
     main()
