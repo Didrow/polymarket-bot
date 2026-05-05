@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 _vol_cache: Dict[str, tuple] = {}
 _active_positions: Dict[str, "Position"] = {}
+# Умови щойно закриті — блокуємо повторне відкриття на 24h
+# {condition_id: datetime_closed}
+_recently_closed: Dict[str, Any] = {}
 
 
 @dataclass
@@ -327,6 +330,16 @@ def place_trade(
         logger.debug(f"⏭ Skip: позиція вже відкрита | {market.question[:50]}")
         return None
 
+    # v28-fix: блокуємо повторне відкриття ринку що щойно закрився (24h cooldown)
+    if market.condition_id in _recently_closed:
+        closed_at = _recently_closed[market.condition_id]
+        hours_since = (datetime.now(timezone.utc) - closed_at).total_seconds() / 3600
+        if hours_since < 24:
+            logger.debug(f"⏭ Skip: ринок закрився {hours_since:.1f}h тому, cooldown | {market.question[:50]}")
+            return None
+        else:
+            del _recently_closed[market.condition_id]  # cooldown минув
+
     if edge_result.edge_direction == "BUY_YES":
         price = market.best_ask_yes  # платимо ASK за YES
     else:
@@ -546,6 +559,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             )
             closed.append(pos)
             del _active_positions[cid]
+            _recently_closed[cid] = datetime.now(timezone.utc)  # v28-fix: cooldown
             continue
 
         # 2. Mark-to-market (Gamma API, не заглушка)
@@ -573,6 +587,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             )
             closed.append(pos)
             del _active_positions[cid]
+            _recently_closed[cid] = datetime.now(timezone.utc)  # v28-fix: cooldown
 
     return closed
 
