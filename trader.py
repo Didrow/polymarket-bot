@@ -14,7 +14,7 @@ import logging
 import requests
 import numpy as np
 from datetime import datetime, timezone
-from typing import Optional, Dict, List
+from typing import Any, Optional, Dict, List
 from dataclasses import dataclass, field
 
 import config
@@ -128,7 +128,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
             # v26: пробуємо direct path /markets/{id} (надійніше ніж ?conditionId=)
             if param_name == "conditionId":
                 url = f"{config.GAMMA_URL}/markets"
-                r = requests.get(url, params={"conditionId": param_val}, timeout=10)
+                r = requests.get(url, params={"condition_id": param_val}, timeout=10)
                 if r.status_code != 200:
                     # Fallback: direct path
                     r = requests.get(f"{config.GAMMA_URL}/markets/{param_val}", timeout=10)
@@ -437,7 +437,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     try:
         r = requests.get(
             f"{config.GAMMA_URL}/markets",
-            params={"conditionId": condition_id},
+            params={"condition_id": condition_id},
             timeout=6
         )
         if r.status_code != 200:

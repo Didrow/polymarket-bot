@@ -300,14 +300,15 @@ class SafeguardManager:
             self.state.current_capital -= size_usd
         self.save_state()
 
-    def record_trade_close(self, pnl_usd: float):
+    def record_trade_close(self, pnl_usd: float, size_usd: float = 0.0):
         self.state.total_pnl += pnl_usd
         if pnl_usd > 0:
             self.state.winning_trades += 1
         else:
             self.state.losing_trades += 1
         if not config.DRY_RUN:
-            self.state.current_capital += pnl_usd
+            # Повертаємо тіло позиції + PnL (record_trade_open вже відняв size_usd)
+            self.state.current_capital += size_usd + pnl_usd
             if self.state.current_capital > self.state.peak_capital:
                 self.state.peak_capital = self.state.current_capital
         self.save_state()
