@@ -24,6 +24,8 @@ import time
 import signal
 import logging
 import logging.handlers
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -67,6 +69,24 @@ root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
+
+# ─── Health check сервер для Render Free Tier ─────────────────
+# Render вимагає відкритий HTTP порт навіть для background процесів.
+# Запускаємо мінімальний сервер у фоновому треді.
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, *args):
+        pass  # вимикаємо HTTP логи щоб не засмічувати консоль
+
+def _start_health_server():
+    port = int(os.getenv("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info(f"🌐 Health check сервер запущено на порту {port} (Render free tier)")
 
 # ─── Глобальний контроль зупинки ─────────────────────────────
 _running = True
@@ -247,6 +267,9 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
 # ─── ГОЛОВНИЙ ЦИКЛ ───────────────────────────────────────────
 def main():
+    # Render free tier: запускаємо health check сервер перед усім іншим
+    _start_health_server()
+
     logger.info("")
     logger.info("=" * 60)
     logger.info("  🌤️  POLYMARKET WEATHER BOT 2026  🌤️")
