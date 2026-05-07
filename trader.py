@@ -150,6 +150,20 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 return None
 
             m = markets[0]
+
+            # ЗАХИСТ: перевіряємо що API повернуло саме той ринок який ми запитували.
+            # Якщо condition_id битий/короткий — API ігнорує його і повертає дефолтний
+            # ринок (зараз це GTA VI). Без цієї перевірки бот закриває погодні угоди
+            # по цінах GTA VI.
+            api_cid = m.get("conditionId", "")
+            api_id  = m.get("id", "")
+            if api_cid != condition_id and api_id != condition_id:
+                logger.debug(
+                    f"⚠️ Gamma API повернуло інший ринок (got={api_cid[:16]}, "
+                    f"expected={condition_id[:16]}). Ігноруємо."
+                )
+                return None
+
             is_closed   = m.get("closed", False)
             is_resolved = m.get("resolved", False)
             is_active   = m.get("active", True)       # деякі API повертають active=false
@@ -448,6 +462,14 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
             return None
         m = markets[0]
 
+        # ЗАХИСТ: та сама перевірка що і в _try_query.
+        # Якщо API повернуло не той ринок — повертаємо None (заморожуємо PnL).
+        api_cid = m.get("conditionId", "")
+        api_id  = m.get("id", "")
+        if api_cid != condition_id and api_id != condition_id:
+            logger.debug(f"⚠️ MTM: Gamma API повернуло інший ринок (got={api_cid[:16]}). Заморожуємо PnL.")
+            return None
+
         # Закритий/resolved ринок — чекаємо resolution polling
         if m.get("closed", False) or m.get("resolved", False):
             logger.debug(f"MTM skip: ринок {condition_id[:12]} closed")
@@ -573,11 +595,13 @@ def check_and_close_positions(clob_client) -> List[Position]:
             pos.update_pnl(effective_price)
 
         # 3. Stop-loss
-        # Tail угоди (entry < 10¢) — бінарні опціони: або $0 або profit.
-        # Стоп-лос їм шкодить: шум в стакані на рівні 0.3¢ = ±50% коливань.
-        # Чекаємо resolution — він і є "закриттям" tail угод.
-        if pos.entry_price < 0.10:
-            continue  # tail: без стоп-лосу
+        # Tail угоди — бінарні опціони: або $0 або profit. Стоп-лос шкодить.
+        # BUY_YES tail: entry < 10¢ (шум ±50% від спреду)
+        # BUY_NO tail:  entry > 90¢ (еквівалент YES < 10¢ — та сама логіка)
+        is_yes_tail = pos.direction == "BUY_YES" and pos.entry_price < 0.10
+        is_no_tail  = pos.direction == "BUY_NO"  and pos.entry_price > 0.90
+        if is_yes_tail or is_no_tail:
+            continue  # tail: без стоп-лосу, чекаємо resolution
 
         # Для звичайних позицій (entry ≥ 10¢) — стандартний стоп
         if pos.pnl_pct <= -config.STOP_LOSS_PCT:
