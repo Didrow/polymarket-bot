@@ -151,16 +151,15 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
             m = markets[0]
 
-            # ЗАХИСТ: перевіряємо що API повернуло саме той ринок який ми запитували.
-            # Якщо condition_id битий/короткий — API ігнорує його і повертає дефолтний
-            # ринок (зараз це GTA VI). Без цієї перевірки бот закриває погодні угоди
-            # по цінах GTA VI.
-            api_cid = m.get("conditionId", "")
-            api_id  = m.get("id", "")
-            if api_cid != condition_id and api_id != condition_id:
+            # НОРМАЛІЗАЦІЯ ID: захист від фантомних ринків (напр. GTA VI).
+            # Gamma API може повертати conditionId без 0x або в іншому регістрі.
+            api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
+            api_id    = str(m.get("id", "")).lower().replace("0x", "")
+            target_id = str(condition_id).lower().replace("0x", "")
+            if api_cid != target_id and api_id != target_id:
                 logger.debug(
                     f"⚠️ Gamma API повернуло інший ринок (got={api_cid[:16]}, "
-                    f"expected={condition_id[:16]}). Ігноруємо."
+                    f"expected={target_id[:16]}). Ігноруємо."
                 )
                 return None
 
@@ -462,12 +461,12 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
             return None
         m = markets[0]
 
-        # ЗАХИСТ: та сама перевірка що і в _try_query.
-        # Якщо API повернуло не той ринок — повертаємо None (заморожуємо PnL).
-        api_cid = m.get("conditionId", "")
-        api_id  = m.get("id", "")
-        if api_cid != condition_id and api_id != condition_id:
-            logger.debug(f"⚠️ MTM: Gamma API повернуло інший ринок (got={api_cid[:16]}). Заморожуємо PnL.")
+        # НОРМАЛІЗАЦІЯ ID: та сама перевірка що і в _try_query
+        api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
+        api_id    = str(m.get("id", "")).lower().replace("0x", "")
+        target_id = str(condition_id).lower().replace("0x", "")
+        if api_cid != target_id and api_id != target_id:
+            logger.debug(f"⚠️ MTM: Gamma повернуло інший ринок (got={api_cid[:16]}). Заморожуємо PnL.")
             return None
 
         # Закритий/resolved ринок — чекаємо resolution polling
@@ -595,9 +594,9 @@ def check_and_close_positions(clob_client) -> List[Position]:
             pos.update_pnl(effective_price)
 
         # 3. Stop-loss
-        # Tail угоди — бінарні опціони: або $0 або profit. Стоп-лос шкодить.
-        # BUY_YES tail: entry < 10¢ (шум ±50% від спреду)
-        # BUY_NO tail:  entry > 90¢ (еквівалент YES < 10¢ — та сама логіка)
+        # Tail угоди (entry < 10¢) — бінарні опціони: або $0 або profit.
+        # Стоп-лос їм шкодить: шум в стакані на рівні 0.3¢ = ±50% коливань.
+        # Чекаємо resolution — він і є "закриттям" tail угод.
         is_yes_tail = pos.direction == "BUY_YES" and pos.entry_price < 0.10
         is_no_tail  = pos.direction == "BUY_NO"  and pos.entry_price > 0.90
         if is_yes_tail or is_no_tail:

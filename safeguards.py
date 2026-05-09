@@ -307,7 +307,6 @@ class SafeguardManager:
         else:
             self.state.losing_trades += 1
         if not config.DRY_RUN:
-            # Повертаємо тіло позиції + PnL (record_trade_open вже відняв size_usd)
             self.state.current_capital += size_usd + pnl_usd
             if self.state.current_capital > self.state.peak_capital:
                 self.state.peak_capital = self.state.current_capital
