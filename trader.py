@@ -158,10 +158,14 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 winner_idx  = m.get("winnerIndex")
 
                 if not is_closed and not is_resolved:
-                    # "Пульс" кожні 10 спроб (~30 хвилин) — підтверджує що резолюція йде
                     if attempt <= 2 or attempt % 10 == 0:
                         logger.info(f"⏳ Resolution: ринок ще активний, очікуємо | cid={target_id[:8]}")
                     return None
+
+                # СТАН 2: Торги зупинені, чекаємо вердикту UMA Oracle
+                if is_closed and not is_resolved:
+                    if attempt <= 2 or attempt % 10 == 0:
+                        logger.info(f"⚖️ Resolution: торги закриті, чекаємо вердикту суддів Polymarket | cid={target_id[:8]}")
 
                 tokens = m.get("tokens", [])
                 if tokens:
