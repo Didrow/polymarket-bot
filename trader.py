@@ -146,8 +146,18 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
             markets = data if isinstance(data, list) else data.get("markets", [])
 
             if not markets:
-                logger.info(f"🔍 Resolution {param_name}={param_val[:16]}: empty response (0 ринків)")
-                return None
+                # RETRY з closed=true: ринок міг переїхати в архів після resolution
+                try:
+                    params_closed = {"condition_id": param_val, "closed": "true"} if param_name == "conditionId" else {param_name: param_val, "closed": "true"}
+                    r2 = requests.get(f"{config.GAMMA_URL}/markets", params=params_closed, timeout=10)
+                    if r2.status_code == 200:
+                        data2 = r2.json()
+                        markets = data2 if isinstance(data2, list) else data2.get("markets", [])
+                except Exception:
+                    pass
+                if not markets:
+                    logger.info(f"🔍 Resolution {param_name}={param_val[:16]}: не знайдено ні в активних, ні в архіві")
+                    return None
 
             m = markets[0]
 
@@ -458,7 +468,20 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         data = r.json()
         markets = data if isinstance(data, list) else data.get("markets", [])
         if not markets:
-            return None
+            # RETRY з closed=true: MTM для вже вирішених ринків
+            try:
+                r2 = requests.get(
+                    f"{config.GAMMA_URL}/markets",
+                    params={"condition_id": condition_id, "closed": "true"},
+                    timeout=6
+                )
+                if r2.status_code == 200:
+                    data2 = r2.json()
+                    markets = data2 if isinstance(data2, list) else data2.get("markets", [])
+            except Exception:
+                pass
+            if not markets:
+                return None
         m = markets[0]
 
         # НОРМАЛІЗАЦІЯ ID: та сама перевірка що і в _try_query
