@@ -124,109 +124,68 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
     # ── S1: запит за conditionId ──────────────────────────────
     def _try_query(param_name: str, param_val: str) -> Optional[bool]:
-        try:
-            # v26: пробуємо direct path /markets/{id} (надійніше ніж ?conditionId=)
-            if param_name == "conditionId":
-                url = f"{config.GAMMA_URL}/markets"
-                r = requests.get(url, params={"condition_id": param_val}, timeout=10)
+        for closed_status in [None, "true"]:
+            try:
+                params = {"condition_id": param_val} if param_name == "conditionId" else {param_name: param_val}
+                if closed_status:
+                    params["closed"] = closed_status
+
+                r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
                 if r.status_code != 200:
-                    # Fallback: direct path
-                    r = requests.get(f"{config.GAMMA_URL}/markets/{param_val}", timeout=10)
-            else:
-                r = requests.get(
-                    f"{config.GAMMA_URL}/markets",
-                    params={param_name: param_val},
-                    timeout=10
-                )
-            if r.status_code != 200:
-                logger.info(f"🔍 Resolution S{param_name}: HTTP {r.status_code} | cid={condition_id[:16]}")
-                return None
+                    continue
 
-            data = r.json()
-            markets = data if isinstance(data, list) else data.get("markets", [])
+                data = r.json()
+                markets = data if isinstance(data, list) else data.get("markets", [])
 
-            if not markets:
-                # RETRY з closed=true: ринок міг переїхати в архів після resolution
-                try:
-                    params_closed = {"condition_id": param_val, "closed": "true"} if param_name == "conditionId" else {param_name: param_val, "closed": "true"}
-                    r2 = requests.get(f"{config.GAMMA_URL}/markets", params=params_closed, timeout=10)
-                    if r2.status_code == 200:
-                        data2 = r2.json()
-                        markets = data2 if isinstance(data2, list) else data2.get("markets", [])
-                except Exception:
-                    pass
                 if not markets:
-                    logger.info(f"🔍 Resolution {param_name}={param_val[:16]}: не знайдено ні в активних, ні в архіві")
+                    continue
+
+                m = markets[0]
+
+                # Нормалізація ID: захист від фантомних ринків (GTA VI і подібних)
+                api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
+                api_id    = str(m.get("id", "")).lower().replace("0x", "")
+                target_id = str(param_val).lower().replace("0x", "")
+
+                if api_cid != target_id and api_id != target_id:
+                    if closed_status == "true" and (attempt <= 3 or attempt % 20 == 0):
+                        logger.info(f"⚠️ API ще не бачить ринок {target_id[:8]} в архіві")
+                    continue
+
+                is_closed   = m.get("closed", False)
+                is_resolved = m.get("resolved", False)
+                outcome_prices = m.get("outcomePrices")
+                winner_idx  = m.get("winnerIndex")
+
+                if not is_closed and not is_resolved:
+                    # "Пульс" кожні 10 спроб (~30 хвилин) — підтверджує що резолюція йде
+                    if attempt <= 2 or attempt % 10 == 0:
+                        logger.info(f"⏳ Resolution: ринок ще активний, очікуємо | cid={target_id[:8]}")
                     return None
 
-            m = markets[0]
+                tokens = m.get("tokens", [])
+                if tokens:
+                    for token in tokens:
+                        if token.get("winner") is True:
+                            outcome = token.get("outcome", "").strip().upper()
+                            result = (outcome == "YES")
+                            _resolution_cache[condition_id] = result
+                            return result
 
-            # НОРМАЛІЗАЦІЯ ID: захист від фантомних ринків (напр. GTA VI).
-            # Gamma API може повертати conditionId без 0x або в іншому регістрі.
-            api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
-            api_id    = str(m.get("id", "")).lower().replace("0x", "")
-            target_id = str(condition_id).lower().replace("0x", "")
-            if api_cid != target_id and api_id != target_id:
-                logger.debug(
-                    f"⚠️ Gamma API повернуло інший ринок (got={api_cid[:16]}, "
-                    f"expected={target_id[:16]}). Ігноруємо."
-                )
-                return None
+                result = _parse_outcome_prices(outcome_prices)
+                if result is not None:
+                    _resolution_cache[condition_id] = result
+                    return result
 
-            is_closed   = m.get("closed", False)
-            is_resolved = m.get("resolved", False)
-            is_active   = m.get("active", True)       # деякі API повертають active=false
-            end_date    = m.get("endDate", "")
-            outcome_prices = m.get("outcomePrices")
-            winner_idx  = m.get("winnerIndex")
-            question_short = m.get("question", "")[:50]
+                if winner_idx is not None:
+                    result = (int(winner_idx) == 0)
+                    _resolution_cache[condition_id] = result
+                    return result
 
-            # Логуємо раз на 10 спроб (щоб не спамити) або на перших 3
-            if attempt <= 3 or attempt % 10 == 0:
-                logger.info(
-                    f"🔍 Resolution attempt #{attempt} | {param_name}={param_val[:16]} | "
-                    f"closed={is_closed} resolved={is_resolved} active={is_active} | "
-                    f"endDate={end_date[:16]} | prices={outcome_prices} | "
-                    f"winnerIdx={winner_idx} | q={question_short}"
-                )
+            except Exception as e:
+                logger.debug(f"Gamma API error під час резолюції: {e}")
 
-            # Ринок ще відкритий
-            if not is_closed and is_resolved is not True and is_active is not False:
-                return None
-
-            # Визначаємо переможця
-            # МЕТОД 1: tokens[].winner=True — офіційний метод Polymarket API (пріоритет)
-            tokens = m.get("tokens", [])
-            if tokens:
-                for token in tokens:
-                    if token.get("winner") is True:
-                        outcome = token.get("outcome", "").strip().upper()
-                        result = (outcome == "YES")
-                        logger.info(f"✅ Resolution via tokens.winner: outcome={outcome} → {'YES' if result else 'NO'} | cid={condition_id[:16]}")
-                        _resolution_cache[condition_id] = result
-                        return result
-
-            # МЕТОД 2: outcomePrices (ціни після resolution = 1.0 / 0.0)
-            result = _parse_outcome_prices(outcome_prices)
-            if result is not None:
-                logger.info(f"✅ Resolution via outcomePrices: {'YES' if result else 'NO'} | cid={condition_id[:16]}")
-                _resolution_cache[condition_id] = result
-                return result
-
-            # МЕТОД 3: winnerIndex
-            if winner_idx is not None:
-                result = (int(winner_idx) == 0)
-                logger.info(f"✅ Resolution via winnerIndex={winner_idx}: {'YES' if result else 'NO'} | cid={condition_id[:16]}")
-                _resolution_cache[condition_id] = result
-                return result
-
-            logger.info(f"⚠️  Market closed/resolved but winner unclear | prices={outcome_prices} idx={winner_idx}")
-            return None
-
-        except Exception as e:
-            logger.info(f"🔍 Resolution query error ({param_name}): {e} | cid={condition_id[:16]}")
-            return None
-
+        return None
     # S1
     result = _try_query("conditionId", condition_id)
     if result is not None:
