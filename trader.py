@@ -6,6 +6,8 @@ trader.py — Polymarket Weather Bot 2026 (v9 production)
   - Hourly limit підвищено до 50/год
   - Дедуплікація: не відкриваємо угоду на той самий condition_id двічі
   - DRY_RUN статистика: pnl_usd рахується після resolution
+  - Збільшено таймаут для погодних ринків (до 100 годин)
+  - Розширено допустимий спред для відображення Unrealized PnL (до 25%)
 """
 
 import math
@@ -114,7 +116,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     Стратегії (в порядку спроб):
       S1: GET /markets?conditionId=X
       S2: GET /markets?id=X          (деякі ринки не мають conditionId)
-      S3: Timeout failsafe            (позиція відкрита > 42h → force-close)
+      S3: Timeout failsafe            (позиція відкрита довгий час → force-close)
     """
     if condition_id in _resolution_cache:
         return _resolution_cache[condition_id]
@@ -124,7 +126,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
     # ── S1: запит за conditionId ──────────────────────────────
     def _try_query(param_name: str, param_val: str) -> Optional[bool]:
-        for closed_status in [None, "true"]:
+        for closed_status in[None, "true"]:
             try:
                 # УВАГА: Gamma API приймає ТІЛЬКИ conditionId (camelCase).
                 # condition_id (snake) ігнорується API і повертає рандомний ринок.
@@ -169,7 +171,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                     if attempt <= 2 or attempt % 10 == 0:
                         logger.info(f"⚖️ Resolution: торги закриті, чекаємо вердикту суддів Polymarket | cid={target_id[:8]}")
 
-                tokens = m.get("tokens", [])
+                tokens = m.get("tokens",[])
                 if tokens:
                     for token in tokens:
                         if token.get("winner") is True:
@@ -204,12 +206,11 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
             return result
 
     # ── S3: Timeout failsafe ──────────────────────────────────
-    # Якщо позиція відкрита > 42 годин і Gamma API досі не повертає resolution —
+    # Якщо позиція відкрита занадто довго і Gamma API досі не повертає resolution —
     # форсуємо закриття на основі поточної ринкової ціни.
-    # (Захист від "висячих" позицій в DRY_RUN)
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
-        if age_hours > 36:  # Timeout: 36h — для ринків де UMA резолюція затримується
+        if age_hours > 100:  # Timeout: 100h — для довгострокових погодних ринків
             # Якщо YES < 0.05 → ринок практично вирішений як NO (BUY_NO виграє)
             # Якщо YES > 0.95 → ринок практично вирішений як YES
             if position.current_price <= 0.05:
@@ -431,7 +432,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         if r.status_code != 200:
             return None
         data = r.json()
-        markets = data if isinstance(data, list) else data.get("markets", [])
+        markets = data if isinstance(data, list) else data.get("markets",[])
         if not markets:
             # RETRY з closed=true: MTM для вже вирішених ринків
             try:
@@ -442,7 +443,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
                 )
                 if r2.status_code == 200:
                     data2 = r2.json()
-                    markets = data2 if isinstance(data2, list) else data2.get("markets", [])
+                    markets = data2 if isinstance(data2, list) else data2.get("markets",[])
             except Exception:
                 pass
             if not markets:
@@ -478,10 +479,9 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
             return None
 
         # КРИТИЧНО: "пиловий стакан" — хтось забув bid=0.001 і ask=0.99
-        # midpoint = 0.495 → фіктивний +8000% на tail угоді за 0.7¢
-        # Ліквідний ринок має спред < 5%; порожній — > 8%  (v23-fix: було 0.25)
+        # Ліквідний ринок має спред < 5%; порожній — > 25% (було 0.08)
         spread = best_ask - best_bid
-        if spread > 0.08:
+        if spread > 0.25:
             logger.debug(f"MTM skip: пиловий стакан (spread={spread:.3f})")
             return None
 
@@ -505,7 +505,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
 # CLEANUP: очищення фіктивних/застарілих позицій при старті
 # ══════════════════════════════════════════════════════════════════
 
-WEATHER_KEYWORDS = [
+WEATHER_KEYWORDS =[
     "temperature", "celsius", "fahrenheit", "cold", "warm", "hot",
     "weather", "rain", "snow", "wind", "humidity", "degrees",
     "london", "paris", "tokyo", "new york", "chicago", "seoul",
@@ -519,7 +519,7 @@ def cleanup_stale_positions() -> List[str]:
     2. Відкриті > 120h і resolution недоступний
     3. endDate далеко в майбутньому (> 14 днів) — явно не weather ринок
     """
-    removed = []
+    removed =[]
     now = datetime.now(timezone.utc)
     for cid, pos in list(_active_positions.items()):
         question_lower = pos.question.lower()
@@ -553,7 +553,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
       2. Mark-to-market через Gamma API → оновлює pnl_pct
       3. Stop-loss якщо pnl_pct < -STOP_LOSS_PCT
     """
-    closed = []
+    closed =[]
     for cid, pos in list(_active_positions.items()):
 
         # 1. Перевіряємо resolution
