@@ -126,7 +126,9 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     def _try_query(param_name: str, param_val: str) -> Optional[bool]:
         for closed_status in [None, "true"]:
             try:
-                params = {"condition_id": param_val} if param_name == "conditionId" else {param_name: param_val}
+                # УВАГА: Gamma API приймає ТІЛЬКИ conditionId (camelCase).
+                # condition_id (snake) ігнорується API і повертає рандомний ринок.
+                params = {"conditionId": param_val} if param_name == "conditionId" else {param_name: param_val}
                 if closed_status:
                     params["closed"] = closed_status
 
@@ -207,7 +209,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     # (Захист від "висячих" позицій в DRY_RUN)
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
-        if age_hours > 72:  # v26: збільшено до 72h
+        if age_hours > 36:  # Timeout: 36h — для ринків де UMA резолюція затримується
             # Якщо YES < 0.05 → ринок практично вирішений як NO (BUY_NO виграє)
             # Якщо YES > 0.95 → ринок практично вирішений як YES
             if position.current_price <= 0.05:
@@ -423,7 +425,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     try:
         r = requests.get(
             f"{config.GAMMA_URL}/markets",
-            params={"condition_id": condition_id},
+            params={"conditionId": condition_id},  # Gamma API: тільки camelCase!
             timeout=6
         )
         if r.status_code != 200:
