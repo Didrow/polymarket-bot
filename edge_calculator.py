@@ -390,8 +390,9 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             reason = f"NO {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
 
         # Слабкий edge + низька впевненість → пропускаємо
-        if eff_edge < 0.45 and confidence < 0.88:
-            logger.debug(f"Слабкий edge {eff_edge:.1%} + confidence {confidence:.2f} < 0.88 → skip")
+        # Пом'якшено: тепер блокуємо тільки якщо edge < 15% І confidence < 80%
+        if eff_edge < 0.15 and confidence < 0.80:
+            logger.debug(f"Слабкий edge {eff_edge:.1%} + confidence {confidence:.2f} < 0.80 → skip")
             return None
 
         size_usd = max(
@@ -426,35 +427,4 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 # ══════════════════════════════════════════════════════════════════
 
 def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
-    results = []
-    skip_vol = skip_city = skip_hours = skip_none = 0
-
-    for market in markets:
-        if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
-            skip_vol += 1
-            continue
-        if market.hours_to_resolution < 2.0 or market.hours_to_resolution > 48.0:
-            skip_hours += 1
-            continue
-        if market.detected_city and hasattr(config, 'CITY_WHITELIST') and config.CITY_WHITELIST:
-            if market.detected_city not in config.CITY_WHITELIST:
-                skip_city += 1
-                continue
-
-        edge = calculate_edge(market)
-        if edge is None:
-            skip_none += 1
-            continue
-
-        if edge.is_tradeable:
-            logger.info(f"✅ EDGE: {edge.summary}")
-            results.append(edge)
-
-    # Сортуємо: найкращий edge першим
-    results.sort(key=lambda r: r.edge, reverse=True)
-
-    logger.info(
-        f"Edge scan: {len(results)} tradeable / {len(markets)} ринків "
-        f"| skip: vol={skip_vol}, hours={skip_hours}, city={skip_city}, none={skip_none}"
-    )
-    return results
+    results =
