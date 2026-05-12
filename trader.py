@@ -151,9 +151,18 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 api_id    = str(m.get("id", "")).lower().replace("0x", "")
                 target_id = str(param_val).lower().replace("0x", "")
 
-                if api_cid != target_id and api_id != target_id:
+                # КРИТИЧНО: після resolution Gamma повертає повний 66-символьний ID
+                # (0x + 64 hex), але збережений ID може бути коротшим (скорочена форма).
+                # Тому порівнюємо: чи один є префіксом іншого.
+                def _ids_match(a: str, b: str) -> bool:
+                    return a == b or a.startswith(b) or b.startswith(a)
+
+                if not _ids_match(api_cid, target_id) and not _ids_match(api_id, target_id):
                     if closed_status == "true" and (attempt <= 3 or attempt % 20 == 0):
-                        logger.info(f"⚠️ API ще не бачить ринок {target_id[:8]} в архіві")
+                        logger.info(
+                            f"⚠️ API повернуло невідповідний ринок "
+                            f"(got={api_cid[:16]}, expected={target_id[:16]})"
+                        )
                     continue
 
                 is_closed   = m.get("closed", False)
