@@ -6,8 +6,8 @@ config.py — Polymarket Weather Bot 2026 (coldmath v8 — фінальна ро
   - MIN_POSITION_USD: 4.0 → 2.0
   - BASE_POSITION_USD: 5.0 → 3.0
   - MIN_MARKET_VOLUME_USD: 5000 для точних сигналів
-  - EXTREME_TAIL_MIN_EDGE_YES: підвищено до 0.40 (менше шуму)
   - MAX_ACTIVE_POSITIONS: 5 → обмежуємо кількість відкритих угод
+  - АДАПТАЦІЯ СТРАТЕГІЇ (v13): Знижено пороги edge для збільшення вибірки угод.
 """
 
 from typing import List
@@ -33,28 +33,26 @@ STOP_LOSS_PCT: float = 0.15
 
 # ── COLDMATH TAIL NO (BUY NO @ 93-99¢) ───────────────────────
 ENABLE_COLDMATH_TAIL_NO: bool = True
-COLDMATH_MIN_ASK_NO: float = 0.95      # підвищено — тільки NO ≥95¢      # NO price ≥ 0.93
+COLDMATH_MIN_ASK_NO: float = 0.95      # тільки NO ≥95¢
 COLDMATH_MAX_ASK_NO: float = 0.99
-COLDMATH_MIN_EDGE_NO: float = 0.22        # підвищено: відсіює weak NO tail        # підвищено: вимагаємо сильніший edge     # мінімальний edge
-COLDMATH_MAX_SIZE_USD: float = 2.0         # знижено: макс $2.5 на NO tail угоду     # $5 на угоду
+COLDMATH_MIN_EDGE_NO: float = 0.12     # БУЛО 0.22 → ТЕПЕР 0.12 (12% це вже чудовий край)
+COLDMATH_MAX_SIZE_USD: float = 2.0     # макс $2.0 на NO tail угоду
 
 # ── EXTREME TAIL YES (BUY YES @ 1-5¢) ────────────────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05  # YES price ≤ 5¢
-EXTREME_TAIL_MAX_SIZE_USD: float = 2.0  # $3 на угоду
-# КЛЮЧОВЕ: підвищено щоб фільтрувати шум our_prob=0.98
-# Тільки ринки де edge > 40% і наш прогноз СПРАВДІ відрізняється
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.65   # підвищено: тільки дуже сильні сигнали
+EXTREME_TAIL_MAX_SIZE_USD: float = 2.0  # $2 на угоду
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.35 # БУЛО 0.65 → ТЕПЕР 0.35
 
 # ── СТАНДАРТНИЙ EDGE ──────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.25           # підвищено для фільтрації шуму           # мінімальний edge для звичайних угод
-MIN_EDGE_HOLD: float = 0.10
+MIN_EDGE_ENTRY: float = 0.10           # БУЛО 0.25 → ТЕПЕР 0.10
+MIN_EDGE_HOLD: float = 0.05            # БУЛО 0.10 → ТЕПЕР 0.05
 
 # ── MARKETS ───────────────────────────────────────────────────
-MAX_RESOLUTION_HOURS: int = 72         # v26: збільшено для ринків May 1-3
+MAX_RESOLUTION_HOURS: int = 72         
 # Тільки ринки з достатнім об'ємом — менше шуму
-MIN_MARKET_VOLUME_USD: float = 300.0 # для DRY_RUN тестування
-SCAN_INTERVAL_SEC: int = 180               # підвищено для стабільності Render
+MIN_MARKET_VOLUME_USD: float = 300.0   # для DRY_RUN тестування
+SCAN_INTERVAL_SEC: int = 180           
 OSINT_SCAN_INTERVAL_SEC: int = 300
 
 # ── ТЕХНІЧНЕ ─────────────────────────────────────────────────
@@ -73,23 +71,22 @@ EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
 # ── WHITELIST МІСТ (тільки якісні прогнози) ──────────────────
 # Для categorical ринків бот використовує prob_exact_temp_c
 # Тільки міста де прогноз точний і ринок ліквідний
-# Топ-10 міст з найточнішими прогнозами і найбільшими обсягами
+# Топ міст з найточнішими прогнозами і найбільшими обсягами (розширено)
 CITY_WHITELIST: List[str] = [
     "London", "Paris", "NYC", "Chicago",
     "Tokyo", "Seoul", "Buenos Aires",
     "Busan", "Lucknow", "Cape Town",
+    "Miami", "Dallas", "Seattle", "Berlin", "Sydney"
 ]
 
-KNOWN_WHALE_WALLETS: List[str] = []
+KNOWN_WHALE_WALLETS: List[str] =[]
 EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST
 
 # ── АТРИБУТИ ДЛЯ СУМІСНОСТІ (використовуються trader.py / osint_module.py) ──
 MIN_DATA_POINTS_FALLBACK: int = 5      # trader.py: мін. точок для volatility calc
 MAX_POSITION_USD: float = 10.0         # trader.py: абсолютний макс. розмір позиції
-WHALE_THRESHOLD_USD: float = 5000.0   # osint_module.py: поріг whale-угоди
+WHALE_THRESHOLD_USD: float = 5000.0    # osint_module.py: поріг whale-угоди
 
 # ── JSONBIN.IO (хмарне збереження стану) ─────────────────────
-# Отримай безкоштовно на https://jsonbin.io
-# Встанови в Railway: Settings → Variables
 JSONBIN_KEY:    str = os.getenv("JSONBIN_KEY", "")     # X-Master-Key
 JSONBIN_BIN_ID: str = os.getenv("JSONBIN_BIN_ID", "")  # ID bin-а
