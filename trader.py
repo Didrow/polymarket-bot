@@ -1,14 +1,10 @@
 """
-trader.py — Polymarket Weather Bot 2026 (v10 production)
+trader.py — Polymarket Weather Bot 2026 (v11 production)
 
 ВИПРАВЛЕНО:
-  - КРИТИЧНИЙ ФІКС (v10): Gamma API conditionId padding. 
-    Використовуємо префіксне порівняння (startswith) для resolution та MTM,
-    оскільки API повертає 66-символьний хеш для закритих ринків замість скороченого.
-  - PnL tracking через Gamma API polling (resolved markets)
-  - Hourly limit підвищено до 50/год
-  - Дедуплікація: не відкриваємо угоду на той самий condition_id двічі
-  - Збільшено таймаут для погодних ринків (до 100 годин)
+  - КРИТИЧНИЙ ФІКС (v11): Gamma API conditionId padding.
+    API очікує повний 66-символьний хеш (bytes32). Якщо збережений ID був скорочений,
+    запит повертав порожній список. Тепер ми автоматично доповнюємо його нулями.
 """
 
 import math
@@ -28,16 +24,59 @@ logger = logging.getLogger(__name__)
 
 _vol_cache: Dict[str, tuple] = {}
 _active_positions: Dict[str, "Position"] = {}
-# Умови щойно закриті — блокуємо повторне відкриття на 24h
-# {condition_id: datetime_closed}
 _recently_closed: Dict[str, Any] = {}
 
 
 def _ids_match(a: str, b: str) -> bool:
-    """Перевіряє чи збігаються ID (враховуючи, що один може бути довшим через padding нулями)"""
+    """Перевіряє чи збігаються ID (враховуючи, що один може бути довшим через нулі)"""
     if not a or not b:
         return False
-    return a == b or a.startswith(b) or b.startswith(a)
+    a_clean = a.lower().replace("0x", "")
+    b_clean = b.lower().replace("0x", "")
+    if a_clean == b_clean:
+        return True
+    return a_clean.startswith(b_clean) or b_clean.startswith(a_clean)
+
+
+def _fetch_market_from_gamma(market_id: str) -> Optional[Dict]:
+    """
+    Надійно знаходить ринок в Gamma API.
+    Якщо ID - це обрізаний хеш (починається з 0x, але коротший за 66),
+    ми доповнюємо його нулями.
+    """
+    queries =[]
+    market_id_lower = market_id.lower()
+    
+    if market_id_lower.startswith("0x"):
+        # Доповнюємо нулями до 66 символів (0x + 64 символи)
+        padded_id = market_id_lower + "0" * (66 - len(market_id_lower)) if len(market_id_lower) < 66 else market_id_lower
+        queries.append(("conditionId", padded_id))
+        queries.append(("conditionId", market_id_lower))
+    else:
+        queries.append(("id", market_id_lower))
+        
+    for param_name, param_val in queries:
+        for closed_status in [None, "true"]:
+            try:
+                params = {param_name: param_val}
+                if closed_status:
+                    params["closed"] = closed_status
+
+                r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
+                if r.status_code == 200:
+                    data = r.json()
+                    markets = data if isinstance(data, list) else data.get("markets", [])
+                    if markets:
+                        m = markets[0]
+                        api_cid = str(m.get("conditionId", "")).lower()
+                        api_id = str(m.get("id", "")).lower()
+                        
+                        if _ids_match(api_cid, market_id) or _ids_match(api_id, market_id):
+                            return m
+            except Exception as e:
+                logger.debug(f"Gamma API query error ({param_name}={param_val}): {e}")
+                
+    return None
 
 
 @dataclass
@@ -56,7 +95,7 @@ class Position:
     market_type: str
     pnl_usd: float = 0.0
     pnl_pct: float = 0.0
-    status: str = "OPEN"    # OPEN | RESOLVED_YES | RESOLVED_NO | CLOSED
+    status: str = "OPEN"
 
     def update_pnl(self, current_price: float):
         self.current_price = current_price
@@ -65,13 +104,9 @@ class Position:
             self.pnl_usd = self.pnl_pct * self.size_usd
 
     def resolve(self, resolved_yes: bool):
-        """
-        Розрахунок реального PnL після resolution.
-        Shares × $1 (якщо виграш) - size_usd = profit/loss
-        """
         if self.direction == "BUY_YES":
             payout = self.shares * 1.0 if resolved_yes else 0.0
-        else:  # BUY_NO
+        else:
             payout = self.shares * 1.0 if not resolved_yes else 0.0
 
         self.pnl_usd = payout - self.size_usd
@@ -80,16 +115,11 @@ class Position:
         self.current_price = 1.0 if resolved_yes else 0.0
 
 
-# ══════════════════════════════════════════════════════════════════
-# RESOLUTION POLLING (Gamma API)
-# ══════════════════════════════════════════════════════════════════
-
 _resolution_cache: Dict[str, Optional[bool]] = {}
 _resolution_attempt_count: Dict[str, int] = {}
 
 
 def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
-    """Витягує resolved_yes з outcomePrices різних форматів."""
     import json as _json
     try:
         if isinstance(outcome_prices, str):
@@ -99,114 +129,64 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
         if len(prices) >= 2:
             yes_p = float(prices[0])
             no_p  = float(prices[1])
-            if yes_p >= 0.99:
-                return True
-            if no_p >= 0.99:
-                return False
-            if yes_p == 1.0:
-                return True
-            if no_p == 1.0:
-                return False
+            if yes_p >= 0.99: return True
+            if no_p >= 0.99: return False
+            if yes_p == 1.0: return True
+            if no_p == 1.0: return False
     except Exception:
         pass
     return None
 
 
 def check_market_resolved(condition_id: str, position: "Position" = None) -> Optional[bool]:
-    """
-    Перевіряє чи ринок розв'язаний через Gamma API.
-    Повертає True (YES win), False (NO win), None (ще відкритий).
-    """
     if condition_id in _resolution_cache:
         return _resolution_cache[condition_id]
 
     _resolution_attempt_count[condition_id] = _resolution_attempt_count.get(condition_id, 0) + 1
     attempt = _resolution_attempt_count[condition_id]
 
-    def _try_query(param_name: str, param_val: str) -> Optional[bool]:
-        for closed_status in [None, "true"]:
-            try:
-                params = {"conditionId": param_val} if param_name == "conditionId" else {param_name: param_val}
-                if closed_status:
-                    params["closed"] = closed_status
+    m = _fetch_market_from_gamma(condition_id)
+    if m:
+        is_closed   = m.get("closed", False)
+        is_resolved = m.get("resolved", False)
+        outcome_prices = m.get("outcomePrices")
+        winner_idx  = m.get("winnerIndex")
 
-                r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
-                if r.status_code != 200:
-                    continue
+        if not is_closed and not is_resolved:
+            if attempt <= 2 or attempt % 10 == 0:
+                logger.info(f"⏳ Resolution: ринок ще активний, очікуємо | cid={condition_id[:8]}")
+            return None
 
-                data = r.json()
-                markets = data if isinstance(data, list) else data.get("markets",[])
+        if is_closed and not is_resolved:
+            if attempt <= 2 or attempt % 10 == 0:
+                logger.info(f"⚖️ Resolution: торги закриті, чекаємо вердикту суддів | cid={condition_id[:8]}")
 
-                if not markets:
-                    continue
-
-                m = markets[0]
-
-                api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
-                api_id    = str(m.get("id", "")).lower().replace("0x", "")
-                target_id = str(param_val).lower().replace("0x", "")
-
-                if not _ids_match(api_cid, target_id) and not _ids_match(api_id, target_id):
-                    if closed_status == "true" and (attempt <= 3 or attempt % 20 == 0):
-                        logger.info(
-                            f"⚠️ API повернуло невідповідний ринок "
-                            f"(got={api_cid[:16]}, expected={target_id[:16]})"
-                        )
-                    continue
-
-                is_closed   = m.get("closed", False)
-                is_resolved = m.get("resolved", False)
-                outcome_prices = m.get("outcomePrices")
-                winner_idx  = m.get("winnerIndex")
-
-                if not is_closed and not is_resolved:
-                    if attempt <= 2 or attempt % 10 == 0:
-                        logger.info(f"⏳ Resolution: ринок ще активний, очікуємо | cid={target_id[:8]}")
-                    return None
-
-                if is_closed and not is_resolved:
-                    if attempt <= 2 or attempt % 10 == 0:
-                        logger.info(f"⚖️ Resolution: торги закриті, чекаємо вердикту суддів Polymarket | cid={target_id[:8]}")
-
-                tokens = m.get("tokens",[])
-                if tokens:
-                    for token in tokens:
-                        if token.get("winner") is True:
-                            outcome = token.get("outcome", "").strip().upper()
-                            result = (outcome == "YES")
-                            _resolution_cache[condition_id] = result
-                            return result
-
-                result = _parse_outcome_prices(outcome_prices)
-                if result is not None:
+        tokens = m.get("tokens",[])
+        if tokens:
+            for token in tokens:
+                if token.get("winner") is True:
+                    outcome = token.get("outcome", "").strip().upper()
+                    result = (outcome == "YES")
                     _resolution_cache[condition_id] = result
                     return result
 
-                if winner_idx is not None:
-                    result = (int(winner_idx) == 0)
-                    _resolution_cache[condition_id] = result
-                    return result
-
-            except Exception as e:
-                logger.debug(f"Gamma API error під час резолюції: {e}")
-
-        return None
-
-    # S1
-    result = _try_query("conditionId", condition_id)
-    if result is not None:
-        return result
-
-    # S2
-    if not condition_id.startswith("0x"):
-        result = _try_query("id", condition_id)
+        result = _parse_outcome_prices(outcome_prices)
         if result is not None:
+            _resolution_cache[condition_id] = result
             return result
+
+        if winner_idx is not None:
+            result = (int(winner_idx) == 0)
+            _resolution_cache[condition_id] = result
+            return result
+    else:
+        if attempt <= 2 or attempt % 10 == 0:
+            logger.warning(f"⚠️ API не знайшло ринок (можливо ще не проіндексовано) | cid={condition_id[:8]}")
 
     # S3: Timeout failsafe
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
-        if age_hours > 100:
+        if age_hours > 96:
             if position.current_price <= 0.05:
                 logger.info(f"⏰ TIMEOUT FAILSAFE ({age_hours:.1f}h) → YES≈0 → resolved=NO | {position.question[:50]}")
                 _resolution_cache[condition_id] = False
@@ -216,20 +196,17 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 _resolution_cache[condition_id] = True
                 return True
             else:
-                logger.info(f"⏰ TIMEOUT: позиція відкрита {age_hours:.1f}h але ціна={position.current_price:.3f} — чекаємо | {position.question[:50]}")
+                if attempt <= 2 or attempt % 10 == 0:
+                    logger.info(f"⏰ TIMEOUT: позиція відкрита {age_hours:.1f}h але ціна={position.current_price:.3f} — чекаємо | {position.question[:50]}")
 
     return None
 
-
-# ══════════════════════════════════════════════════════════════════
-# ПОЗИЦІЯ-РОЗМІР
-# ══════════════════════════════════════════════════════════════════
 
 def _get_market_vol(token_id: str) -> float:
     cached = _vol_cache.get(token_id)
     if cached and time.time() - cached[0] < 1800:
         return cached[1]
-    vol = 0.18  # fallback
+    vol = 0.18
     _vol_cache[token_id] = (time.time(), vol)
     return vol
 
@@ -268,10 +245,6 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
 
     return round(final, 2)
 
-
-# ══════════════════════════════════════════════════════════════════
-# PLACE TRADE
-# ══════════════════════════════════════════════════════════════════
 
 def place_trade(
     edge_result: EdgeResult,
@@ -347,10 +320,6 @@ def place_trade(
     return None
 
 
-# ══════════════════════════════════════════════════════════════════
-# MTM & ЗАКРИТТЯ ПОЗИЦІЙ
-# ══════════════════════════════════════════════════════════════════
-
 _mtm_price_cache: Dict[str, tuple] = {}
 MTM_CACHE_TTL = 90
 
@@ -360,68 +329,32 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     if cached and time.time() - cached[0] < MTM_CACHE_TTL:
         return cached[1]
 
-    try:
-        r = requests.get(
-            f"{config.GAMMA_URL}/markets",
-            params={"conditionId": condition_id},
-            timeout=6
-        )
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        markets = data if isinstance(data, list) else data.get("markets",[])
-        if not markets:
-            try:
-                r2 = requests.get(
-                    f"{config.GAMMA_URL}/markets",
-                    params={"condition_id": condition_id, "closed": "true"},
-                    timeout=6
-                )
-                if r2.status_code == 200:
-                    data2 = r2.json()
-                    markets = data2 if isinstance(data2, list) else data2.get("markets",[])
-            except Exception:
-                pass
-            if not markets:
-                return None
-                
-        m = markets[0]
+    m = _fetch_market_from_gamma(condition_id)
+    if not m:
+        return None
 
-        api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
-        api_id    = str(m.get("id", "")).lower().replace("0x", "")
-        target_id = str(condition_id).lower().replace("0x", "")
-        
-        # ВИКОРИСТОВУЄМО ТЕ Ж САМЕ ПРЕФІКСНЕ ПОРІВНЯННЯ ТУТ
-        if not _ids_match(api_cid, target_id) and not _ids_match(api_id, target_id):
-            logger.debug(f"⚠️ MTM: Gamma повернуло інший ринок (got={api_cid[:16]}). Заморожуємо PnL.")
-            return None
+    if m.get("closed", False) or m.get("resolved", False):
+        return None
 
-        if m.get("closed", False) or m.get("resolved", False):
-            return None
+    _raw_ask = m.get("bestAsk")
+    _raw_bid = m.get("bestBid")
+    best_ask = float(_raw_ask) if _raw_ask is not None else 0.0
+    best_bid = float(_raw_bid) if _raw_bid is not None else 0.0
 
-        _raw_ask = m.get("bestAsk")
-        _raw_bid = m.get("bestBid")
-        best_ask = float(_raw_ask) if _raw_ask is not None else 0.0
-        best_bid = float(_raw_bid) if _raw_bid is not None else 0.0
+    if best_ask == 0.0 or best_bid == 0.0:
+        return None
 
-        if best_ask == 0.0 or best_bid == 0.0:
-            return None
+    spread = best_ask - best_bid
+    if spread > 0.25:
+        return None
 
-        spread = best_ask - best_bid
-        if spread > 0.25:
-            return None
+    yes_price = (best_ask + best_bid) / 2.0
 
-        yes_price = (best_ask + best_bid) / 2.0
+    if yes_price > 0.99 or yes_price < 0.005:
+        return None
 
-        if yes_price > 0.99 or yes_price < 0.005:
-            return None
-
-        _mtm_price_cache[condition_id] = (time.time(), yes_price)
-        return yes_price
-
-    except Exception as e:
-        logger.debug(f"MTM error {condition_id[:12]}: {e}")
-    return None
+    _mtm_price_cache[condition_id] = (time.time(), yes_price)
+    return yes_price
 
 
 WEATHER_KEYWORDS =[
