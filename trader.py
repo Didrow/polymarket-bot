@@ -1,10 +1,12 @@
 """
-trader.py — Polymarket Weather Bot 2026 (v11 production)
+trader.py — Polymarket Weather Bot 2026 (v12 production)
 
 ВИПРАВЛЕНО:
-  - КРИТИЧНИЙ ФІКС (v11): Gamma API conditionId padding.
-    API очікує повний 66-символьний хеш (bytes32). Якщо збережений ID був скорочений,
-    запит повертав порожній список. Тепер ми автоматично доповнюємо його нулями.
+  - КРИТИЧНИЙ ФІКС (v12): Правильні параметри запиту для Gamma API.
+    Попередні версії використовували `conditionId`, який API ігнорує,
+    повертаючи список з 100 випадкових ринків (де нашого не було).
+    Тепер ми використовуємо `condition_ids` та захист від ігнорування параметрів
+    (перевірка `len(markets) > 5`).
 """
 
 import math
@@ -41,41 +43,44 @@ def _ids_match(a: str, b: str) -> bool:
 def _fetch_market_from_gamma(market_id: str) -> Optional[Dict]:
     """
     Надійно знаходить ринок в Gamma API.
-    Якщо ID - це обрізаний хеш (починається з 0x, але коротший за 66),
-    ми доповнюємо його нулями.
+    API іноді вимагає 'condition_id', іноді 'condition_ids'.
+    Якщо параметр ігнорується, API повертає загальний список багатьох ринків —
+    ми фільтруємо це через len(markets) > 5.
     """
-    queries =[]
     market_id_lower = market_id.lower()
+    padded_id = market_id_lower
     
-    if market_id_lower.startswith("0x"):
-        # Доповнюємо нулями до 66 символів (0x + 64 символи)
-        padded_id = market_id_lower + "0" * (66 - len(market_id_lower)) if len(market_id_lower) < 66 else market_id_lower
-        queries.append(("conditionId", padded_id))
-        queries.append(("conditionId", market_id_lower))
-    else:
-        queries.append(("id", market_id_lower))
-        
-    for param_name, param_val in queries:
-        for closed_status in [None, "true"]:
-            try:
-                params = {param_name: param_val}
-                if closed_status:
-                    params["closed"] = closed_status
+    # Доповнюємо нулями до 66 символів (0x + 64 hex)
+    if market_id_lower.startswith("0x") and len(market_id_lower) < 66:
+        padded_id = market_id_lower + "0" * (66 - len(market_id_lower))
 
-                r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
-                if r.status_code == 200:
-                    data = r.json()
-                    markets = data if isinstance(data, list) else data.get("markets", [])
-                    if markets:
-                        m = markets[0]
-                        api_cid = str(m.get("conditionId", "")).lower()
-                        api_id = str(m.get("id", "")).lower()
+    param_keys = ["condition_ids", "condition_id"] if market_id_lower.startswith("0x") else ["id"]
+
+    for key in param_keys:
+        for val in list(set([padded_id, market_id_lower])):
+            # Шукаємо спочатку в закритих ринках, потім у відкритих
+            for closed_status in ["true", None]:
+                try:
+                    params = {key: val}
+                    if closed_status:
+                        params["closed"] = closed_status
+
+                    r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=6)
+                    if r.status_code == 200:
+                        data = r.json()
+                        markets = data if isinstance(data, list) else data.get("markets",[])
                         
-                        if _ids_match(api_cid, market_id) or _ids_match(api_id, market_id):
-                            return m
-            except Exception as e:
-                logger.debug(f"Gamma API query error ({param_name}={param_val}): {e}")
-                
+                        # Якщо API проігнорувало фільтр, воно поверне купу ринків
+                        if len(markets) > 5:
+                            continue
+
+                        for m in markets:
+                            api_cid = str(m.get("conditionId", "")).lower()
+                            api_id = str(m.get("id", "")).lower()
+                            if _ids_match(api_cid, market_id) or _ids_match(api_id, market_id):
+                                return m
+                except Exception:
+                    pass
     return None
 
 
@@ -183,7 +188,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
         if attempt <= 2 or attempt % 10 == 0:
             logger.warning(f"⚠️ API не знайшло ринок (можливо ще не проіндексовано) | cid={condition_id[:8]}")
 
-    # S3: Timeout failsafe
+    # Timeout failsafe
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
         if age_hours > 96:
