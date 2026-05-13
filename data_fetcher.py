@@ -1,13 +1,11 @@
 """
-data_fetcher.py — Polymarket Weather Bot 2026
-Джерела: NOAA + NASA POWER + Open-Meteo GFS/ECMWF
+data_fetcher.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
+Джерела: NOAA + NASA POWER + Open-Meteo GFS/ECMWF + Open-Meteo ENSEMBLE (31 members)
 
-ВИПРАВЛЕНО:
-  BUG-5: NASA POWER URL хардкодований "start=20260417" → завжди минула дата
-  BUG-6: lru_cache без TTL → якщо перший запит None, залишається None назавжди
-  BUG-7: fallback model="" → URL /v1/ (404), виправлено на "forecast"
-  BUG-8: NOAA повертає °F, код зберігав як °C без конвертації
-  BUG-9: prob_above_temp_c формула ОБЕРНЕНА → виправлено на нормальний розподіл
+РЕАЛІЗАЦІЯ СТРАТЕГІЇ:
+  Використовує Ансамблеві прогнози для розрахунку ймовірності кожної температури
+  в "сітці". Завдяки Гауссовому згладжуванню (sigma=1.3) бот бачить шанси навіть 
+  для тих температур, які відхиляються на 1-2 градуси від середнього прогнозу.
 """
 
 import math
@@ -20,7 +18,7 @@ from typing import Optional, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
-# TTL кеш (замість lru_cache без TTL - BUG-6 fix)
+# TTL кеш
 _cache: Dict[str, Tuple[float, any]] = {}
 CACHE_TTL = 900  # 15 хвилин
 
@@ -38,7 +36,7 @@ def _cache_set(key: str, val):
 
 
 # ─────────────────────────────────────────────
-# WeatherForecast dataclass
+# WeatherForecast dataclass (GRID LADDERING EDITION)
 # ─────────────────────────────────────────────
 
 @dataclass
@@ -50,68 +48,94 @@ class WeatherForecast:
     prob_rain: float = 0.0
     prob_snow: float = 0.0
     sources_used: List[str] = field(default_factory=list)
+    # Зберігаємо всі 31 варіант майбутнього від Ансамблю
+    temp_high_members: List[float] = field(default_factory=list)
+    temp_low_members: List[float] = field(default_factory=list)
 
     def prob_above_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
+        members = self.temp_low_members if is_low else self.temp_high_members
+        sigma = 1.3  # Метеорологічна похибка (розкид)
+        
+        # Якщо є дані ансамблю (31 модель)
+        if members:
+            prob = sum(0.5 * (1 + math.erf((m - threshold_c) / (sigma * math.sqrt(2)))) for m in members) / len(members)
+            return max(0.01, min(0.99, round(prob, 4)))
+        
+        # Fallback до одного значення, якщо ансамбль недоступний
         tc = self.temp_low_c if is_low else self.temp_high_c
         if tc == 0.0:
             return 0.50
         diff = tc - threshold_c
-        sigma = 2.5
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
-        return max(0.02, min(0.98, round(prob, 4)))
+        return max(0.01, min(0.99, round(prob, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
         return 1.0 - self.prob_above_temp_c(threshold_c, is_low)
+
+    def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
+        """
+        МАГІЯ СІТКИ (Grid): рахує ймовірність того, що температура потрапить у Polymarket бакет.
+        Бакет Polymarket "exactly 25°C" означає діапазон [24.5°C, 25.49°C].
+        Завдяки sigma=1.3, бот бачить ймовірність сусідніх температур.
+        """
+        members = self.temp_low_members if is_low else self.temp_high_members
+        sigma = 1.3
+        
+        if members:
+            prob = 0.0
+            for m in members:
+                p_high = 0.5 * (1 + math.erf((threshold_c + 0.5 - m) / (sigma * math.sqrt(2))))
+                p_low  = 0.5 * (1 + math.erf((threshold_c - 0.5 - m) / (sigma * math.sqrt(2))))
+                prob += (p_high - p_low)
+            return max(0.01, min(0.99, round(prob / len(members), 4)))
+
+        tc = self.temp_low_c if is_low else self.temp_high_c
+        if tc == 0.0:
+            return 0.01
+        p_high = 0.5 * (1 + math.erf((threshold_c + 0.5 - tc) / (sigma * math.sqrt(2))))
+        p_low  = 0.5 * (1 + math.erf((threshold_c - 0.5 - tc) / (sigma * math.sqrt(2))))
+        return max(0.01, min(0.99, round(p_high - p_low, 4)))
 
     def prob_rain_or_snow(self) -> float:
         return max(0.02, min(0.98, max(self.prob_rain, self.prob_snow)))
 
 
 # ─────────────────────────────────────────────
-# Координати міст (великий список)
+# Координати міст
 # ─────────────────────────────────────────────
 
-# ══════════════════════════════════════════════════════════════════
-# AIRPORT COORDINATES (точніші для weather market resolution)
-# Більшість Polymarket weather ринків вирішуються за аеропортною станцією
-# ══════════════════════════════════════════════════════════════════
 AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
-    # США — ICAO станції (використовують Wunderground/ASOS)
-    "NYC":           (40.6413, -73.7781),   # KJFK (JFK Airport)
-    "New York":      (40.6413, -73.7781),   # KJFK
-    "Chicago":       (41.9742, -87.9073),   # KORD (O'Hare)
-    "Los Angeles":   (33.9425, -118.4081),  # KLAX
-    "San Francisco": (37.6213, -122.3790),  # KSFO
-    "Miami":         (25.7959, -80.2870),   # KMIA
-    "Dallas":        (32.8998, -97.0403),   # KDFW
-    "Seattle":       (47.4502, -122.3088),  # KSEA
-    "Boston":        (42.3656, -71.0096),   # KBOS
-    "Denver":        (39.8561, -104.6737),  # KDEN
-    "Atlanta":       (33.6407, -84.4277),   # KATL
-    # Європа
-    "London":        (51.4775, -0.4614),    # EGLL (Heathrow)
-    "Paris":         (49.0097, 2.5479),     # LFPG (CDG)
-    "Berlin":        (52.3667, 13.5033),    # EDDB (Brandenburg)
-    "Madrid":        (40.4936, -3.5668),    # LEMD (Barajas)
-    "Amsterdam":     (52.3086, 4.7639),     # EHAM (Schiphol)
-    "Rome":          (41.8003, 12.2389),    # LIRF (Fiumicino)
-    "Istanbul":      (40.9769, 28.8146),    # LTFM
-    # Азія
-    "Tokyo":         (35.5494, 139.7798),   # RJTT (Haneda)
-    "Seoul":         (37.4602, 126.4407),   # RKSI (Incheon)
-    "Singapore":     (1.3644, 103.9915),    # WSSS (Changi)
-    "Dubai":         (25.2532, 55.3657),    # OMDB
-    "Bangkok":       (13.6811, 100.7472),   # VTBS (Suvarnabhumi)
-    # Інші
-    "Sydney":        (-33.9399, 151.1753),  # YSSY (Kingsford Smith)
-    "Toronto":       (43.6777, -79.6248),   # CYYZ (Pearson)
-    "Buenos Aires":  (-34.8222, -58.5358),  # SAEZ (Ezeiza)
-    "Cape Town":     (-33.9715, 18.6021),   # FACT
-    "Busan":         (35.1795, 128.9381),   # RKPK (Gimhae)
+    "NYC":           (40.6413, -73.7781),
+    "New York":      (40.6413, -73.7781),
+    "Chicago":       (41.9742, -87.9073),
+    "Los Angeles":   (33.9425, -118.4081),
+    "San Francisco": (37.6213, -122.3790),
+    "Miami":         (25.7959, -80.2870),
+    "Dallas":        (32.8998, -97.0403),
+    "Seattle":       (47.4502, -122.3088),
+    "Boston":        (42.3656, -71.0096),
+    "Denver":        (39.8561, -104.6737),
+    "Atlanta":       (33.6407, -84.4277),
+    "London":        (51.4775, -0.4614),
+    "Paris":         (49.0097, 2.5479),
+    "Berlin":        (52.3667, 13.5033),
+    "Madrid":        (40.4936, -3.5668),
+    "Amsterdam":     (52.3086, 4.7639),
+    "Rome":          (41.8003, 12.2389),
+    "Istanbul":      (40.9769, 28.8146),
+    "Tokyo":         (35.5494, 139.7798),
+    "Seoul":         (37.4602, 126.4407),
+    "Singapore":     (1.3644, 103.9915),
+    "Dubai":         (25.2532, 55.3657),
+    "Bangkok":       (13.6811, 100.7472),
+    "Sydney":        (-33.9399, 151.1753),
+    "Toronto":       (43.6777, -79.6248),
+    "Buenos Aires":  (-34.8222, -58.5358),
+    "Cape Town":     (-33.9715, 18.6021),
+    "Busan":         (35.1795, 128.9381),
 }
 
 CITY_COORDS: Dict[str, Tuple[float, float]] = {
-    # США (NOAA покриває)
     "NYC":           (40.7128, -74.0060),
     "New York":      (40.7128, -74.0060),
     "Chicago":       (41.8781, -87.6298),
@@ -132,7 +156,6 @@ CITY_COORDS: Dict[str, Tuple[float, float]] = {
     "Nashville":     (36.1627, -86.7816),
     "Charlotte":     (35.2271, -80.8431),
     "Orlando":       (28.5383, -81.3792),
-    # Європа
     "London":        (51.5074, -0.1278),
     "Paris":         (48.8566, 2.3522),
     "Berlin":        (52.5200, 13.4049),
@@ -149,7 +172,6 @@ CITY_COORDS: Dict[str, Tuple[float, float]] = {
     "Moscow":        (55.7558, 37.6173),
     "Helsinki":      (60.1699, 24.9384),
     "Ankara":        (39.9334, 32.8597),
-    # Азія
     "Tokyo":         (35.6895, 139.6917),
     "Seoul":         (37.5665, 126.9780),
     "Beijing":       (39.9042, 116.4074),
@@ -173,7 +195,6 @@ CITY_COORDS: Dict[str, Tuple[float, float]] = {
     "Karachi":       (24.8607, 67.0011),
     "Lucknow":       (26.8467, 80.9462),
     "Hanoi":         (21.0285, 105.8542),
-    # Інші
     "Sydney":        (-33.8688, 151.2093),
     "Melbourne":     (-37.8136, 144.9631),
     "Brisbane":      (-27.4698, 153.0251),
@@ -203,16 +224,11 @@ US_CITIES = {
 
 
 def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float, float]]:
-    """
-    Повертає координати міста.
-    prefer_airport=True: використовує координати аеропорту (точніше для weather markets).
-    """
-    # Спочатку перевіряємо аеропортні координати (точніші для resolution)
     if prefer_airport and city in AIRPORT_COORDS:
         return AIRPORT_COORDS[city]
     if city in CITY_COORDS:
         return CITY_COORDS[city]
-    # Geocoding через Open-Meteo
+        
     key = f"geo_{city}"
     cached = _cache_get(key)
     if cached:
@@ -235,13 +251,81 @@ def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float,
 
 
 # ─────────────────────────────────────────────
-# 1. NOAA/NWS (США — найточніше)
+# 1. ENSEMBLE API (ГОЛОВНЕ ДЖЕРЕЛО ДЛЯ GRID YES)
+# ─────────────────────────────────────────────
+
+def fetch_open_meteo_ensemble(city: str) -> Optional[WeatherForecast]:
+    """Отримує 31 варіант погоди для створення ймовірнісної сітки."""
+    coords = _get_coords(city, prefer_airport=True)
+    if not coords:
+        return None
+
+    key = f"ensemble_{city}"
+    cached = _cache_get(key)
+    if cached:
+        return cached
+
+    lat, lon = coords
+    try:
+        r = requests.get(
+            "https://ensemble-api.open-meteo.com/v1/ensemble",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "daily": "temperature_2m_max,temperature_2m_min",
+                "models": "gfs_ensemble", # Отримуємо 31 members
+                "timezone": "auto",
+                "forecast_days": 3,
+            },
+            timeout=10
+        )
+        r.raise_for_status()
+        daily = r.json().get("daily", {})
+        
+        high_m, low_m = [],[]
+        # Парсинг всіх 31 варіантів прогнозу (members)
+        for i in range(1, 32):
+            k_high = f"temperature_2m_max_member{i:02d}"
+            k_low  = f"temperature_2m_min_member{i:02d}"
+            if k_high in daily and daily[k_high] and daily[k_high][0] is not None:
+                high_m.append(daily[k_high][0])
+            if k_low in daily and daily[k_low] and daily[k_low][0] is not None:
+                low_m.append(daily[k_low][0])
+
+        if not high_m:
+            return None
+
+        # Розрахунок середнього прогнозу Ансамблю
+        avg_high = sum(high_m) / len(high_m)
+        avg_low  = sum(low_m) / len(low_m) if low_m else avg_high - 8
+
+        fc = WeatherForecast(
+            city=city, 
+            timestamp=datetime.utcnow(),
+            temp_high_c=round(avg_high, 1), 
+            temp_low_c=round(avg_low, 1),
+            sources_used=["Open-Meteo_ENSEMBLE"]
+        )
+        # Зберігаємо "мемберів" для розрахунку сітки ймовірностей
+        fc.temp_high_members = high_m
+        fc.temp_low_members = low_m
+        
+        _cache_set(key, fc)
+        logger.debug(f"⛅ ENSEMBLE {city}: {len(high_m)} members (mean: {avg_high:.1f}°C)")
+        return fc
+    except Exception as e:
+        logger.debug(f"Ensemble error {city}: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────
+# 2. NOAA/NWS (США)
 # ─────────────────────────────────────────────
 
 def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
     if city not in US_CITIES:
         return None
-    coords = _get_coords(city, prefer_airport=True)  # аеропортні координати точніші
+    coords = _get_coords(city, prefer_airport=True)
     if not coords:
         return None
 
@@ -255,21 +339,18 @@ def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
         r = requests.get(
             f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}",
             timeout=10,
-            headers={"User-Agent": "PolymarketWeatherBot/2026"}
+            headers={"User-Agent": "PolymarketWeatherBot/GridEdition"}
         )
         r.raise_for_status()
         forecast_url = r.json()["properties"]["forecast"]
 
         r2 = requests.get(forecast_url, timeout=10,
-                           headers={"User-Agent": "PolymarketWeatherBot/2026"})
+                           headers={"User-Agent": "PolymarketWeatherBot/GridEdition"})
         r2.raise_for_status()
         periods = r2.json()["properties"]["periods"][:2]
 
-        # BUG-8 FIX: NOAA повертає °F — конвертуємо в °C!
-        high_f = max((p.get("temperature", 60) for p in periods
-                      if p.get("temperature")), default=60)
-        low_f  = min((p.get("temperature", 50) for p in periods
-                      if p.get("temperature")), default=50)
+        high_f = max((p.get("temperature", 60) for p in periods if p.get("temperature")), default=60)
+        low_f  = min((p.get("temperature", 50) for p in periods if p.get("temperature")), default=50)
         high_c = (high_f - 32) * 5 / 9
         low_c  = (low_f  - 32) * 5 / 9
 
@@ -286,7 +367,6 @@ def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
             sources_used=["NOAA"]
         )
         _cache_set(key, fc)
-        logger.debug(f"NOAA {city}: {high_c:.1f}°C ({high_f:.0f}°F)")
         return fc
     except Exception as e:
         logger.debug(f"NOAA error {city}: {e}")
@@ -294,27 +374,22 @@ def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
 
 
 # ─────────────────────────────────────────────
-# 2. NASA POWER (глобально, безкоштовно)
+# 3. NASA POWER (Кліматична база)
 # ─────────────────────────────────────────────
 
 def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
     coords = _get_coords(city, prefer_airport=True)
-    if not coords:
-        return None
+    if not coords: return None
 
     key = f"nasa_{city}"
     cached = _cache_get(key)
-    if cached:
-        return cached
+    if cached: return cached
 
     lat, lon = coords
     try:
-        # BUG-5 FIX: динамічні дати (не хардкод "20260417")
         end_dt   = datetime.utcnow()
         start_dt = end_dt - timedelta(days=10)
-        end_str   = end_dt.strftime("%Y%m%d")
-        start_str = start_dt.strftime("%Y%m%d")
-
+        
         r = requests.get(
             "https://power.larc.nasa.gov/api/temporal/daily/point",
             params={
@@ -322,8 +397,8 @@ def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
                 "community":  "RE",
                 "longitude":  lon,
                 "latitude":   lat,
-                "start":      start_str,
-                "end":        end_str,
+                "start":      start_dt.strftime("%Y%m%d"),
+                "end":        end_dt.strftime("%Y%m%d"),
                 "format":     "JSON",
             },
             timeout=15
@@ -331,27 +406,23 @@ def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
         r.raise_for_status()
         data = r.json()["properties"]["parameter"]
 
-        # Фільтруємо невалідні значення (-999)
         tmax_vals = [v for v in data["T2M_MAX"].values() if v and v > -900]
         tmin_vals = [v for v in data["T2M_MIN"].values() if v and v > -900]
         prec_vals = [v for v in data["PRECTOTCORR"].values() if v and v >= 0]
 
-        if not tmax_vals:
-            return None
+        if not tmax_vals: return None
 
-        high_c = sum(tmax_vals[-5:]) / len(tmax_vals[-5:])  # останні 5 днів
+        high_c = sum(tmax_vals[-5:]) / len(tmax_vals[-5:])
         low_c  = sum(tmin_vals[-5:]) / len(tmin_vals[-5:]) if tmin_vals else high_c - 8
         avg_prec = sum(prec_vals[-5:]) / len(prec_vals[-5:]) if prec_vals else 0
 
         fc = WeatherForecast(
             city=city, timestamp=datetime.utcnow(),
             temp_high_c=round(high_c, 1), temp_low_c=round(low_c, 1),
-            prob_rain=min(0.90, avg_prec / 8.0),
-            prob_snow=0.0,
+            prob_rain=min(0.90, avg_prec / 8.0), prob_snow=0.0,
             sources_used=["NASA_POWER"]
         )
         _cache_set(key, fc)
-        logger.debug(f"NASA POWER {city}: {high_c:.1f}°C")
         return fc
     except Exception as e:
         logger.debug(f"NASA POWER error {city}: {e}")
@@ -359,22 +430,16 @@ def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
 
 
 # ─────────────────────────────────────────────
-# 3. Open-Meteo (GFS / ECMWF / forecast)
+# 4. Open-Meteo Single (GFS / ECMWF)
 # ─────────────────────────────────────────────
 
 def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherForecast]:
-    """
-    BUG-7 FIX: fallback model="" → 404. Тепер default = "forecast".
-    Підтримувані моделі: "forecast", "gfs", "ecmwf"
-    """
     coords = _get_coords(city, prefer_airport=True)
-    if not coords:
-        return None
+    if not coords: return None
 
     key = f"om_{model}_{city}"
     cached = _cache_get(key)
-    if cached:
-        return cached
+    if cached: return cached
 
     lat, lon = coords
     try:
@@ -384,8 +449,7 @@ def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherFore
                 "latitude":   lat,
                 "longitude":  lon,
                 "daily":      ["temperature_2m_max", "temperature_2m_min",
-                               "precipitation_probability_max",
-                               "precipitation_sum"],
+                               "precipitation_probability_max", "precipitation_sum"],
                 "timezone":   "auto",
                 "forecast_days": 3,
             },
@@ -393,199 +457,117 @@ def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherFore
         )
         r.raise_for_status()
         daily = r.json().get("daily", {})
-        if not daily:
-            return None
+        if not daily: return None
 
         high_c     = daily["temperature_2m_max"][0]
         low_c      = daily["temperature_2m_min"][0]
         rain_prob  = (daily.get("precipitation_probability_max", [0])[0] or 0) / 100.0
-        precip_mm  = daily.get("precipitation_sum", [0])[0] or 0
 
-        source_name = f"Open-Meteo_{model.upper()}"
         fc = WeatherForecast(
             city=city, timestamp=datetime.utcnow(),
             temp_high_c=round(high_c, 1), temp_low_c=round(low_c, 1),
             prob_rain=rain_prob, prob_snow=0.0,
-            sources_used=[source_name]
+            sources_used=[f"Open-Meteo_{model.upper()}"]
         )
         _cache_set(key, fc)
-        logger.debug(f"Open-Meteo/{model} {city}: {high_c:.1f}°C, rain={rain_prob:.0%}")
         return fc
     except Exception as e:
         logger.debug(f"Open-Meteo/{model} error {city}: {e}")
         return None
 
 
+# ─────────────────────────────────────────────
+# 5. METAR (Real-time airport observation)
+# ─────────────────────────────────────────────
 
-# ══════════════════════════════════════════════════════════════════
-# METAR — Real-time airport observations (aviation.gov, безкоштовно)
-# Використовується для ринків з hours_to_resolution < 4h
-# ══════════════════════════════════════════════════════════════════
-
-# ICAO коди для наших міст
 CITY_TO_ICAO: Dict[str, str] = {
-    "NYC":          "KJFK",
-    "New York":     "KJFK",
-    "Chicago":      "KORD",
-    "Los Angeles":  "KLAX",
-    "San Francisco":"KSFO",
-    "Miami":        "KMIA",
-    "Dallas":       "KDFW",
-    "Seattle":      "KSEA",
-    "Boston":       "KBOS",
-    "Denver":       "KDEN",
-    "Atlanta":      "KATL",
-    "London":       "EGLL",
-    "Paris":        "LFPG",
-    "Berlin":       "EDDB",
-    "Amsterdam":    "EHAM",
-    "Istanbul":     "LTFM",
-    "Tokyo":        "RJTT",
-    "Seoul":        "RKSI",
-    "Singapore":    "WSSS",
-    "Dubai":        "OMDB",
-    "Sydney":       "YSSY",
-    "Toronto":      "CYYZ",
-    "Buenos Aires": "SAEZ",
-    "Busan":        "RKPK",
+    "NYC": "KJFK", "New York": "KJFK", "Chicago": "KORD", "Los Angeles": "KLAX",
+    "San Francisco": "KSFO", "Miami": "KMIA", "Dallas": "KDFW", "Seattle": "KSEA",
+    "Boston": "KBOS", "Denver": "KDEN", "Atlanta": "KATL", "London": "EGLL",
+    "Paris": "LFPG", "Berlin": "EDDB", "Amsterdam": "EHAM", "Istanbul": "LTFM",
+    "Tokyo": "RJTT", "Seoul": "RKSI", "Singapore": "WSSS", "Dubai": "OMDB",
+    "Sydney": "YSSY", "Toronto": "CYYZ", "Buenos Aires": "SAEZ", "Busan": "RKPK",
 }
 
-
 def fetch_metar(city: str) -> Optional[WeatherForecast]:
-    """
-    METAR: реальне спостереження з аеропорту прямо зараз.
-    Корисно для ринків що закриваються < 4 годин.
-    API: https://aviationweather.gov/api/data/metar
-    """
     icao = CITY_TO_ICAO.get(city)
-    if not icao:
-        return None
+    if not icao: return None
 
     key = f"metar_{city}"
     cached = _cache_get(key)
-    if cached:
-        return cached
+    if cached: return cached
 
     try:
         r = requests.get(
             "https://aviationweather.gov/api/data/metar",
             params={"ids": icao, "format": "json", "hours": 1},
             timeout=8,
-            headers={"User-Agent": "PolymarketWeatherBot/2026"}
+            headers={"User-Agent": "PolymarketWeatherBot"}
         )
         r.raise_for_status()
         data = r.json()
-        if not data or not isinstance(data, list):
-            return None
+        if not data or not isinstance(data, list): return None
 
         obs = data[0]
-        # Температура в °C (METAR завжди °C)
         temp_c = obs.get("temp")
-        if temp_c is None:
-            return None
-
-        temp_c = float(temp_c)
-        dewpoint = obs.get("dewp", temp_c - 5)
+        if temp_c is None: return None
 
         fc = WeatherForecast(
-            city=city,
-            timestamp=datetime.utcnow(),
-            temp_high_c=temp_c,       # поточна температура (не max!)
-            temp_low_c=float(dewpoint),
-            prob_rain=0.0,
-            prob_snow=0.0,
+            city=city, timestamp=datetime.utcnow(),
+            temp_high_c=float(temp_c), temp_low_c=float(obs.get("dewp", temp_c - 5)),
+            prob_rain=0.0, prob_snow=0.0,
             sources_used=["METAR"]
         )
-        # Короткий кеш для METAR (30 хвилин)
-        _cache[key] = (time.time() - CACHE_TTL + 1800, fc)
-        logger.info(f"METAR {city} ({icao}): {temp_c:.1f}°C (real-time)")
+        _cache[key] = (time.time() - CACHE_TTL + 1800, fc) # Короткий кеш (30 хв)
         return fc
-
     except Exception as e:
         logger.debug(f"METAR error {city} ({icao}): {e}")
         return None
 
 
 # ─────────────────────────────────────────────
-# CONSENSUS (всі джерела → зважене середнє)
+# CONSENSUS (Злиття прогнозів + ENSEMBLE)
 # ─────────────────────────────────────────────
 
 def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
-    """
-    BUG-6 FIX: власний TTL кеш замість lru_cache без TTL.
-    Якщо перший запит повернув None — наступний через 15 хвилин спробує знову.
-    """
     key = f"consensus_{city}"
     cached = _cache_get(key)
-    if cached:
-        return cached
+    if cached: return cached
 
-    forecasts_w = []  # (forecast, weight)
+    forecasts_w =[]
 
-    # 1. NOAA для США (найвища вага)
     fc = fetch_noaa_forecast(city)
-    if fc:
-        forecasts_w.append((fc, 0.45))
+    if fc: forecasts_w.append((fc, 0.45))
 
-    # 2. NASA POWER (знижено: кліматичні avg, не оперативний прогноз)
     fc = fetch_nasa_power(city)
-    if fc:
-        forecasts_w.append((fc, 0.10))
+    if fc: forecasts_w.append((fc, 0.10))
 
-    # 3. GFS (підвищено: реальний NWP прогноз оновлюється 4 рази/добу)
     fc = fetch_open_meteo(city, "gfs")
-    if fc:
-        forecasts_w.append((fc, 0.30))
+    if fc: forecasts_w.append((fc, 0.30))
 
-    # 4. ECMWF (підвищено: найточніший NWP для Європи)
     fc = fetch_open_meteo(city, "ecmwf")
-    if fc:
-        forecasts_w.append((fc, 0.25))
+    if fc: forecasts_w.append((fc, 0.25))
 
-    # 5. METAR — real-time airport observation
-    # ВАЖЛИВО: METAR = поточна T, НЕ денний максимум!
-    # Busan вночі = 13°C, але денний max = 20°C → METAR спотворює прогноз.
-    # Включаємо ТІЛЬКИ якщо hours_to_resolution <= 6h (T зараз ≈ денному max)
-    # І тільки якщо gap між METAR і GFS <= 5°C (немає нічного ефекту).
     metar = fetch_metar(city)
     if metar and hours_to_resolution <= 6.0:
-        gfs_fc = next(
-            (fc for fc, _ in forecasts_w
-             if fc and fc.sources_used and
-             any("GFS" in s or "NOAA" in s for s in fc.sources_used)),
-            None
-        )
-        metar_ok = True
-        if gfs_fc:
-            gap = abs(metar.temp_high_c - gfs_fc.temp_high_c)
-            if gap > 5.0:
-                logger.debug(
-                    f"METAR {city}: gap {gap:.1f}°C > 5°C "
-                    f"(METAR={metar.temp_high_c:.1f} GFS={gfs_fc.temp_high_c:.1f}) — нічна T, skip"
-                )
-                metar_ok = False
-        if metar_ok:
-            metar_w = 0.50 if hours_to_resolution <= 2.0 else (
-                      0.35 if hours_to_resolution <= 4.0 else 0.20)
+        gfs_fc = next((f for f, _ in forecasts_w if any("GFS" in s or "NOAA" in s for s in f.sources_used)), None)
+        if not gfs_fc or abs(metar.temp_high_c - gfs_fc.temp_high_c) <= 5.0:
+            metar_w = 0.50 if hours_to_resolution <= 2.0 else 0.35 if hours_to_resolution <= 4.0 else 0.20
             forecasts_w.append((metar, metar_w))
-            logger.info(
-                f"METAR {city}: {metar.temp_high_c:.1f}°C вага={metar_w:.2f} "
-                f"({hours_to_resolution:.1f}h)"
-            )
-    if not forecasts_w:
-        fc = fetch_open_meteo(city, "forecast")
-        if fc:
-            forecasts_w.append((fc, 1.0))
 
-    if not forecasts_w:
+    # ОТРИМУЄМО АНСАМБЛЕВИЙ ПРОГНОЗ ДЛЯ СІТКИ
+    ens_fc = fetch_open_meteo_ensemble(city)
+
+    if not forecasts_w and not ens_fc:
         logger.warning(f"Немає прогнозу для {city}")
         return None
 
-    total_w = sum(w for _, w in forecasts_w)
-
     def wavg(attr: str) -> float:
+        if not forecasts_w:
+            return getattr(ens_fc, attr)
         return sum(getattr(f, attr) * w for f, w in forecasts_w) / total_w
 
+    total_w = sum(w for _, w in forecasts_w) if forecasts_w else 0.0
     all_sources = [s for f, _ in forecasts_w for s in f.sources_used]
 
     result = WeatherForecast(
@@ -593,20 +575,24 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
         timestamp=datetime.utcnow(),
         temp_high_c=round(wavg("temp_high_c"), 1),
         temp_low_c=round(wavg("temp_low_c"), 1),
-        prob_rain=round(wavg("prob_rain"), 3),
-        prob_snow=round(wavg("prob_snow"), 3),
-        sources_used=all_sources,
+        prob_rain=round(wavg("prob_rain"), 3) if forecasts_w else 0.0,
+        prob_snow=round(wavg("prob_snow"), 3) if forecasts_w else 0.0,
+        sources_used=all_sources + (["ENSEMBLE"] if ens_fc else[]),
     )
+
+    # ПЕРЕДАЄМО "МЕМБЕРІВ" АНСАМБЛЮ В РЕЗУЛЬТАТ (Саме вони формують Сітку)
+    if ens_fc:
+        result.temp_high_members = ens_fc.temp_high_members
+        result.temp_low_members = ens_fc.temp_low_members
 
     _cache_set(key, result)
     logger.info(
         f"Forecast {city}: {result.temp_high_c:.1f}°C "
-        f"(rain={result.prob_rain:.0%}) "
-        f"| src={'+'.join(all_sources[:3])}"
+        f"| src={'+'.join(result.sources_used[:3])} "
+        f"| Members: {len(result.temp_high_members) if result.temp_high_members else 0}"
     )
     return result
 
-
 def get_multi_source_consensus(city: str, hours: float = 24.0) -> Optional[WeatherForecast]:
-    """Alias для сумісності."""
+    """Alias для сумісності з іншими модулями."""
     return get_best_forecast(city, hours)
