@@ -48,7 +48,7 @@ class EdgeResult:
 
 
 # ══════════════════════════════════════════════════════════════════
-# ПАРСИНГ ПОРОГУ — з визначенням одиниць (°C або °F)
+# ПАРСИНГ ПОРОГУ
 # ══════════════════════════════════════════════════════════════════
 
 def _parse_threshold_with_unit(question: str) -> Tuple[Optional[float], str]:
@@ -99,7 +99,6 @@ def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
         return 0.60
     sources = forecast.sources_used
     
-    # Ансамбль (31 модель) дає найвищу статистичну впевненість для нашої сітки
     if "Open-Meteo_ENSEMBLE" in sources or "ENSEMBLE" in sources:
         return 0.90
         
@@ -107,14 +106,11 @@ def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
     if "NOAA" in sources and n >= 2: return 0.95
     if "NOAA" in sources: return 0.90
     if any("GFS" in s for s in sources) and any("ECMWF" in s for s in sources): return 0.87
-    if any("GFS" in s for s in sources): return 0.82
-    if any("ECMWF" in s for s in sources): return 0.82
-    if "NASA_POWER" in sources and n == 1: return 0.55
-    return 0.70
+    return 0.75
 
 
 # ══════════════════════════════════════════════════════════════════
-# РОЗРАХУНОК ЙМОВІРНОСТІ ЧЕРЕЗ АНСАМБЛЬ (Grid Logic)
+# РОЗРАХУНОК ЙМОВІРНОСТІ
 # ══════════════════════════════════════════════════════════════════
 
 def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -> Tuple[float, float, str]:
@@ -137,20 +133,19 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
 
-    # Використовуємо нові ансамблеві методи з data_fetcher
     if kind == "above":
         p = forecast.prob_above_temp_c(threshold_c, is_low)
     elif kind == "below":
         p = forecast.prob_below_temp_c(threshold_c, is_low)
     else:
-        # Categorical ринки — це основа нашої сітки!
+        # Categorical ринки — серце стратегії fridius2
         p = forecast.prob_exact_temp_c(threshold_c, is_low)
 
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
 
 
 # ══════════════════════════════════════════════════════════════════
-# ОСНОВНА ФУНКЦІЯ РОЗРАХУНКУ EDGE (ТІЛЬКИ YES)
+# ОБЧИСЛЕННЯ EDGE
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -161,7 +156,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if not city or (hasattr(config, 'CITY_WHITELIST') and city not in config.CITY_WHITELIST):
         return None
 
-    if market.hours_to_resolution < 2.0 or market.hours_to_resolution > 48.0:
+    if market.hours_to_resolution < 1.5 or market.hours_to_resolution > 48.0:
         return None
 
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
@@ -172,51 +167,45 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         return None
 
     confidence = _confidence_from_forecast(forecast)
-    if confidence < 0.70:
-        return None
-
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
     
-    # Для YES стратегії нас цікавить ціна покупки (ASK)
+    # Використовуємо ASK для розрахунку реальної вартості входу
     market_prob = market.best_ask_yes
-    if market_prob == 0.0 or market_prob >= 0.99:
-        return None  # Порожній стакан або вже вирішений ринок
+    if market_prob <= 0.001 or market_prob >= 0.99:
+        return None 
 
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
     tc = forecast.temp_low_c if is_low else forecast.temp_high_c
     fc_temp = f"{tc:.1f}°C"
-    
-    # Визначаємо, чи використовуємо ми дані ансамблю для цього прогнозу
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
+    # Ефективний edge з урахуванням впевненості моделі
     eff_edge = (our_prob - market_prob) * confidence
 
-    # 🎣 1. ЛОГІКА "РИБАЛЬСЬКОЇ СІТКИ" (GRID YES LADDERING)
-    # Шукаємо дешеві контракти сусідніх температур, ймовірність яких занижена ринком
+    # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     is_grid_yes = (
         kind == "categorical"
-        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES     # Ціна <= 12¢
-        and our_prob >= 0.05                                   # Ансамбль дає хоча б 5% шанс
-        and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES       # Маємо перевагу EV
+        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES 
+        and our_prob >= 0.05 
+        and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES
+    )
+
+    # 🎯 СТРАТЕГІЯ 2: SNIPER YES (Основний прогноз)
+    is_sniper_yes = (
+        eff_edge >= config.MIN_EDGE_ENTRY 
+        and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
     )
 
     if is_grid_yes:
         size_usd = max(config.MIN_POSITION_USD, min(config.EXTREME_TAIL_MAX_SIZE_USD, 4.0))
         reason = f"🎣 GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
-        tradeable = True
-
-    # 🎯 2. ЛОГІКА "СНАЙПЕРА" (SNIPER YES)
-    # Якщо це найбільш імовірна температура, і ми маємо суттєву перевагу
-    elif eff_edge >= config.MIN_EDGE_ENTRY:
+    elif is_sniper_yes:
         size_usd = config.BASE_POSITION_USD
         reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
-        tradeable = True
-        
     else:
-        # Ринок ефективний або переоцінений. 
-        # Ми БІЛЬШЕ НЕ КУПУЄМО "NO". Ми просто пропускаємо.
+        # Ми ПОВНІСТЮ ігноруємо BUY_NO в цій версії
         return None
 
     return EdgeResult(
@@ -228,13 +217,14 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         edge_direction=direction,
         confidence=confidence,
         reason=reason,
-        is_tradeable=tradeable,
+        is_tradeable=True,
         size_usd=round(size_usd, 2),
         threshold_c=threshold_c,
     )
 
+
 # ══════════════════════════════════════════════════════════════════
-# СКАНУВАННЯ ВСІХ РИНКІВ
+# СКАНУВАННЯ
 # ══════════════════════════════════════════════════════════════════
 
 def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
@@ -245,7 +235,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
         if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
             skip_vol += 1
             continue
-        if market.hours_to_resolution < 2.0 or market.hours_to_resolution > 48.0:
+        if market.hours_to_resolution < 1.5 or market.hours_to_resolution > 48.0:
             skip_hours += 1
             continue
         if market.detected_city and hasattr(config, 'CITY_WHITELIST') and config.CITY_WHITELIST:
@@ -262,7 +252,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             logger.info(f"✅ EDGE: {edge.summary}")
             results.append(edge)
 
-    # Сортуємо: найкращий edge першим
+    # Сортування: Grid угоди мають пріоритет за потенціалом R:R
     results.sort(key=lambda r: r.edge, reverse=True)
 
     logger.info(
