@@ -274,13 +274,23 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             if market.best_ask_yes < config.EXTREME_TAIL_MAX_ASK_YES:
                 logger.debug(f"SKIP: standard BUY_YES best_ask={market.best_ask_yes:.4f} < {config.EXTREME_TAIL_MAX_ASK_YES:.2f} — ghost market")
                 return None
+            # Не боремося з ринком коли YES ціна дуже низька (<10¢ = ринок впевнений що NO)
+            if market_prob < 0.10:
+                logger.debug(f"SKIP BUY_YES: market_prob={market_prob:.2f} < 0.10 — ринок дуже впевнений у NO")
+                return None
             reason = f"YES {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
         else:
             direction = "BUY_NO"
             eff_edge  = eff_no
+            # КЛЮЧОВИЙ ФІЛЬТР: не боремося з ринком коли YES > 80%
+            # Коли market_prob > 0.80 — ринок майже напевно правий (METAR вже підтвердив).
+            # Саме ці угоди (NO за 2-9¢) знищили win rate до 15%.
+            if market_prob > 0.80:
+                logger.debug(f"SKIP BUY_NO: market_prob={market_prob:.2f} > 0.80 — не воюємо з впевненим ринком")
+                return None
             reason = f"NO {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
 
-        # Блокуємо тільки якщо edge < 15% І confidence < 80%
+        # Мінімальний edge + confidence
         if eff_edge < 0.15 and confidence < 0.80:
             logger.debug(f"Слабкий edge {eff_edge:.1%} + confidence {confidence:.2f} < 0.80 → skip")
             return None

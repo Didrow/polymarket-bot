@@ -42,11 +42,11 @@ COLDMATH_MAX_SIZE_USD: float = 2.0     # макс $2.0 на NO tail угоду
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.05  # YES price ≤ 5¢
 EXTREME_TAIL_MAX_SIZE_USD: float = 2.0  # $2 на угоду
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.35 # БУЛО 0.65 → ТЕПЕР 0.35
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.40 # 40% для extreme YES tail
 
 # ── СТАНДАРТНИЙ EDGE ──────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.10           # БУЛО 0.25 → ТЕПЕР 0.10
-MIN_EDGE_HOLD: float = 0.05            # БУЛО 0.10 → ТЕПЕР 0.05
+MIN_EDGE_ENTRY: float = 0.20           # 20% мінімум для стандартних угод
+MIN_EDGE_HOLD: float = 0.08            # 8% для утримання позиції
 
 # ── MARKETS ───────────────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72         
