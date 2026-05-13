@@ -1,12 +1,18 @@
-"""
-edge_calculator.py — coldmath v9 (production-ready)
 
-ВИПРАВЛЕНО ВСІ КРИТИЧНІ БАГИ:
-  - BUG-F (КРИТИЧНИЙ): °F/°C конверсія
-  - BUG-C: Categorical ринки ("be exactly 17°C")
-  - BUG-H: our_prob=0.98 для "above/below" ринків
-  - BUG-L: Hourly limit
-  - BUG-P: PnL = 0 завжди в DRY_RUN
+
+
+Вибач за обрив! Дійсно, повідомлення обрізалося через ліміт символів. 
+
+Ось **повний і завершений файл `edge_calculator.py`** від першого до останнього рядка. Ти можеш скопіювати його цілком і замінити свій поточний файл.
+
+```python
+"""
+edge_calculator.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
+
+Адаптовано під стратегію "fridius2":
+- Повністю вимкнено пошук угод BUY_NO.
+- Агресивний пошук дешевих BUY_YES (до 12 центів) через Ансамблеві ймовірності.
+- Купівля сусідніх температур для створення "Рибальської сітки" навколо прогнозу.
 """
 
 import math
@@ -29,12 +35,12 @@ class EdgeResult:
     estimated_prob: float
     market_prob: float
     edge: float
-    edge_direction: str      # "BUY_YES" | "BUY_NO"
+    edge_direction: str      # Тепер завжди "BUY_YES"
     confidence: float
     reason: str
     is_tradeable: bool
     size_usd: float = 0.0
-    threshold_c: float = 0.0  # зберігаємо конвертований поріг для логу
+    threshold_c: float = 0.0
 
     @property
     def edge_pct(self) -> str:
@@ -54,18 +60,11 @@ class EdgeResult:
 # ══════════════════════════════════════════════════════════════════
 
 def _parse_threshold_with_unit(question: str) -> Tuple[Optional[float], str]:
-    """
-    Повертає (threshold_value, unit) де unit = 'C' або 'F'.
-    """
-    # °F явно вказане
     m = re.search(r'(\d+\.?\d*)\s*°?\s*F\b', question)
-    if m:
-        return float(m.group(1)), 'F'
+    if m: return float(m.group(1)), 'F'
 
-    # °C явно вказане
     m = re.search(r'(\d+\.?\d*)\s*°?\s*C\b', question)
-    if m:
-        return float(m.group(1)), 'C'
+    if m: return float(m.group(1)), 'C'
 
     fahrenheit_cities = {"chicago", "dallas", "nyc", "new york", "san francisco",
                          "miami", "los angeles", "seattle", "atlanta", "boston",
@@ -79,7 +78,7 @@ def _parse_threshold_with_unit(question: str) -> Tuple[Optional[float], str]:
         val = float(m.group(1))
         if val > 40 and is_fahrenheit_city:
             return val, 'F'
-        if val > 50:  # температура >50 без одиниці = майже напевно °F
+        if val > 50:
             return val, 'F'
         return val, 'C'
 
@@ -87,14 +86,10 @@ def _parse_threshold_with_unit(question: str) -> Tuple[Optional[float], str]:
 
 
 def _f_to_c(f: float) -> float:
-    """Конвертація Fahrenheit → Celsius."""
     return (f - 32) * 5 / 9
 
 
 def _detect_market_kind(question: str) -> str:
-    """
-    Визначити тип ринку: "above" | "below" | "categorical"
-    """
     q = question.lower()
     if "or higher" in q or "or above" in q or "above" in q or "exceed" in q:
         return "above"
@@ -104,37 +99,33 @@ def _detect_market_kind(question: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# CONFIDENCE
+# CONFIDENCE (Впевненість)
 # ══════════════════════════════════════════════════════════════════
 
 def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
     if not forecast or not forecast.sources_used:
         return 0.60
     sources = forecast.sources_used
-    n = len(sources)
-    if "NOAA" in sources and n >= 2:
-        return 0.95
-    if "NOAA" in sources:
+    
+    # Ансамбль (31 модель) дає найвищу статистичну впевненість для нашої сітки
+    if "Open-Meteo_ENSEMBLE" in sources or "ENSEMBLE" in sources:
         return 0.90
-    if any("GFS" in s for s in sources) and any("ECMWF" in s for s in sources):
-        return 0.87
-    if any("GFS" in s for s in sources):
-        return 0.82
-    if any("ECMWF" in s for s in sources):
-        return 0.82
-    if "NASA_POWER" in sources and n == 1:
-        return 0.55
+        
+    n = len(sources)
+    if "NOAA" in sources and n >= 2: return 0.95
+    if "NOAA" in sources: return 0.90
+    if any("GFS" in s for s in sources) and any("ECMWF" in s for s in sources): return 0.87
+    if any("GFS" in s for s in sources): return 0.82
+    if any("ECMWF" in s for s in sources): return 0.82
+    if "NASA_POWER" in sources and n == 1: return 0.55
     return 0.70
 
 
 # ══════════════════════════════════════════════════════════════════
-# РОЗРАХУНОК ЙМОВІРНОСТІ
+# РОЗРАХУНОК ЙМОВІРНОСТІ ЧЕРЕЗ АНСАМБЛЬ (Grid Logic)
 # ══════════════════════════════════════════════════════════════════
 
-def estimate_market_probability(
-    market: PolyMarket,
-    forecast: WeatherForecast,
-) -> Tuple[float, float, str]:
+def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -> Tuple[float, float, str]:
     if not forecast:
         return 0.50, 0.0, "no_forecast"
 
@@ -153,30 +144,21 @@ def estimate_market_probability(
 
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
-    tc = forecast.temp_low_c if is_low else forecast.temp_high_c
 
-    if tc == 0.0 or tc is None:
-        return 0.50, threshold_c, kind
-
+    # Використовуємо нові ансамблеві методи з data_fetcher
     if kind == "above":
         p = forecast.prob_above_temp_c(threshold_c, is_low)
     elif kind == "below":
         p = forecast.prob_below_temp_c(threshold_c, is_low)
     else:
-        sigma = 2.0
-        erf = math.erf
-        sqrt2 = math.sqrt(2)
-        p = (
-            0.5 * (1 + erf((threshold_c + 0.5 - tc) / (sigma * sqrt2))) -
-            0.5 * (1 + erf((threshold_c - 0.5 - tc) / (sigma * sqrt2)))
-        )
-        p = max(0.01, min(0.99, p))
+        # Categorical ринки — це основа нашої сітки!
+        p = forecast.prob_exact_temp_c(threshold_c, is_low)
 
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
 
 
 # ══════════════════════════════════════════════════════════════════
-# ОСНОВНА ФУНКЦІЯ РОЗРАХУНКУ EDGE
+# ОСНОВНА ФУНКЦІЯ РОЗРАХУНКУ EDGE (ТІЛЬКИ YES)
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -184,12 +166,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         return None
 
     city = market.detected_city
-    if not city:
+    if not city or (hasattr(config, 'CITY_WHITELIST') and city not in config.CITY_WHITELIST):
         return None
-
-    if hasattr(config, 'CITY_WHITELIST') and config.CITY_WHITELIST:
-        if city not in config.CITY_WHITELIST:
-            return None
 
     if market.hours_to_resolution < 2.0 or market.hours_to_resolution > 48.0:
         return None
@@ -203,102 +181,50 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     confidence = _confidence_from_forecast(forecast)
     if confidence < 0.70:
-        logger.debug(f"Low confidence {confidence:.2f} for {city}")
         return None
 
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
-    market_prob = market.midpoint_yes
-
-    if (1.0 - market_prob) < 0.015:
-        logger.debug(f"SKIP: market YES={market_prob:.3f} → NO price < 0.015")
-        return None
+    
+    # Для YES стратегії нас цікавить ціна покупки (ASK)
+    market_prob = market.best_ask_yes
+    if market_prob == 0.0 or market_prob >= 0.99:
+        return None  # Порожній стакан або вже вирішений ринок
 
     kind = _detect_market_kind(market.question)
-    _, unit = _parse_threshold_with_unit(market.question)
-
     is_low = 'lowest' in market.question.lower()
     tc = forecast.temp_low_c if is_low else forecast.temp_high_c
-
-    if kind == "below" and unit == 'F':
-        temp_gap = tc - threshold_c
-        if temp_gap > 8.0:
-            logger.debug(f"SANITY SKIP °F below: forecast {tc:.1f}°C > threshold {threshold_c:.1f}°C (+{temp_gap:.1f}°C gap)")
-            return None
-
-    edge_yes = our_prob - market_prob
-    edge_no  = (1.0 - our_prob) - (1.0 - market_prob)
-    eff_yes  = edge_yes * confidence
-    eff_no   = edge_no  * confidence
-
     fc_temp = f"{tc:.1f}°C"
-    src = "+".join(s.split("_")[0] for s in (forecast.sources_used or [])[:2])
-    no_price = 1.0 - market_prob
+    
+    # Визначаємо, чи використовуємо ми дані ансамблю для цього прогнозу
+    src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
-    is_coldmath_no = (
-        config.ENABLE_COLDMATH_TAIL_NO
-        and no_price >= config.COLDMATH_MIN_ASK_NO
-        and no_price <= config.COLDMATH_MAX_ASK_NO
-        and our_prob <= 0.03
-        and eff_no >= config.COLDMATH_MIN_EDGE_NO
+    direction = "BUY_YES"
+    eff_edge = (our_prob - market_prob) * confidence
+
+    # 🎣 1. ЛОГІКА "РИБАЛЬСЬКОЇ СІТКИ" (GRID YES LADDERING)
+    # Шукаємо дешеві контракти сусідніх температур, ймовірність яких занижена ринком
+    is_grid_yes = (
+        kind == "categorical"
+        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES     # Ціна <= 12¢
+        and our_prob >= 0.05                                   # Ансамбль дає хоча б 5% шанс
+        and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES       # Маємо перевагу EV
     )
 
-    is_extreme_yes = (
-        config.ENABLE_EXTREME_TAIL_YES
-        and market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES
-        and eff_yes >= config.EXTREME_TAIL_MIN_EDGE_YES
-        and confidence >= 0.80
-        and our_prob >= 0.15
-    )
-
-    if market.midpoint_yes < 0.003:
-        return None
-
-    if is_coldmath_no:
-        direction = "BUY_NO"
-        eff_edge  = abs(eff_no)
-        size_usd  = min(config.COLDMATH_MAX_SIZE_USD, max(config.MIN_POSITION_USD, config.BASE_POSITION_USD * confidence))
-        reason = f"COLDMATH NO @ {no_price:.3f} | {kind_label} | прогноз:{fc_temp} | {src}"
+    if is_grid_yes:
+        size_usd = max(config.MIN_POSITION_USD, min(config.EXTREME_TAIL_MAX_SIZE_USD, 4.0))
+        reason = f"🎣 GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
         tradeable = True
 
-    elif is_extreme_yes:
-        direction = "BUY_YES"
-        eff_edge  = abs(eff_yes)
-        size_usd  = min(config.EXTREME_TAIL_MAX_SIZE_USD, max(config.MIN_POSITION_USD, 2.0))
-        reason = f"EXTREME YES @ {market.best_ask_yes:.3f} | {kind_label} | прогноз:{fc_temp} | {src}"
+    # 🎯 2. ЛОГІКА "СНАЙПЕРА" (SNIPER YES)
+    # Якщо це найбільш імовірна температура, і ми маємо суттєву перевагу
+    elif eff_edge >= config.MIN_EDGE_ENTRY:
+        size_usd = config.BASE_POSITION_USD
+        reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
         tradeable = True
-
-    elif abs(eff_yes) >= config.MIN_EDGE_ENTRY or abs(eff_no) >= config.MIN_EDGE_ENTRY:
-        if eff_yes >= eff_no:
-            direction = "BUY_YES"
-            eff_edge  = eff_yes
-            if market.best_ask_yes < config.EXTREME_TAIL_MAX_ASK_YES:
-                logger.debug(f"SKIP: standard BUY_YES best_ask={market.best_ask_yes:.4f} < {config.EXTREME_TAIL_MAX_ASK_YES:.2f} — ghost market")
-                return None
-            # Не боремося з ринком коли YES ціна дуже низька (<10¢ = ринок впевнений що NO)
-            if market_prob < 0.10:
-                logger.debug(f"SKIP BUY_YES: market_prob={market_prob:.2f} < 0.10 — ринок дуже впевнений у NO")
-                return None
-            reason = f"YES {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
-        else:
-            direction = "BUY_NO"
-            eff_edge  = eff_no
-            # КЛЮЧОВИЙ ФІЛЬТР: не боремося з ринком коли YES > 80%
-            # Коли market_prob > 0.80 — ринок майже напевно правий (METAR вже підтвердив).
-            # Саме ці угоди (NO за 2-9¢) знищили win rate до 15%.
-            if market_prob > 0.80:
-                logger.debug(f"SKIP BUY_NO: market_prob={market_prob:.2f} > 0.80 — не воюємо з впевненим ринком")
-                return None
-            reason = f"NO {our_prob:.2f} vs {market_prob:.2f} | {kind_label} | прогноз:{fc_temp} | {src}"
-
-        # Мінімальний edge + confidence
-        if eff_edge < 0.15 and confidence < 0.80:
-            logger.debug(f"Слабкий edge {eff_edge:.1%} + confidence {confidence:.2f} < 0.80 → skip")
-            return None
-
-        size_usd = max(config.MIN_POSITION_USD, min(config.BASE_POSITION_USD * confidence * 1.1, config.INITIAL_CAPITAL * config.MAX_POSITION_PCT))
-        tradeable = True
-
+        
     else:
+        # Ринок ефективний або переоцінений. 
+        # Ми БІЛЬШЕ НЕ КУПУЄМО "NO". Ми просто пропускаємо.
         return None
 
     return EdgeResult(
