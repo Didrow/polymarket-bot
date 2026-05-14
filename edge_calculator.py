@@ -185,10 +185,14 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     eff_edge = (our_prob - market_prob) * confidence
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
+    # Мінімум 2¢: ринки по 0.3-1¢ — мертві (нема ліквідності, ніхто не купить).
+    # fridius2 купує по 3-10¢, не по 0.3¢.
+    GRID_MIN_PRICE = 0.02
     is_grid_yes = (
         kind == "categorical"
-        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES 
-        and our_prob >= 0.05 
+        and market_prob >= GRID_MIN_PRICE
+        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
+        and our_prob >= 0.08
         and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES
     )
 
