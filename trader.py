@@ -118,6 +118,12 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
       S2: GET /markets?id=X          (деякі ринки не мають conditionId)
       S3: Timeout failsafe            (позиція відкрита довгий час → force-close)
     """
+    # PADDING: Gamma API потребує повний 66-символьний bytes32 ID (0x + 64 hex).
+    # Збережені ID можуть бути короткими (напр. 0xc885...2a = 20 chars).
+    # Без паддінгу API ігнорує запит і повертає фантомний ринок (e3b423df...).
+    if condition_id.startswith("0x") and len(condition_id) < 66:
+        condition_id = "0x" + condition_id[2:].zfill(64)
+
     if condition_id in _resolution_cache:
         return _resolution_cache[condition_id]
 
