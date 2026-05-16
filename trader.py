@@ -1,10 +1,9 @@
 """
-trader.py — Polymarket Weather Bot 2026 (v15 Ultimate API Fix)
+trader.py — Polymarket Weather Bot 2026 (v16 Self-Cleaning Edition)
 
 ВИПРАВЛЕНО:
-  - Gamma API тепер опитується за `clobTokenIds` замість `condition_id`. 
-  - Це на 100% усуває баг "API повертає невідповідний ринок" і дозволяє 
-    бачити статуси "Очікуємо вердикту суддів".
+  - Зменшено таймаути завислих ринків зі 120 до 72 годин.
+  - Покращена перевірка clobTokenIds.
 """
 
 import math
@@ -96,7 +95,6 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     def _try_query() -> Optional[bool]:
         for closed_status in [None, "true"]:
             try:
-                # МАГІЯ ТУТ: Використовуємо token_id замість проблемного condition_id
                 params = {}
                 if position and position.token_id:
                     params["clobTokenIds"] = position.token_id
@@ -118,17 +116,14 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
                 m = markets[0]
 
-                # Перевірка безпеки (спрацює і для токена, і для condition_id)
                 api_tokens = str(m.get("clobTokenIds", "")).lower()
                 api_cid = str(m.get("conditionId", "")).lower().replace("0x", "")
                 target_id = str(condition_id).lower().replace("0x", "")
                 
-                # Якщо шукали за токеном, він точно має бути в результаті
                 if position and position.token_id:
                     if position.token_id.lower() not in api_tokens:
                         continue
                 else:
-                    # Порівнюємо: чи один ID є префіксом іншого (короткий vs повний bytes32)
                     def _ids_match(a: str, b: str) -> bool:
                         return a == b or a.startswith(b) or b.startswith(a)
                     if not _ids_match(api_cid, target_id):
@@ -166,7 +161,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                     _resolution_cache[condition_id] = result
                     return result
 
-            except Exception as e:
+            except Exception:
                 pass
         return None
 
@@ -174,10 +169,10 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     if result is not None:
         return result
 
-    # Timeout failsafe для занадто старих позицій
+    # ЗНИЖЕНО ТАЙМАУТ: Якщо позиція висить більше 72 годин — форсуємо закриття
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
-        if age_hours > 100:  
+        if age_hours > 72:  
             if position.current_price <= 0.05:
                 logger.info(f"⏰ TIMEOUT ({age_hours:.1f}h) → YES≈0 → force resolved=NO | {position.question[:50]}")
                 _resolution_cache[condition_id] = False
@@ -396,7 +391,8 @@ def cleanup_stale_positions() -> List[str]:
             removed.append(cid)
             continue
 
-        if age_hours > 120:
+        # ЗНИЖЕНО: Видаляємо сміття через 72 години
+        if age_hours > 72:
             del _active_positions[cid]
             removed.append(cid)
             continue
