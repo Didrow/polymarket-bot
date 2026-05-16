@@ -124,10 +124,15 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 target_id = str(condition_id).lower().replace("0x", "")
                 
                 # Якщо шукали за токеном, він точно має бути в результаті
-                if position and position.token_id and position.token_id.lower() not in api_tokens:
-                    continue
-                elif not position and target_id not in api_cid:
-                    continue
+                if position and position.token_id:
+                    if position.token_id.lower() not in api_tokens:
+                        continue
+                else:
+                    # Порівнюємо: чи один ID є префіксом іншого (короткий vs повний bytes32)
+                    def _ids_match(a: str, b: str) -> bool:
+                        return a == b or a.startswith(b) or b.startswith(a)
+                    if not _ids_match(api_cid, target_id):
+                        continue
 
                 is_closed   = m.get("closed", False)
                 is_resolved = m.get("resolved", False)
