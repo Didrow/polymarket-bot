@@ -293,13 +293,15 @@ def main():
     restored = safeguard.restore_positions()
     if restored:
         _trader._active_positions.update(restored)
-    # v28-fix: очищення фіктивних/non-weather позицій + ЗБЕРЕГТИ в JSONBin
+
+    # Одразу після restore — примусово видаляємо фантомні позиції:
+    # старі > 48h або з нереальним PnL > $50
     removed = cleanup_stale_positions()
     if removed:
-        logger.warning(f"🧹 Очищено {len(removed)} фіктивних позицій при старті: {removed}")
-        # КРИТИЧНО: зберігаємо очищений стан в JSONBin одразу
-        # інакше при наступному рестарті GTA VI повернеться знову
+        logger.warning(f"🧹 Очищено {len(removed)} застарілих/фантомних позицій при старті")
+        # Зберігаємо в JSONBin щоб вони не повернулись після наступного рестарту
         safeguard.save_positions(_trader._active_positions)
+        logger.info(f"💾 JSONBin оновлено: {len(_trader._active_positions)} активних позицій")
 
     # Email startup notification
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
