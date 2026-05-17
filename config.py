@@ -48,7 +48,7 @@ MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання (
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72         
 MIN_MARKET_VOLUME_USD: float = 1000.0   # Знижено поріг, щоб ловити більше дешевих ринків для сітки
-SCAN_INTERVAL_SEC: int = 120            # Сканування кожні 2 хвилини
+SCAN_INTERVAL_SEC: int = 600            # Сканування кожні 10 хвилини
 OSINT_SCAN_INTERVAL_SEC: int = 300
 MAX_VOL_NO_TRADE: float = 0.60
 TARGET_PORTFOLIO_VOL: float = 0.15
