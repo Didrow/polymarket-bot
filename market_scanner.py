@@ -25,6 +25,20 @@ WEATHER_CITIES = [
     "dallas", "buenos-aires", "lagos", "lucknow", "paris", "berlin", "seoul"
 ]
 
+
+def normalize_condition_id(cid: str) -> str:
+    """
+    Нормалізує condition_id до єдиного формату (0x + 64 символи).
+    Це вирішує проблему дублювання та зависання ринків під час resolution polling.
+    """
+    if not cid:
+        return ""
+    cid = str(cid).strip().lower()
+    if cid.startswith("0x"):
+        cid = cid[2:]
+    return "0x" + cid.zfill(64)
+
+
 @dataclass
 class PolyMarket:
     condition_id: str
@@ -45,6 +59,7 @@ class PolyMarket:
     is_above: Optional[bool] = None
     raw: Dict = field(default_factory=dict)
 
+
 def _parse_dt(s: str) -> Optional[datetime]:
     if not s:
         return None
@@ -56,6 +71,7 @@ def _parse_dt(s: str) -> Optional[datetime]:
         return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except Exception:
         return None
+
 
 def _detect_city(text: str) -> str:
     t = text.lower()
@@ -71,6 +87,7 @@ def _detect_city(text: str) -> str:
         if key in t:
             return city
     return ""
+
 
 def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket]:
     try:
@@ -105,23 +122,10 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         token_yes_id = str(token_ids[0])
         token_no_id = str(token_ids[1])
 
-        prices_str = raw.get("outcomePrices", "[\"0.5\", \"0.5\"]")
-        prices = json.loads(prices_str) if isinstance(prices_str, str) else prices_str
-        if len(prices) < 2:
-            prices = ["0.5", "0.5"]
-        yes_price = float(prices[0]) if prices[0] else 0.5
-        no_price = float(prices[1]) if prices[1] else 0.5
-        if yes_price <= 0:
-            yes_price = 0.001
-        if no_price <= 0:
-            no_price = 0.001
-
-        # ВИПРАВЛЕННЯ: "0.0 or yes_price" повертає yes_price навіть якщо стакан порожній!
-        # Правильно: явно перевіряємо None vs 0
-        _raw_ask = raw.get("bestAsk")
-        _raw_bid = raw.get("bestBid")
-        best_ask = float(_raw_ask) if _raw_ask is not None else 0.0
-        best_bid = float(_raw_bid) if _raw_bid is not None else 0.0
+        # ВИПРАВЛЕННЯ: ЗАХИСТ ВІД NONE для bestAsk/bestBid (float() від None викликає TypeError)
+        best_ask = float(raw.get("bestAsk") or 0.0)
+        best_bid = float(raw.get("bestBid") or 0.0)
+        
         # Якщо немає продавців — купити можна тільки за 100¢ (неліквідний)
         if best_ask == 0.0:
             best_ask = 1.0
@@ -178,8 +182,12 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         elif any(w in full for w in ["below", "under", "or lower"]):
             is_above = False
 
+        # НОРМАЛІЗАЦІЯ ID ОДРАЗУ НА ЕТАПІ ПАРСИНГУ
+        raw_cid = raw.get("conditionId") or raw.get("id", "")
+        norm_cid = normalize_condition_id(raw_cid)
+
         return PolyMarket(
-            condition_id=raw.get("conditionId") or raw.get("id", ""),
+            condition_id=norm_cid,
             question=question,
             description=description[:200],
             end_date=end_date,
@@ -201,6 +209,7 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         logger.debug(f"Parse error: {e} | {raw.get('question', '')[:40]}")
         return None
 
+
 def _extract_markets_from_event(event: Dict, hours_limit: float) -> List[PolyMarket]:
     result = []
     event_end = event.get("endDate", "")
@@ -212,6 +221,7 @@ def _extract_markets_from_event(event: Dict, hours_limit: float) -> List[PolyMar
         if pm:
             result.append(pm)
     return result
+
 
 def _fetch_events_by_tag(tag_slug: str, hours_limit: float) -> List[PolyMarket]:
     found = []
@@ -230,6 +240,7 @@ def _fetch_events_by_tag(tag_slug: str, hours_limit: float) -> List[PolyMarket]:
         logger.debug(f"tag={tag_slug} error: {e}")
     return found
 
+
 def _fetch_event_by_slug(slug: str, hours_limit: float) -> List[PolyMarket]:
     try:
         r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug}, timeout=8)
@@ -243,6 +254,7 @@ def _fetch_event_by_slug(slug: str, hours_limit: float) -> List[PolyMarket]:
         return result
     except Exception:
         return []
+
 
 def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     cache_key = "weather_markets"
@@ -258,7 +270,7 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     def add(lst: List[PolyMarket]) -> int:
         n = 0
         for pm in lst:
-            cid = pm.condition_id
+            cid = pm.condition_id  # condition_id тут ВЖЕ нормалізований
             if cid and cid not in seen:
                 seen.add(cid)
                 all_markets.append(pm)
