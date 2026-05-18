@@ -170,9 +170,10 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     # ── 2. Перевірка та закриття існуючих позицій ──────────
     # v27: cleanup у кожному циклі — видаляє non-weather позиції що з'явились під час роботи
-    removed = cleanup_stale_positions()
-    if removed:
-        logger.warning(f"🧹 Очищено під час циклу: {removed}")
+    stale = cleanup_stale_positions()
+    for pos in stale:
+        safeguard.record_trade_close(pos.pnl_usd, pos.size_usd)
+        logger.warning(f"🧹 Cleanup closed: {pos.question[:60]} | PnL ${pos.pnl_usd:.2f}")
 
     closed = check_and_close_positions(clob_client)
     for pos in closed:

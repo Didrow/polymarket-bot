@@ -527,14 +527,12 @@ WEATHER_KEYWORDS =[
     "busan", "buenos aires", "lucknow", "cape town", "nyc",
 ]
 
-def cleanup_stale_positions() -> List[str]:
+def cleanup_stale_positions() -> List[Position]:
     """
-    v28: Видаляє позиції які:
-    1. НЕ є weather ринками (non-weather: political, crypto, etc.)
-    2. Відкриті > 120h і resolution недоступний
-    3. endDate далеко в майбутньому (> 14 днів) — явно не weather ринок
+    Видаляє застарілі/фантомні позиції.
+    Повертає List[Position] (з заповненим pnl_usd) для record_trade_close в main.py.
     """
-    removed =[]
+    removed: List[Position] = []
     now = datetime.now(timezone.utc)
     for cid, pos in list(_active_positions.items()):
         question_lower = pos.question.lower()
@@ -546,17 +544,31 @@ def cleanup_stale_positions() -> List[str]:
             logger.warning(
                 f"🧹 CLEANUP non-weather: {pos.question[:70]} | age={age_hours:.1f}h"
             )
+            pos.pnl_usd = 0.0
             del _active_positions[cid]
-            removed.append(cid)
+            removed.append(pos)
             continue
 
         # Причина 2: відкрита > 48h без resolution
+        # Замість тихого видалення — фіксуємо результат по поточній ціні
         if age_hours > 48:
-            logger.warning(
-                f"🧹 CLEANUP застаріла (age={age_hours:.1f}h): {pos.question[:70]}"
-            )
+            price = pos.current_price if pos.current_price > 0 else pos.entry_price
+            # YES переміг якщо ціна > 0.80, програв якщо < 0.20
+            if price >= 0.80:
+                pnl = (1.0 - pos.entry_price) * pos.size_usd
+                logger.info(f"✅ WIN (48h timeout, price={price:.2f}): {pos.question[:60]} | PnL +${pnl:.2f}")
+                pos.pnl_usd = pnl
+            elif price <= 0.20:
+                pnl = -pos.entry_price * pos.size_usd
+                logger.info(f"❌ LOSS (48h timeout, price={price:.2f}): {pos.question[:60]} | PnL ${pnl:.2f}")
+                pos.pnl_usd = pnl
+            else:
+                # Ціна в середині — записуємо як LOSS по entry
+                pnl = -pos.entry_price * pos.size_usd
+                logger.warning(f"❌ LOSS (48h timeout, ціна невизначена {price:.2f}): {pos.question[:60]} | PnL ${pnl:.2f}")
+                pos.pnl_usd = pnl
             del _active_positions[cid]
-            removed.append(cid)
+            removed.append(pos)
             continue
 
         # Причина 3: фантомна позиція — нереальний PnL (> $50 на $100 капіталі)
@@ -565,8 +577,9 @@ def cleanup_stale_positions() -> List[str]:
             logger.warning(
                 f"🧹 CLEANUP фантом (pnl=${pos.pnl_usd:.2f} нереально): {pos.question[:70]}"
             )
+            pos.pnl_usd = 0.0
             del _active_positions[cid]
-            removed.append(cid)
+            removed.append(pos)
             continue
 
     return removed
