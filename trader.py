@@ -1,5 +1,5 @@
 """
-trader.py — Polymarket Weather Bot 2026 (v10 WIN/LOSS FIXED)
+trader.py — Polymarket Weather Bot 2026 (v12 DEEPSEEK API FIX)
 """
 
 import math
@@ -99,11 +99,11 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     _resolution_attempt_count[condition_id] = _resolution_attempt_count.get(condition_id, 0) + 1
     attempt = _resolution_attempt_count[condition_id]
 
-    def _try_query(param_name: str, param_val: str) -> Optional[bool]:
+    def _try_query(param_val: str) -> Optional[bool]:
         for closed_status in [None, "true", "false"]:
             try:
-                api_param = "condition_id" if param_name == "conditionId" else param_name
-                params = {api_param: param_val}
+                # ✅ DEEPSEEK FIX: Завжди використовуємо conditionId (camelCase)
+                params = {"conditionId": param_val}
                 if closed_status:
                     params["closed"] = closed_status
 
@@ -115,6 +115,12 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 markets = data if isinstance(data, list) else data.get("markets", [])
                 if not markets:
                     continue
+
+                # ✅ ЛОГУВАННЯ ВІД DEEPSEEK (Покаже, чи спрацював фільтр API)
+                if attempt <= 2 and closed_status is None:
+                    api_first_id = normalize_condition_id(markets[0].get("conditionId", ""))
+                    if api_first_id != condition_id:
+                        logger.debug(f"🔍 API Debug: Шукали {condition_id[:10]}..., API повернуло {api_first_id[:10]}...")
 
                 found_m = None
                 for m in markets:
@@ -162,7 +168,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 logger.debug(f"Gamma API error під час резолюції: {e}")
         return None
 
-    result = _try_query("conditionId", condition_id)
+    result = _try_query(condition_id)
     if result is not None: return result
 
     return None
@@ -282,7 +288,8 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         return cached[1]
 
     try:
-        r = requests.get(f"{config.GAMMA_URL}/markets", params={"condition_id": condition_id}, timeout=6)
+        # ✅ DEEPSEEK FIX: conditionId (camelCase)
+        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": condition_id}, timeout=6)
         if r.status_code != 200: return None
         data = r.json()
         markets = data if isinstance(data, list) else data.get("markets", [])
@@ -300,7 +307,6 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
 
         if m.get("closed", False) or m.get("resolved", False): return None
 
-        # Захист від None (Рекомендація 4)
         best_ask = float(m.get("bestAsk") or 0.0)
         best_bid = float(m.get("bestBid") or 0.0)
 
@@ -316,7 +322,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         pass
     return None
 
-WEATHER_KEYWORDS =["temperature", "celsius", "fahrenheit", "weather", "rain", "snow", "degrees"]
+WEATHER_KEYWORDS = ["temperature", "celsius", "fahrenheit", "weather", "rain", "snow", "degrees", "london", "paris", "tokyo", "new york", "chicago", "seoul", "busan", "buenos aires", "lucknow", "cape town", "nyc"]
 
 def cleanup_stale_positions() -> List[Position]:
     removed: List[Position] = []
@@ -331,7 +337,7 @@ def cleanup_stale_positions() -> List[Position]:
             removed.append(pos)
             continue
 
-        # Рекомендація 3: прибираємо магію з ціною, ставимо чесний таймаут 120 год.
+        # ✅ ТАЙМАУТ ЗАЛИШАЄМО 120 ГОДИН!
         if age_hours > 120:
             logger.warning(f"🗑 TIMEOUT 120h: Ринок застряг, видаляємо в 0 | {pos.question[:60]}")
             pos.pnl_usd = 0.0
@@ -348,7 +354,7 @@ def cleanup_stale_positions() -> List[Position]:
     return removed
 
 def check_and_close_positions(clob_client) -> List[Position]:
-    closed =[]
+    closed = []
     for cid, pos in list(_active_positions.items()):
         norm_cid = normalize_condition_id(cid)
 
