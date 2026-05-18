@@ -5,6 +5,7 @@ safeguards.py — Polymarket Weather Bot 2026
 v26-railway: Подвійне збереження стану
   PRIMARY:  JSONBin.io (хмара) — виживає після будь-якого рестарту
   FALLBACK: локальний bot_state.json — якщо JSONBin недоступний
+v10 (WIN/LOSS FIXED): Нормалізація ID під час відновлення позицій.
 """
 
 import logging
@@ -213,11 +214,15 @@ class SafeguardManager:
         restored = {}
         try:
             for cid, d in self.state.open_positions.items():
+                # ВИПРАВЛЕННЯ: Лікуємо старі "короткі" або неправильні ID з бази
+                norm_cid = _trader.normalize_condition_id(cid)
+
                 entry_time = datetime.fromisoformat(d["entry_time"]) if "entry_time" in d else datetime.now(timezone.utc)
                 if entry_time.tzinfo is None:
                     entry_time = entry_time.replace(tzinfo=timezone.utc)
+                
                 pos = _trader.Position(
-                    condition_id=cid,
+                    condition_id=norm_cid,
                     question=d.get("question", ""),
                     direction=d.get("direction", "BUY_NO"),
                     token_id=d.get("token_id", ""),
@@ -230,9 +235,9 @@ class SafeguardManager:
                     city=d.get("city", ""),
                     market_type=d.get("market_type", "temperature"),
                 )
-                restored[cid] = pos
+                restored[norm_cid] = pos
             if restored:
-                logger.info(f"♻️  Відновлено {len(restored)} позицій після рестарту")
+                logger.info(f"♻️  Відновлено {len(restored)} позицій після рестарту (ID нормалізовані)")
         except Exception as e:
             logger.error(f"Помилка відновлення позицій: {e}")
         return restored
