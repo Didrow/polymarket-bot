@@ -8,6 +8,7 @@ trader.py — Polymarket Weather Bot 2026 (v9 production)
   - DRY_RUN статистика: pnl_usd рахується після resolution
   - Збільшено таймаут для погодних ринків (до 100 годин)
   - Розширено допустимий спред для відображення Unrealized PnL (до 25%)
+  - Виправлено баг зависання: пошук правильного ринку у відповіді API
 """
 
 import math
@@ -109,18 +110,6 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
 
 
 def check_market_resolved(condition_id: str, position: "Position" = None) -> Optional[bool]:
-    """
-    Перевіряє чи ринок розв'язаний через Gamma API.
-    Повертає True (YES win), False (NO win), None (ще відкритий).
-
-    Стратегії (в порядку спроб):
-      S1: GET /markets?conditionId=X
-      S2: GET /markets?id=X          (деякі ринки не мають conditionId)
-      S3: Timeout failsafe            (позиція відкрита довгий час → force-close)
-    """
-    # PADDING: Gamma API потребує повний 66-символьний bytes32 ID (0x + 64 hex).
-    # Збережені ID можуть бути короткими (напр. 0xc885...2a = 20 chars).
-    # Без паддінгу API ігнорує запит і повертає фантомний ринок (e3b423df...).
     if condition_id.startswith("0x") and len(condition_id) < 66:
         condition_id = "0x" + condition_id[2:].zfill(64)
 
@@ -130,13 +119,12 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     _resolution_attempt_count[condition_id] = _resolution_attempt_count.get(condition_id, 0) + 1
     attempt = _resolution_attempt_count[condition_id]
 
-    # ── S1: запит за conditionId ──────────────────────────────
     def _try_query(param_name: str, param_val: str) -> Optional[bool]:
-        for closed_status in[None, "true"]:
+        for closed_status in [None, "true", "false"]:
             try:
-                # УВАГА: Gamma API приймає ТІЛЬКИ conditionId (camelCase).
-                # condition_id (snake) ігнорується API і повертає рандомний ринок.
-                params = {"conditionId": param_val} if param_name == "conditionId" else {param_name: param_val}
+                # Gamma API краще розуміє condition_id у snake_case
+                api_param = "condition_id" if param_name == "conditionId" else param_name
+                params = {api_param: param_val}
                 if closed_status:
                     params["closed"] = closed_status
 
@@ -150,27 +138,23 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 if not markets:
                     continue
 
-                m = markets[0]
-
-                # Нормалізація ID: захист від фантомних ринків (GTA VI і подібних)
-                api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
-                api_id    = str(m.get("id", "")).lower().replace("0x", "")
                 target_id = str(param_val).lower().replace("0x", "")
 
-                # КРИТИЧНО: після resolution Gamma повертає повний 66-символьний ID
-                # (0x + 64 hex), але збережений ID може бути коротшим (скорочена форма).
-                # Тому порівнюємо: чи один є префіксом іншого.
-                def _ids_match(a: str, b: str) -> bool:
-                    return a == b or a.startswith(b) or b.startswith(a)
+                # ШУКАЄМО НАШ РИНОК У ВСЬОМУ МАСИВІ (API часто повертає сміття першим)
+                found_m = None
+                for m in markets:
+                    api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
+                    api_id    = str(m.get("id", "")).lower().replace("0x", "")
+                    if api_cid == target_id or api_id == target_id or api_cid.startswith(target_id) or api_id.startswith(target_id):
+                        found_m = m
+                        break
 
-                if not _ids_match(api_cid, target_id) and not _ids_match(api_id, target_id):
-                    if closed_status == "true" and (attempt <= 3 or attempt % 20 == 0):
-                        logger.info(
-                            f"⚠️ API повернуло невідповідний ринок "
-                            f"(got={api_cid[:16]}, expected={target_id[:16]})"
-                        )
+                if not found_m:
+                    if closed_status == "true" and (attempt <= 2 or attempt % 20 == 0):
+                        logger.info(f"⚠️ API не знайшло ринок {target_id[:16]} у відповіді.")
                     continue
 
+                m = found_m
                 is_closed   = m.get("closed", False)
                 is_resolved = m.get("resolved", False)
                 outcome_prices = m.get("outcomePrices")
@@ -178,20 +162,14 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
                 if not is_closed and not is_resolved:
                     if attempt <= 2 or attempt % 10 == 0:
-                        logger.info(f"⏳ Resolution: ринок ще активний, очікуємо | cid={target_id[:8]}")
+                        logger.info(f"⏳ Resolution: ринок ще активний | cid={target_id[:8]}")
                     return None
 
-                # СТАН 2: Торги зупинені, чекаємо вердикту UMA Oracle
-                if is_closed and not is_resolved:
-                    if attempt <= 2 or attempt % 10 == 0:
-                        logger.info(f"⚖️ Resolution: торги закриті, чекаємо вердикту суддів Polymarket | cid={target_id[:8]}")
-
-                tokens = m.get("tokens",[])
+                tokens = m.get("tokens", [])
                 if tokens:
                     for token in tokens:
                         if token.get("winner") is True:
-                            outcome = token.get("outcome", "").strip().upper()
-                            result = (outcome == "YES")
+                            result = (token.get("outcome", "").strip().upper() == "YES")
                             _resolution_cache[condition_id] = result
                             return result
 
@@ -207,47 +185,26 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
             except Exception as e:
                 logger.debug(f"Gamma API error під час резолюції: {e}")
-
         return None
-    # S1
-    result = _try_query("conditionId", condition_id)
-    if result is not None:
-        return result
 
-    # S2: пробуємо як id (тільки якщо НЕ hex-хеш — 0x... завжди дає 422)
+    result = _try_query("conditionId", condition_id)
+    if result is not None: return result
+
     if not condition_id.startswith("0x"):
         result = _try_query("id", condition_id)
-        if result is not None:
-            return result
+        if result is not None: return result
 
-    # ── S3: Timeout failsafe ──────────────────────────────────
-    # Якщо позиція відкрита занадто довго і Gamma API досі не повертає resolution —
-    # форсуємо закриття на основі поточної ринкової ціни.
     if position is not None:
         age_hours = (datetime.now(timezone.utc) - position.entry_time).total_seconds() / 3600
-        if age_hours > 100:  # Timeout: 100h — для довгострокових погодних ринків
-            # Якщо YES < 0.05 → ринок практично вирішений як NO (BUY_NO виграє)
-            # Якщо YES > 0.95 → ринок практично вирішений як YES
+        if age_hours > 100:  # Timeout збільшено до 100 годин
             if position.current_price <= 0.05:
-                logger.info(
-                    f"⏰ TIMEOUT FAILSAFE ({age_hours:.1f}h) → YES≈0 → resolved=NO | "
-                    f"{position.direction} | {position.question[:50]}"
-                )
+                logger.info(f"⏰ TIMEOUT → YES≈0 → resolved=NO | {position.question[:50]}")
                 _resolution_cache[condition_id] = False
                 return False
             elif position.current_price >= 0.95:
-                logger.info(
-                    f"⏰ TIMEOUT FAILSAFE ({age_hours:.1f}h) → YES≈1 → resolved=YES | "
-                    f"{position.direction} | {position.question[:50]}"
-                )
+                logger.info(f"⏰ TIMEOUT → YES≈1 → resolved=YES | {position.question[:50]}")
                 _resolution_cache[condition_id] = True
                 return True
-            else:
-                logger.info(
-                    f"⏰ TIMEOUT: позиція відкрита {age_hours:.1f}h але ціна={position.current_price:.3f} — "
-                    f"не можемо визначити winner, чекаємо ще | {position.question[:50]}"
-                )
-
     return None
 
 
@@ -425,94 +382,49 @@ MTM_CACHE_TTL = 90  # секунд
 
 
 def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
-    """
-    Mark-to-market: поточна YES price через Gamma API.
-    Використовує bestAsk/bestBid (реальний стакан), НЕ outcomePrices.
-    
-    ЗАХИСТИ:
-    - Закритий ринок → None (resolution polling сам закриє)
-    - Порожній стакан (ask=0 або bid=0) → None (заморожуємо старий PnL)
-    - Однобокий стакан → None (не можна визначити чесну ціну)
-    """
     cached = _mtm_price_cache.get(condition_id)
     if cached and time.time() - cached[0] < MTM_CACHE_TTL:
         return cached[1]
 
     try:
-        r = requests.get(
-            f"{config.GAMMA_URL}/markets",
-            params={"conditionId": condition_id},  # Gamma API: тільки camelCase!
-            timeout=6
-        )
-        if r.status_code != 200:
-            return None
+        r = requests.get(f"{config.GAMMA_URL}/markets", params={"condition_id": condition_id}, timeout=6)
+        if r.status_code != 200: return None
         data = r.json()
-        markets = data if isinstance(data, list) else data.get("markets",[])
-        if not markets:
-            # RETRY з closed=true: MTM для вже вирішених ринків
-            try:
-                r2 = requests.get(
-                    f"{config.GAMMA_URL}/markets",
-                    params={"condition_id": condition_id, "closed": "true"},
-                    timeout=6
-                )
-                if r2.status_code == 200:
-                    data2 = r2.json()
-                    markets = data2 if isinstance(data2, list) else data2.get("markets",[])
-            except Exception:
-                pass
-            if not markets:
-                return None
-        m = markets[0]
+        markets = data if isinstance(data, list) else data.get("markets", [])
+        
+        if not markets: return None
 
-        # НОРМАЛІЗАЦІЯ ID: та сама перевірка що і в _try_query
-        api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
-        api_id    = str(m.get("id", "")).lower().replace("0x", "")
         target_id = str(condition_id).lower().replace("0x", "")
-        if api_cid != target_id and api_id != target_id:
-            logger.debug(f"⚠️ MTM: Gamma повернуло інший ринок (got={api_cid[:16]}). Заморожуємо PnL.")
-            return None
+        
+        # ПРАВИЛЬНИЙ ПОШУК РИНКУ В СТАКАНІ
+        found_m = None
+        for m in markets:
+            api_cid   = str(m.get("conditionId", "")).lower().replace("0x", "")
+            api_id    = str(m.get("id", "")).lower().replace("0x", "")
+            if api_cid == target_id or api_id == target_id or api_cid.startswith(target_id) or api_id.startswith(target_id):
+                found_m = m
+                break
 
-        # Закритий/resolved ринок — чекаємо resolution polling
+        if not found_m: return None
+        m = found_m
+
         if m.get("closed", False) or m.get("resolved", False):
-            logger.debug(f"MTM skip: ринок {condition_id[:12]} closed")
             return None
 
-        # Беремо реальний стакан (не outcomePrices — це остання угода)
-        _raw_ask = m.get("bestAsk")
-        _raw_bid = m.get("bestBid")
-        best_ask = float(_raw_ask) if _raw_ask is not None else 0.0
-        best_bid = float(_raw_bid) if _raw_bid is not None else 0.0
+        best_ask = float(m.get("bestAsk") if m.get("bestAsk") is not None else 0.0)
+        best_bid = float(m.get("bestBid") if m.get("bestBid") is not None else 0.0)
 
-        logger.debug(
-            f"MTM {condition_id[:8]}: ask={best_ask:.4f} bid={best_bid:.4f}"
-        )
+        if best_ask == 0.0 or best_bid == 0.0: return None
+        if (best_ask - best_bid) > 0.25: return None
 
-        # КРИТИЧНО: якщо БУДЬ-ЯКА сторона стакану порожня → заморожуємо PnL
-        if best_ask == 0.0 or best_bid == 0.0:
-            logger.debug(f"MTM skip: однобокий стакан (ask={best_ask} bid={best_bid})")
-            return None
-
-        # КРИТИЧНО: "пиловий стакан" — хтось забув bid=0.001 і ask=0.99
-        # Ліквідний ринок має спред < 5%; порожній — > 25% (було 0.08)
-        spread = best_ask - best_bid
-        if spread > 0.25:
-            logger.debug(f"MTM skip: пиловий стакан (spread={spread:.3f})")
-            return None
-
-        # Чесна середина нормального двостороннього стакану
         yes_price = (best_ask + best_bid) / 2.0
-
-        # Фільтр resolved/екстремальних значень
-        if yes_price > 0.99 or yes_price < 0.005:
-            logger.debug(f"MTM skip: extreme price={yes_price:.4f}")
-            return None
+        if yes_price > 0.99 or yes_price < 0.005: return None
 
         _mtm_price_cache[condition_id] = (time.time(), yes_price)
         return yes_price
 
-    except Exception as e:
-        logger.debug(f"MTM error {condition_id[:12]}: {e}")
+    except Exception:
+        pass
     return None
 
 
@@ -528,10 +440,6 @@ WEATHER_KEYWORDS =[
 ]
 
 def cleanup_stale_positions() -> List[Position]:
-    """
-    Видаляє застарілі/фантомні позиції.
-    Повертає List[Position] (з заповненим pnl_usd) для record_trade_close в main.py.
-    """
     removed: List[Position] = []
     now = datetime.now(timezone.utc)
     for cid, pos in list(_active_positions.items()):
@@ -539,44 +447,31 @@ def cleanup_stale_positions() -> List[Position]:
         is_weather = any(kw in question_lower for kw in WEATHER_KEYWORDS)
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        # Причина 1: явно не weather ринок (GTA VI, Russia-Ukraine, etc.)
         if not is_weather:
-            logger.warning(
-                f"🧹 CLEANUP non-weather: {pos.question[:70]} | age={age_hours:.1f}h"
-            )
             pos.pnl_usd = 0.0
             del _active_positions[cid]
             removed.append(pos)
             continue
 
-        # Причина 2: відкрита > 48h без resolution
-        # Замість тихого видалення — фіксуємо результат по поточній ціні
-        if age_hours > 48:
+        # ЗБІЛЬШЕНО З 48 ДО 100 ГОДИН (погодні ринки довго закриваються)
+        if age_hours > 100:
             price = pos.current_price if pos.current_price > 0 else pos.entry_price
-            # YES переміг якщо ціна > 0.80, програв якщо < 0.20
             if price >= 0.80:
                 pnl = (1.0 - pos.entry_price) * pos.size_usd
-                logger.info(f"✅ WIN (48h timeout, price={price:.2f}): {pos.question[:60]} | PnL +${pnl:.2f}")
+                logger.info(f"✅ WIN (100h timeout): {pos.question[:60]} | PnL +${pnl:.2f}")
                 pos.pnl_usd = pnl
             elif price <= 0.20:
                 pnl = -pos.entry_price * pos.size_usd
-                logger.info(f"❌ LOSS (48h timeout, price={price:.2f}): {pos.question[:60]} | PnL ${pnl:.2f}")
+                logger.info(f"❌ LOSS (100h timeout): {pos.question[:60]} | PnL ${pnl:.2f}")
                 pos.pnl_usd = pnl
             else:
-                # Ціна в середині — записуємо як LOSS по entry
                 pnl = -pos.entry_price * pos.size_usd
-                logger.warning(f"❌ LOSS (48h timeout, ціна невизначена {price:.2f}): {pos.question[:60]} | PnL ${pnl:.2f}")
                 pos.pnl_usd = pnl
             del _active_positions[cid]
             removed.append(pos)
             continue
 
-        # Причина 3: фантомна позиція — нереальний PnL (> $50 на $100 капіталі)
-        # Це артефакт старих збережень де MTM рахувався неправильно
         if pos.pnl_usd > 50.0:
-            logger.warning(
-                f"🧹 CLEANUP фантом (pnl=${pos.pnl_usd:.2f} нереально): {pos.question[:70]}"
-            )
             pos.pnl_usd = 0.0
             del _active_positions[cid]
             removed.append(pos)
