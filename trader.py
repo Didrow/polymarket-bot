@@ -1,44 +1,5 @@
-Твій лог показує, що бот працює, але ми зіткнулися з проблемою "привидів" (Ghost
-Positions).
-
-Що сталося (аналіз помилки):
-
-У логах ми бачимо: ⚠️ API не знайшло ринок 0x8c9ac14b1b1afc у відповіді.
-
-1.  Це не краш бота. Бот продовжує працювати і знаходити нові ринки (Кейптаун,
-    Пусан).
-2.  Проблема в ID: Бачиш цей хвостик 0x8c9ac14b1b1afc? Він дуже короткий
-    (всього 14 символів після 0x). Справжній conditionId на Polymarket має
-    довжину 64 символи.
-3.  Чому так? Ці 4 позиції (Лукнау, Токіо, Бусан) були збережені у твою хмару
-    (JSONBin) ще кілька днів тому, коли в коді була помилка, яка "обрізала" ID.
-4.  Результат: Оскільки ID обрізаний, бот ніколи не зможе знайти ці ринки через
-    API, щоб дізнатися результат. Вони просто висітимуть у пам'яті, поки не
-    спрацює таймаут 120 годин.
-
-Як це виправити прямо зараз (3 кроки):
-
-Крок 1. Очисти "привидів"
-
-Найпростіший спосіб — "обнулити" пам'ять бота, щоб він забув про ці зламані 4
-позиції і почав з чистого аркуша з новими, правильними ринками.
-
-1.  Зайди на JSONBin.io.
-2.  Відкрий свій "Bin" (за тим ID, що ти вказав у .env).
-3.  Знайди розділ "open_positions": { ... } і видали все, що всередині фігурних
-    дужок, щоб стало так: "open_positions": {}.
-4.  Збережи (Save).
-
-Крок 2. Остаточне виправлення trader.py (v13)
-
-Я вніс зміну в normalize_condition_id. Тепер ми будемо передавати в API чистий
-хеш без 0x (як того вимагає більшість версій Gamma API) і додамо повний вивід
-ID у логи, щоб ми бачили, чи він повний (64 символи).
-
-Скопіюй цей код і повністю заміни ним файл trader.py:
-
 """
-trader.py — Polymarket Weather Bot 2026 (v13 BULLETPROOF API)
+trader.py — Polymarket Weather Bot 2026 (v13 BULLETPROOF API - CLEAN)
 """
 
 import math
@@ -60,7 +21,6 @@ _vol_cache: Dict[str, tuple] = {}
 _active_positions: Dict[str, "Position"] = {}
 _recently_closed: Dict[str, Any] = {}
 
-# ── НОРМАЛІЗАЦІЯ ID (v13: Чистий hex для API) ──
 def normalize_condition_id(cid: str) -> str:
     if not cid:
         return ""
@@ -68,7 +28,6 @@ def normalize_condition_id(cid: str) -> str:
     if cid.startswith("0x"):
         cid = cid[2:]
     return cid.zfill(64)
-
 
 @dataclass
 class Position:
@@ -105,11 +64,6 @@ class Position:
         self.status = "RESOLVED_YES" if resolved_yes else "RESOLVED_NO"
         self.current_price = 1.0 if resolved_yes else 0.0
 
-
-# ══════════════════════════════════════════════════════════════════
-# RESOLUTION POLLING (Gamma API)
-# ══════════════════════════════════════════════════════════════════
-
 _resolution_cache: Dict[str, Optional[bool]] = {}
 _resolution_attempt_count: Dict[str, int] = {}
 
@@ -130,9 +84,7 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
     return None
 
 def check_market_resolved(condition_id: str, position: "Position" = None) -> Optional[bool]:
-    # Для API використовуємо чистий hex (без 0x)
     clean_id = normalize_condition_id(condition_id)
-
     if clean_id in _resolution_cache:
         return _resolution_cache[clean_id]
 
@@ -142,7 +94,6 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     def _try_query(target_hex: str) -> Optional[bool]:
         for closed_status in [None, "true", "false"]:
             try:
-                # ✅ ПРОТОКОЛ: Спробуємо обидва варіанти параметра
                 for param_name in ["conditionId", "condition_ids"]:
                     params = {param_name: target_hex}
                     if closed_status:
@@ -165,10 +116,8 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                             is_resolved = m.get("resolved", False)
                             
                             if not is_closed and not is_resolved:
-                                if attempt <= 1: logger.info(f"⏳ Ринок активний | {target_hex[:8]}...")
                                 return None
 
-                            # Результат
                             tokens = m.get("tokens", [])
                             if tokens:
                                 for t in tokens:
@@ -181,41 +130,28 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                             if res is not None:
                                 _resolution_cache[target_hex] = res
                                 return res
-                
-            except Exception as e:
-                logger.debug(f"API Error: {e}")
+            except Exception:
+                pass
         return None
 
     result = _try_query(clean_id)
-    if result is not None: return result
-
-    if attempt > 1 and attempt % 20 == 0:
-        logger.warning(f"⚠️ API не бачить ринок {clean_id[:12]}... можливо, ще не Resolved")
-    
-    return None
-
+    return result
 
 def _get_market_vol(token_id: str) -> float:
-    cached = _vol_cache.get(token_id)
-    if cached and time.time() - cached[0] < 1800: return cached[1]
-    vol = 0.18  
-    _vol_cache[token_id] = (time.time(), vol)
-    return vol
+    return 0.18  
 
 def decide_position_size(edge_result: EdgeResult, current_capital: float) -> float:
     market = edge_result.market
     direction = edge_result.edge_direction
     entry_price = market.best_ask_yes if direction == "BUY_YES" else (1 - market.best_bid_yes)
-    token_id = market.token_yes_id if direction == "BUY_YES" else market.token_no_id
-
-    vol = _get_market_vol(token_id)
+    
+    vol = _get_market_vol("")
     target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
     vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
 
     win_loss = (1 - entry_price) / max(entry_price, 0.001)
     kelly_raw = edge_result.edge / max(win_loss, 0.01)
-    kelly_fraction = 0.12 if direction == "BUY_NO" else 0.15
-    kelly_size = current_capital * kelly_raw * kelly_fraction
+    kelly_size = current_capital * kelly_raw * 0.15
     
     final = min(vol_size, kelly_size)
     final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
@@ -244,7 +180,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     token_id = market.token_yes_id if edge_result.edge_direction == "BUY_YES" else market.token_no_id
 
     pos = Position(
-        condition_id=clean_cid, # Зберігаємо ПОВНИЙ 64-символьний хеш
+        condition_id=clean_cid,
         question=market.question,
         direction=edge_result.edge_direction,
         token_id=token_id,
@@ -263,7 +199,6 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         _active_positions[clean_cid] = pos
         return pos
 
-    # Реальна торгівля (SDK v2 ready)
     if not clob_client: return None
     try:
         order = clob_client.create_and_post_order({
@@ -356,12 +291,3 @@ def get_portfolio_summary() -> Dict:
 
 def get_active_positions() -> Dict:
     return _active_positions
-
-Крок 3. Перезавантаж бота
-
-Після очищення JSONBin і оновлення файлу — деплой. Бот "прокинеться" з порожнім
-портфелем і одразу знайде правильні повноформатні ринки. Коли вони закриються
-через 2-3 дні, ти побачиш справжні результати.
-
-Цей патч (v13) є фінальною крапкою в питанні API. Тепер бот вміє стукати у всі
-двері Gamma API одночасно.
