@@ -289,16 +289,28 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     n3 = add(_fetch_events_by_tag("highest-temperature", hours_limit))
     logger.info(f"Tag search: daily-temperature={n1}, weather={n2}, highest={n3}")
 
-    # Slug-шаблони (coldmath-specific)
-    if len(all_markets) < 15:
-        logger.info("Метод slug-шаблони (highest/lowest + bin)...")
+    # Slug-шаблони (coldmath-specific) — ЛИШЕ якщо tag search знайшов мало
+    # Оптимізовано: топ-8 міст, 2 дні, тільки highest/lowest (без bin brute-force)
+    # Бюджет часу: 20 секунд максимум, щоб не блокувати бот на Render Free Tier
+    _SLUG_CITIES = ["london", "nyc", "tokyo", "chicago", "paris", "berlin", "seoul", "sydney"]
+    _SLUG_TIME_BUDGET = 20  # секунд
+
+    if len(all_markets) < 3:
+        logger.info("Метод slug-шаблони (fallback, топ-8 міст, 2 дні)...")
         now = datetime.now(timezone.utc)
+        slug_start = time.time()
         slug_hits = 0
-        for day_offset in range(0, 5):
+        _budget_exceeded = False
+        for day_offset in range(0, 2):
+            if _budget_exceeded:
+                break
             d = now + timedelta(days=day_offset)
             mon = MONTH_NAMES[d.month]
-            for city in WEATHER_CITIES:
-                # highest / lowest
+            for city in _SLUG_CITIES:
+                if time.time() - slug_start > _SLUG_TIME_BUDGET:
+                    logger.warning(f"⏱ Slug-scan бюджет {_SLUG_TIME_BUDGET}s вичерпано, зупиняємо")
+                    _budget_exceeded = True
+                    break
                 for temp_type in ["highest-temperature", "lowest-temperature"]:
                     slug = f"{temp_type}-in-{city}-on-{mon}-{d.day}-{d.year}"
                     ms = _fetch_event_by_slug(slug, hours_limit)
@@ -307,17 +319,13 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
                             seen.add(pm.condition_id)
                             all_markets.append(pm)
                             slug_hits += 1
-                # bin-ринки (наприклад will-the-highest...-be-18)
-                for temp in range(5, 35):
-                    slug = f"will-the-highest-temperature-in-{city}-be-{temp}-on-{mon}-{d.day}"
-                    ms = _fetch_event_by_slug(slug, hours_limit)
-                    for pm in ms:
-                        if pm.condition_id not in seen:
-                            seen.add(pm.condition_id)
-                            all_markets.append(pm)
-                            slug_hits += 1
-            time.sleep(0.03)
-        logger.info(f"Slug-шаблони: +{slug_hits} ринків")
+                # Early exit якщо вже достатньо ринків
+                if len(all_markets) >= 10:
+                    break
+        elapsed = time.time() - slug_start
+        logger.info(f"Slug-шаблони: +{slug_hits} ринків за {elapsed:.1f}s")
+    else:
+        logger.info(f"Tag search достатній ({len(all_markets)} ринків), slug-scan пропущено")
 
     all_markets.sort(key=lambda m: m.hours_to_resolution)
     total = len(all_markets)
