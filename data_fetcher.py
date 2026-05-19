@@ -275,9 +275,9 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
                 "latitude": lat,
                 "longitude": lon,
                 "daily": "temperature_2m_max,temperature_2m_min",
-                "models": "gfs_ensemble", # Отримуємо 31 members
+                "models": "gfs_seamless", # Отримуємо 31 members
                 "timezone": "auto",
-            "forecast_days": 5,
+                "forecast_days": 5,
             },
             timeout=10
         )
