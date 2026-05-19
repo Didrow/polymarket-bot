@@ -9,17 +9,6 @@ python-dotenv>=1.0.0
 
 # HTTP запити
 requests>=2.31.0
-aiohttp>=3.9.0
-
-# Математика та дані
-numpy>=1.26.0
-pandas>=2.1.0
-
-# Планування завдань
-APScheduler>=3.10.0
-
-# WebSocket (для реального часу)
-websockets>=12.0
 
 # Web3 / Polygon (необхідно для EIP-712 підписів)
 web3>=6.11.0

@@ -22,7 +22,8 @@ MONTH_NAMES = {1: "january", 2: "february", 3: "march", 4: "april", 5: "may", 6:
 WEATHER_CITIES = [
     "london", "nyc", "new-york", "cape-town", "wellington", "moscow", "tokyo",
     "san-francisco", "chicago", "chengdu", "ankara", "busan", "jeddah", "karachi",
-    "dallas", "buenos-aires", "lagos", "lucknow", "paris", "berlin", "seoul"
+    "dallas", "buenos-aires", "lagos", "lucknow", "paris", "berlin", "seoul",
+    "miami", "seattle", "sydney", "sao-paulo", "munich",
 ]
 
 
@@ -81,7 +82,10 @@ def _detect_city(text: str) -> str:
         "san francisco": "San Francisco", "chicago": "Chicago", "chengdu": "Chengdu",
         "ankara": "Ankara", "busan": "Busan", "jeddah": "Jeddah", "karachi": "Karachi",
         "dallas": "Dallas", "buenos aires": "Buenos Aires", "lagos": "Lagos",
-        "lucknow": "Lucknow", "paris": "Paris", "berlin": "Berlin", "seoul": "Seoul"
+        "lucknow": "Lucknow", "paris": "Paris", "berlin": "Berlin", "seoul": "Seoul",
+        "miami": "Miami", "seattle": "Seattle", "sydney": "Sydney",
+        "sao paulo": "Sao Paulo", "são paulo": "Sao Paulo",
+        "munich": "Munich", "münchen": "Munich",
     }
     for key, city in cities.items():
         if key in t:
@@ -323,7 +327,7 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     else:
         logger.info(f"✅ Знайдено {total} weather-ринків (coldmath-ready):")
         for pm in all_markets[:12]:
-            logger.info(f"  [{pm.detected_city or '?'}] {pm.question[:65]} | {pm.hours_to_resolution:.1f}h | YES={pm.midpoint_yes:.3f} | vol=${pm.volume_usd:,.0f}")
+            logger.info(f"  [{pm.detected_city or '?'}] {pm.question[:65]} | {pm.hours_to_resolution:.1f}h | ASK={pm.best_ask_yes:.3f} | vol=${pm.volume_usd:,.0f}")
 
     _market_cache[cache_key] = (time.time(), all_markets)
     return all_markets

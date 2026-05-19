@@ -131,9 +131,11 @@ def check_env_security() -> bool:
 
     # Перевірка що ключ не в коді (простий скан)
     key = os.getenv("PRIVATE_KEY", "")
-    if key and key in open(__file__).read() if os.path.exists(__file__) else False:
-        logger.error("🚨 ПРИВАТНИЙ КЛЮЧ ЗНАЙДЕНО В КОДІ! НЕГАЙНО ЗМІНИТИ ГАМАНЕЦЬ!")
-        return False
+    if key and os.path.exists(__file__):
+        with open(__file__) as _f:
+            if key in _f.read():
+                logger.error("🚨 ПРИВАТНИЙ КЛЮЧ ЗНАЙДЕНО В КОДІ! НЕГАЙНО ЗМІНИТИ ГАМАНЕЦЬ!")
+                return False
 
     logger.info("✅ RULE 3: Приватний ключ береться з .env (безпечно)")
     return True

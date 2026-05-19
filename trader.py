@@ -6,7 +6,6 @@ import math
 import time
 import logging
 import requests
-import numpy as np
 from datetime import datetime, timezone
 from typing import Any, Optional, Dict, List
 from dataclasses import dataclass, field
@@ -27,7 +26,7 @@ def normalize_condition_id(cid: str) -> str:
     cid = str(cid).strip().lower()
     if cid.startswith("0x"):
         cid = cid[2:]
-    return cid.zfill(64)
+    return "0x" + cid.zfill(64)
 
 @dataclass
 class Position:
@@ -119,9 +118,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     attempt = _resolution_attempt_count[clean_id]
 
     def _try_query(target_hex: str) -> Optional[bool]:
-        # target_hex — внутрішній формат БЕЗ '0x'.
-        # Gamma API потребує '0x' PREFIX у параметрі conditionId.
-        api_id = "0x" + target_hex
+        api_id = target_hex  # target_hex already has 0x prefix
         for closed_status in [None, "true", "false"]:
             try:
                 for param_name in ["conditionId", "condition_ids"]:
@@ -188,9 +185,12 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
     vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
 
-    win_loss = (1 - entry_price) / max(entry_price, 0.001)
-    kelly_raw = edge_result.edge / max(win_loss, 0.01)
-    kelly_size = current_capital * kelly_raw * 0.15
+    # Kelly for binary: f = (p*b - q) / b
+    p = edge_result.estimated_prob
+    q = 1.0 - p
+    b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001)
+    kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
+    kelly_size = current_capital * kelly_raw * 0.25  # Quarter-Kelly
     
     final = min(vol_size, kelly_size)
     final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
@@ -264,8 +264,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         return cached[1]
 
     try:
-        # ВИПРАВЛЕНО: Gamma API потребує 0x prefix для conditionId
-        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": "0x" + clean_id}, timeout=6)
+        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": clean_id}, timeout=6)
         if r.status_code != 200: return None
         data = r.json()
         markets = data if isinstance(data, list) else data.get("markets", [])
@@ -286,7 +285,7 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         pass
     return None
 
-WEATHER_KEYWORDS = ["temperature", "weather", "rain", "snow", "degrees", "london", "paris", "tokyo", "nyc", "chicago", "seoul", "busan", "lucknow", "cape town"]
+WEATHER_KEYWORDS = ["temperature", "weather", "rain", "snow", "degrees", "london", "paris", "tokyo", "nyc", "chicago", "seoul", "busan", "lucknow", "cape town", "miami", "dallas", "seattle", "berlin", "sydney", "sao paulo", "munich"]
 
 def cleanup_stale_positions() -> List[Position]:
     removed: List[Position] = []

@@ -12,7 +12,7 @@ import math
 import time
 import requests
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple
 
@@ -213,6 +213,8 @@ CITY_COORDS: Dict[str, Tuple[float, float]] = {
     "Lima":          (-12.0464, -77.0428),
     "Mexico City":   (19.4326, -99.1332),
     "Panama City":   (8.9936, -79.5197),
+    "Sao Paulo":     (-23.5505, -46.6333),
+    "Munich":        (48.1351, 11.5820),
 }
 
 US_CITIES = {
@@ -254,7 +256,7 @@ def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float,
 # 1. ENSEMBLE API (ГОЛОВНЕ ДЖЕРЕЛО ДЛЯ GRID YES)
 # ─────────────────────────────────────────────
 
-def fetch_open_meteo_ensemble(city: str) -> Optional[WeatherForecast]:
+def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
     """Отримує 31 варіант погоди для створення ймовірнісної сітки."""
     coords = _get_coords(city, prefer_airport=True)
     if not coords:
@@ -275,22 +277,24 @@ def fetch_open_meteo_ensemble(city: str) -> Optional[WeatherForecast]:
                 "daily": "temperature_2m_max,temperature_2m_min",
                 "models": "gfs_ensemble", # Отримуємо 31 members
                 "timezone": "auto",
-                "forecast_days": 3,
+            "forecast_days": 5,
             },
             timeout=10
         )
         r.raise_for_status()
         daily = r.json().get("daily", {})
         
+        # Вибираємо правильний день за hours_to_resolution
+        day_index = min(max(int(hours_to_resolution / 24), 0), 4)
+        
         high_m, low_m = [],[]
-        # Парсинг всіх 31 варіантів прогнозу (members)
         for i in range(1, 32):
             k_high = f"temperature_2m_max_member{i:02d}"
             k_low  = f"temperature_2m_min_member{i:02d}"
-            if k_high in daily and daily[k_high] and daily[k_high][0] is not None:
-                high_m.append(daily[k_high][0])
-            if k_low in daily and daily[k_low] and daily[k_low][0] is not None:
-                low_m.append(daily[k_low][0])
+            if k_high in daily and daily[k_high] and len(daily[k_high]) > day_index and daily[k_high][day_index] is not None:
+                high_m.append(daily[k_high][day_index])
+            if k_low in daily and daily[k_low] and len(daily[k_low]) > day_index and daily[k_low][day_index] is not None:
+                low_m.append(daily[k_low][day_index])
 
         if not high_m:
             return None
@@ -301,7 +305,7 @@ def fetch_open_meteo_ensemble(city: str) -> Optional[WeatherForecast]:
 
         fc = WeatherForecast(
             city=city, 
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             temp_high_c=round(avg_high, 1), 
             temp_low_c=round(avg_low, 1),
             sources_used=["Open-Meteo_ENSEMBLE"]
@@ -311,7 +315,7 @@ def fetch_open_meteo_ensemble(city: str) -> Optional[WeatherForecast]:
         fc.temp_low_members = low_m
         
         _cache_set(key, fc)
-        logger.debug(f"⛅ ENSEMBLE {city}: {len(high_m)} members (mean: {avg_high:.1f}°C)")
+        logger.debug(f"⛅ ENSEMBLE {city}: {len(high_m)} members, day_index={day_index} (mean: {avg_high:.1f}°C)")
         return fc
     except Exception as e:
         logger.debug(f"Ensemble error {city}: {e}")
@@ -322,7 +326,7 @@ def fetch_open_meteo_ensemble(city: str) -> Optional[WeatherForecast]:
 # 2. NOAA/NWS (США)
 # ─────────────────────────────────────────────
 
-def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
+def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
     if city not in US_CITIES:
         return None
     coords = _get_coords(city, prefer_airport=True)
@@ -361,7 +365,7 @@ def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
                 rain_prob = max(rain_prob, float(pp["value"]) / 100.0)
 
         fc = WeatherForecast(
-            city=city, timestamp=datetime.utcnow(),
+            city=city, timestamp=datetime.now(timezone.utc),
             temp_high_c=round(high_c, 1), temp_low_c=round(low_c, 1),
             prob_rain=rain_prob, prob_snow=0.0,
             sources_used=["NOAA"]
@@ -377,7 +381,7 @@ def fetch_noaa_forecast(city: str) -> Optional[WeatherForecast]:
 # 3. NASA POWER (Кліматична база)
 # ─────────────────────────────────────────────
 
-def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
+def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
     coords = _get_coords(city, prefer_airport=True)
     if not coords: return None
 
@@ -387,7 +391,7 @@ def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
 
     lat, lon = coords
     try:
-        end_dt   = datetime.utcnow()
+        end_dt   = datetime.now(timezone.utc)
         start_dt = end_dt - timedelta(days=10)
         
         r = requests.get(
@@ -417,7 +421,7 @@ def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
         avg_prec = sum(prec_vals[-5:]) / len(prec_vals[-5:]) if prec_vals else 0
 
         fc = WeatherForecast(
-            city=city, timestamp=datetime.utcnow(),
+            city=city, timestamp=datetime.now(timezone.utc),
             temp_high_c=round(high_c, 1), temp_low_c=round(low_c, 1),
             prob_rain=min(0.90, avg_prec / 8.0), prob_snow=0.0,
             sources_used=["NASA_POWER"]
@@ -433,7 +437,7 @@ def fetch_nasa_power(city: str) -> Optional[WeatherForecast]:
 # 4. Open-Meteo Single (GFS / ECMWF)
 # ─────────────────────────────────────────────
 
-def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherForecast]:
+def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
     coords = _get_coords(city, prefer_airport=True)
     if not coords: return None
 
@@ -451,7 +455,7 @@ def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherFore
                 "daily":      ["temperature_2m_max", "temperature_2m_min",
                                "precipitation_probability_max", "precipitation_sum"],
                 "timezone":   "auto",
-                "forecast_days": 3,
+                "forecast_days": 5,
             },
             timeout=10
         )
@@ -459,12 +463,15 @@ def fetch_open_meteo(city: str, model: str = "forecast") -> Optional[WeatherFore
         daily = r.json().get("daily", {})
         if not daily: return None
 
-        high_c     = daily["temperature_2m_max"][0]
-        low_c      = daily["temperature_2m_min"][0]
-        rain_prob  = (daily.get("precipitation_probability_max", [0])[0] or 0) / 100.0
+        day_index = min(max(int(hours_to_resolution / 24), 0), 4)
+        high_c     = daily["temperature_2m_max"][day_index] if len(daily.get("temperature_2m_max", [])) > day_index else daily["temperature_2m_max"][0]
+        low_c      = daily["temperature_2m_min"][day_index] if len(daily.get("temperature_2m_min", [])) > day_index else daily["temperature_2m_min"][0]
+        rain_probs = daily.get("precipitation_probability_max", [0])
+        rain_prob  = (rain_probs[day_index] if len(rain_probs) > day_index else rain_probs[0] if rain_probs else 0) or 0
+        rain_prob  = rain_prob / 100.0
 
         fc = WeatherForecast(
-            city=city, timestamp=datetime.utcnow(),
+            city=city, timestamp=datetime.now(timezone.utc),
             temp_high_c=round(high_c, 1), temp_low_c=round(low_c, 1),
             prob_rain=rain_prob, prob_snow=0.0,
             sources_used=[f"Open-Meteo_{model.upper()}"]
@@ -513,7 +520,7 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
         if temp_c is None: return None
 
         fc = WeatherForecast(
-            city=city, timestamp=datetime.utcnow(),
+            city=city, timestamp=datetime.now(timezone.utc),
             temp_high_c=float(temp_c), temp_low_c=float(obs.get("dewp", temp_c - 5)),
             prob_rain=0.0, prob_snow=0.0,
             sources_used=["METAR"]
@@ -536,16 +543,16 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
 
     forecasts_w =[]
 
-    fc = fetch_noaa_forecast(city)
+    fc = fetch_noaa_forecast(city, hours_to_resolution)
     if fc: forecasts_w.append((fc, 0.45))
 
-    fc = fetch_nasa_power(city)
+    fc = fetch_nasa_power(city, hours_to_resolution)
     if fc: forecasts_w.append((fc, 0.10))
 
-    fc = fetch_open_meteo(city, "gfs")
+    fc = fetch_open_meteo(city, "gfs", hours_to_resolution)
     if fc: forecasts_w.append((fc, 0.30))
 
-    fc = fetch_open_meteo(city, "ecmwf")
+    fc = fetch_open_meteo(city, "ecmwf", hours_to_resolution)
     if fc: forecasts_w.append((fc, 0.25))
 
     metar = fetch_metar(city)
@@ -556,7 +563,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
             forecasts_w.append((metar, metar_w))
 
     # ОТРИМУЄМО АНСАМБЛЕВИЙ ПРОГНОЗ ДЛЯ СІТКИ
-    ens_fc = fetch_open_meteo_ensemble(city)
+    ens_fc = fetch_open_meteo_ensemble(city, hours_to_resolution)
 
     if not forecasts_w and not ens_fc:
         logger.warning(f"Немає прогнозу для {city}")
@@ -572,7 +579,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
 
     result = WeatherForecast(
         city=city,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         temp_high_c=round(wavg("temp_high_c"), 1),
         temp_low_c=round(wavg("temp_low_c"), 1),
         prob_rain=round(wavg("prob_rain"), 3) if forecasts_w else 0.0,

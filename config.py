@@ -47,7 +47,7 @@ MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання (
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 72         
-MIN_MARKET_VOLUME_USD: float = 1000.0   # Знижено поріг, щоб ловити більше дешевих ринків для сітки
+MIN_MARKET_VOLUME_USD: float = 100.0    # Weather ринки часто мають volume <$1000 на старті
 SCAN_INTERVAL_SEC: int = 600            # Сканування кожні 10 хвилини
 OSINT_SCAN_INTERVAL_SEC: int = 300
 MAX_VOL_NO_TRADE: float = 0.60
@@ -69,7 +69,8 @@ CITY_WHITELIST: List[str] = [
     "London", "Paris", "NYC", "Chicago",
     "Tokyo", "Seoul", "Buenos Aires",
     "Busan", "Lucknow", "Cape Town",
-    "Miami", "Dallas", "Seattle", "Berlin", "Sydney"
+    "Miami", "Dallas", "Seattle", "Berlin", "Sydney",
+    "Sao Paulo", "Munich",
 ]
 
 KNOWN_WHALE_WALLETS: List[str] = []

@@ -193,7 +193,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         return
 
     # ── 4. OSINT сканування (кожен 5-й цикл) ───────────────
-    if int(time.time()) % (config.OSINT_SCAN_INTERVAL_SEC) < config.SCAN_INTERVAL_SEC:
+    if cycle_count % 5 == 0:
         osint_data = scan_all_osint(markets)
         for whale in osint_data.get("whales", []):
             if whale.is_known_insider:
