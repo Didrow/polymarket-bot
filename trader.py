@@ -67,6 +67,33 @@ class Position:
 _resolution_cache: Dict[str, Optional[bool]] = {}
 _resolution_attempt_count: Dict[str, int] = {}
 
+
+def _check_resolution_by_clob(position: "Position") -> Optional[bool]:
+    """
+    Резервна перевірка resolution через CLOB midpoint.
+    Коли ринок закривається, YES-токен → ціна 1.0 (якщо YES), або 0.0 (якщо NO).
+    Тільки для BUY_YES, де token_id = YES токен.
+    """
+    if not position or not position.token_id:
+        return None
+    try:
+        r = requests.get(
+            f"{config.CLOB_URL}/midpoint",
+            params={"token_id": position.token_id},
+            timeout=6,
+        )
+        if r.status_code == 200:
+            mid = float(r.json().get("mid", 0.5))
+            if mid >= 0.98:
+                # YES токен = $1 → YES переміг (BUY_YES = WIN, BUY_NO = LOSS)
+                return True if position.direction == "BUY_YES" else False
+            if mid <= 0.02:
+                # YES токен = $0 → NO переміг (BUY_YES = LOSS, BUY_NO = WIN)
+                return False if position.direction == "BUY_YES" else True
+    except Exception:
+        pass
+    return None
+
 def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
     import json as _json
     try:
@@ -92,10 +119,13 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
     attempt = _resolution_attempt_count[clean_id]
 
     def _try_query(target_hex: str) -> Optional[bool]:
+        # target_hex — внутрішній формат БЕЗ '0x'.
+        # Gamma API потребує '0x' PREFIX у параметрі conditionId.
+        api_id = "0x" + target_hex
         for closed_status in [None, "true", "false"]:
             try:
                 for param_name in ["conditionId", "condition_ids"]:
-                    params = {param_name: target_hex}
+                    params = {param_name: api_id}  # ← ВИПРАВЛЕНО: з 0x для API
                     if closed_status:
                         params["closed"] = closed_status
 
@@ -114,7 +144,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                         if m_cid == target_hex or m_id == target_hex:
                             is_closed   = m.get("closed", False)
                             is_resolved = m.get("resolved", False)
-                            
+
                             if not is_closed and not is_resolved:
                                 return None
 
@@ -125,7 +155,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                                         res = (t.get("outcome", "").strip().upper() == "YES")
                                         _resolution_cache[target_hex] = res
                                         return res
-                            
+
                             res = _parse_outcome_prices(m.get("outcomePrices"))
                             if res is not None:
                                 _resolution_cache[target_hex] = res
@@ -134,7 +164,16 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                 pass
         return None
 
+    # Спочатку пробуємо Gamma API (з правильним 0x префіксом)
     result = _try_query(clean_id)
+
+    # Якщо Gamma не визначила результат — пробуємо CLOB midpoint (резервний метод)
+    if result is None and position is not None:
+        result = _check_resolution_by_clob(position)
+        if result is not None:
+            _resolution_cache[clean_id] = result
+            logger.debug(f"Resolution via CLOB fallback: {result} for {condition_id[:20]}")
+
     return result
 
 def _get_market_vol(token_id: str) -> float:
@@ -225,7 +264,8 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
         return cached[1]
 
     try:
-        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": clean_id}, timeout=6)
+        # ВИПРАВЛЕНО: Gamma API потребує 0x prefix для conditionId
+        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": "0x" + clean_id}, timeout=6)
         if r.status_code != 200: return None
         data = r.json()
         markets = data if isinstance(data, list) else data.get("markets", [])
@@ -256,8 +296,16 @@ def cleanup_stale_positions() -> List[Position]:
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
         if not is_weather or age_hours > 120:
-            logger.info(f"🧹 Прибираємо старий ринок: {pos.question[:50]}")
-            pos.pnl_usd = 0.0
+            logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
+            # ВИПРАВЛЕНО: спробуємо визначити реальний результат перед видаленням
+            resolved = check_market_resolved(cid, position=pos)
+            if resolved is not None:
+                pos.resolve(resolved)
+                logger.info(
+                    f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'} (при cleanup): "
+                    f"{pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}"
+                )
+            # else: залишаємо поточний MTM pnl_usd (краще ніж обнуляти)
             del _active_positions[cid]
             removed.append(pos)
 
