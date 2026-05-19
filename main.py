@@ -153,7 +153,7 @@ def init_clob_client():
 
 
 # ─── Один цикл сканування ────────────────────────────────────
-def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 0) -> None:
+def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 0) -> int:
     """
     Один цикл бота:
     1. Перевірити безпеку
@@ -166,7 +166,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     # ── 1. Circuit breaker check ────────────────────────────
     if not safeguard.can_trade():
-        return
+        return 0
 
     # ── 2. Перевірка та закриття існуючих позицій ──────────
     # v27: cleanup у кожному циклі — видаляє non-weather позиції що з'явились під час роботи
@@ -190,7 +190,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     markets = fetch_weather_markets()
     if not markets:
         logger.info("Немає активних weather-ринків (< 72h). Чекаємо...")
-        return
+        return 0
 
     # ── 4. OSINT сканування (кожен 5-й цикл) ───────────────
     if cycle_count % 5 == 0:
@@ -222,9 +222,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 )
 
     if not tradeable:
-        logger.info("Немає ринків з достатнім edge. Наступне сканування через "
-                    f"{config.SCAN_INTERVAL_SEC}s")
-        return
+        logger.info("Немає ринків з достатнім edge. Чекаємо...")
+        return 0
 
     # ── 6. Відкриття позицій ─────────────────────────────────
     # Ітеруємо ВЕСЬ список, зупиняємось після 2 УСПІШНО ВІДКРИТИХ.
@@ -263,6 +262,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 edge=edge_result.edge,
                 dry_run=config.DRY_RUN,
             )
+
+    return opened_this_cycle
 
 
 # ─── ГОЛОВНИЙ ЦИКЛ ───────────────────────────────────────────
@@ -311,6 +312,7 @@ def main():
 
     cycle_count = 0
     last_summary_time = time.time()
+    empty_cycles = 0
 
     while _running:
         try:
@@ -323,7 +325,12 @@ def main():
                 f"💰 Капітал: ${cap:.2f} | PnL: {pnl_sign}${pnl:.2f} ───"
             )
 
-            run_scan_cycle(safeguard, clob_client, cycle_count)
+            opened_trades = run_scan_cycle(safeguard, clob_client, cycle_count)
+            
+            if opened_trades == 0:
+                empty_cycles += 1
+            else:
+                empty_cycles = 0
 
             # Зберігаємо позиції після кожного циклу (захист від рестарту)
             safeguard.save_positions(_trader._active_positions)
@@ -348,8 +355,13 @@ def main():
             time.sleep(30)  # Пауза після помилки
 
         if _running:
-            logger.info(f"💤 Сплю {config.SCAN_INTERVAL_SEC}s...\n")
-            time.sleep(config.SCAN_INTERVAL_SEC)
+            sleep_time = config.SCAN_INTERVAL_SEC
+            if empty_cycles >= 3:
+                sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s...\n")
+            else:
+                logger.info(f"💤 Сплю {sleep_time}s...\n")
+            time.sleep(sleep_time)
 
     # Завершення
     logger.info("\n⏹ Бот зупинено")

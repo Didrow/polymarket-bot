@@ -144,6 +144,7 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         _skip_keywords = [
             "space weather", "spaceweather", "geomagnetic",
             "earthquake", "magnitude", "seismic",
+            "flu", "hospitalization", "influenza", "covid",
         ]
         if any(kw in full for kw in _skip_keywords):
             return None
