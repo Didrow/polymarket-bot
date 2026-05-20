@@ -116,7 +116,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
     _resolution_attempt_count[clean_id] = _resolution_attempt_count.get(clean_id, 0) + 1
 
-    def _try_query(target_hex: str) -> Optional[bool]:
+    def _try_query(target_hex: str):
         api_id = target_hex
         for closed_status in [None, "true", "false"]:
             try:
@@ -153,7 +153,7 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                             is_resolved = m.get("resolved", False)
 
                             if not is_closed and not is_resolved:
-                                return None
+                                return "OPEN", None
 
                             tokens = m.get("tokens", [])
                             if tokens:
@@ -162,27 +162,35 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                                     if winner_val is True or str(winner_val).strip().lower() == "true":
                                         res = (t.get("outcome", "").strip().upper() == "YES")
                                         _resolution_cache[target_hex] = res
-                                        return res
+                                        return "RESOLVED", res
 
                             res = _parse_outcome_prices(m.get("outcomePrices"))
                             if res is not None:
                                 _resolution_cache[target_hex] = res
-                                return res
+                                return "RESOLVED", res
+
+                            return "CLOSED", None
             except Exception:
                 pass
+        return "UNKNOWN", None
+
+    # Спочатку пробуємо Gamma API
+    status, result = _try_query(clean_id)
+
+    # Якщо ринок відкритий — нічого не робимо (не резолвимо через CLOB midpoint)
+    if status == "OPEN":
         return None
 
-    # Спочатку пробуємо Gamma API (з правильним 0x префіксом)
-    result = _try_query(clean_id)
-
-    # Якщо Gamma не визначила результат — пробуємо CLOB midpoint (резервний метод)
-    if result is None and position is not None:
+    # Якщо ринок закритий, але Gamma ще не встановила переможця, або якщо запит завершився помилкою ("UNKNOWN")
+    # ТІЛЬКИ тоді застосовуємо резервний метод CLOB midpoint
+    if result is None and position is not None and status in ["CLOSED", "UNKNOWN"]:
         result = _check_resolution_by_clob(position)
         if result is not None:
             _resolution_cache[clean_id] = result
             logger.debug(f"Resolution via CLOB fallback: {result} for {condition_id[:20]}")
 
     return result
+
 
 def _get_market_vol(token_id: str) -> float:
     return 0.18  
