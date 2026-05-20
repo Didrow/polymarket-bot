@@ -115,14 +115,13 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
         return _resolution_cache[clean_id]
 
     _resolution_attempt_count[clean_id] = _resolution_attempt_count.get(clean_id, 0) + 1
-    attempt = _resolution_attempt_count[clean_id]
 
     def _try_query(target_hex: str) -> Optional[bool]:
-        api_id = target_hex  # target_hex already has 0x prefix
+        api_id = target_hex
         for closed_status in [None, "true", "false"]:
             try:
-                for param_name in ["conditionId", "condition_ids"]:
-                    params = {param_name: api_id}  # ← ВИПРАВЛЕНО: з 0x для API
+                for param_name in ["ids", "conditionId"]:
+                    params = {param_name: api_id}
                     if closed_status:
                         params["closed"] = closed_status
 
@@ -131,7 +130,18 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                         continue
 
                     data = r.json()
-                    markets = data if isinstance(data, list) else data.get("markets", [])
+                    if isinstance(data, list):
+                        markets = data
+                    elif isinstance(data, dict):
+                        if "markets" in data:
+                            markets = data["markets"]
+                        elif "conditionId" in data or "id" in data:
+                            markets = [data]
+                        else:
+                            markets = []
+                    else:
+                        markets = []
+
                     if not markets:
                         continue
 
@@ -148,7 +158,8 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
                             tokens = m.get("tokens", [])
                             if tokens:
                                 for t in tokens:
-                                    if t.get("winner") is True:
+                                    winner_val = t.get("winner")
+                                    if winner_val is True or str(winner_val).strip().lower() == "true":
                                         res = (t.get("outcome", "").strip().upper() == "YES")
                                         _resolution_cache[target_hex] = res
                                         return res
