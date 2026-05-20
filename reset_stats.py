@@ -19,23 +19,12 @@ from safeguards import SafeguardManager, BotState, _jsonbin_load, _jsonbin_save
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-def reset_statistics():
-    logger.info("Starting stats cleanup...")
-    
+def reset_statistics_api() -> str:
     # Initialize safeguard manager to read current state
     manager = SafeguardManager()
     current_state = manager.state
     
     active_positions_count = len(current_state.open_positions or {})
-    logger.info(f"Current state loaded:")
-    logger.info(f"  - Total Trades: {current_state.total_trades}")
-    logger.info(f"  - Winning Trades: {current_state.winning_trades}")
-    logger.info(f"  - Losing Trades: {current_state.losing_trades}")
-    logger.info(f"  - Total PnL: ${current_state.total_pnl:.2f}")
-    logger.info(f"  - Active Open Positions: {active_positions_count}")
-    
-    # We will reset statistics but keep open positions
-    logger.info("Resetting historical statistics...")
     
     new_state = BotState(
         initial_capital=config.INITIAL_CAPITAL,
@@ -57,13 +46,23 @@ def reset_statistics():
     
     # Save the cleaned state to local and JSONBin
     manager.save_state()
-    logger.info("✅ Statistics successfully reset!")
-    logger.info("New state saved:")
-    logger.info(f"  - Total Trades: {manager.state.total_trades} (representing active positions)")
-    logger.info(f"  - Winning Trades: {manager.state.winning_trades}")
-    logger.info(f"  - Losing Trades: {manager.state.losing_trades}")
-    logger.info(f"  - Total PnL: ${manager.state.total_pnl:.2f}")
-    logger.info(f"  - Active Open Positions kept: {len(manager.state.open_positions or {})}")
+    
+    summary = (
+        f"Statistics successfully reset!\n"
+        f"New State:\n"
+        f"  - Total Trades: {manager.state.total_trades} (representing active positions)\n"
+        f"  - Winning Trades: {manager.state.winning_trades}\n"
+        f"  - Losing Trades: {manager.state.losing_trades}\n"
+        f"  - Total PnL: ${manager.state.total_pnl:.2f}\n"
+        f"  - Active Open Positions kept: {active_positions_count}"
+    )
+    return summary
+
+def reset_statistics():
+    logger.info("Starting stats cleanup...")
+    summary = reset_statistics_api()
+    for line in summary.split("\n"):
+        logger.info(line)
 
 if __name__ == "__main__":
     reset_statistics()

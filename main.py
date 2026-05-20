@@ -75,9 +75,23 @@ logger = logging.getLogger(__name__)
 # ─── Health check сервер для Render Free Tier ─────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
+        if self.path == "/reset-stats-9922":
+            try:
+                from reset_stats import reset_statistics_api
+                summary = reset_statistics_api()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(f"SUCCESS!\n\n{summary}".encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(f"ERROR: {e}".encode("utf-8"))
+        else:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
     def log_message(self, *args):
         pass
 
