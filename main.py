@@ -74,15 +74,55 @@ logger = logging.getLogger(__name__)
 
 # ─── Health check сервер для Render Free Tier ─────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
+    safeguard_manager = None
+
     def do_GET(self):
         if self.path == "/reset-stats-9922":
             try:
-                from reset_stats import reset_statistics_api
-                summary = reset_statistics_api()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(f"SUCCESS!\n\n{summary}".encode("utf-8"))
+                manager = _HealthHandler.safeguard_manager
+                if manager is not None:
+                    # Reset the running instance in place
+                    import config
+                    from datetime import datetime, timezone
+                    
+                    active_positions_count = len(manager.state.open_positions or {})
+                    manager.state.initial_capital = config.INITIAL_CAPITAL
+                    manager.state.current_capital = config.INITIAL_CAPITAL
+                    manager.state.peak_capital = config.INITIAL_CAPITAL
+                    manager.state.total_trades = active_positions_count
+                    manager.state.winning_trades = 0
+                    manager.state.losing_trades = 0
+                    manager.state.total_pnl = 0.0
+                    manager.state.is_halted = False
+                    manager.state.halt_reason = ""
+                    manager.state.start_time = datetime.now(timezone.utc).isoformat()
+                    manager.state.last_update = datetime.now(timezone.utc).isoformat()
+                    
+                    # Save state to local file and JSONBin
+                    manager.save_state()
+                    
+                    summary = (
+                        f"Statistics successfully reset in running memory and JSONBin!\n"
+                        f"New State:\n"
+                        f"  - Total Trades: {manager.state.total_trades} (representing active positions)\n"
+                        f"  - Winning Trades: 0\n"
+                        f"  - Losing Trades: 0\n"
+                        f"  - Total PnL: $0.00\n"
+                        f"  - Active Open Positions kept: {active_positions_count}"
+                    )
+                    
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(f"SUCCESS!\n\n{summary}".encode("utf-8"))
+                else:
+                    # Fallback if manager is not loaded yet
+                    from reset_stats import reset_statistics_api
+                    summary = reset_statistics_api()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(f"SUCCESS (Fallback/Off-line)!\n\n{summary}".encode("utf-8"))
             except Exception as e:
                 self.send_response(500)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -304,6 +344,7 @@ def main():
     # Ініціалізація
     clob_client = init_clob_client()
     safeguard = SafeguardManager()
+    _HealthHandler.safeguard_manager = safeguard
 
     # ♻️ Відновлення позицій після рестарту
     restored = safeguard.restore_positions()
