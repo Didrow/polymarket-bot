@@ -1,10 +1,5 @@
 """
 edge_calculator.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
-
-Адаптовано під стратегію "fridius2":
-- Повністю вимкнено пошук угод BUY_NO.
-- Агресивний пошук дешевих BUY_YES (до 12 центів) через Ансамблеві ймовірності.
-- Купівля сусідніх температур для створення "Рибальської сітки" навколо прогнозу.
 """
 
 import math
@@ -27,7 +22,7 @@ class EdgeResult:
     estimated_prob: float
     market_prob: float
     edge: float
-    edge_direction: str      # Тепер завжди "BUY_YES"
+    edge_direction: str      
     confidence: float
     reason: str
     is_tradeable: bool
@@ -48,33 +43,58 @@ class EdgeResult:
 
 
 # ══════════════════════════════════════════════════════════════════
-# ПАРСИНГ ПОРОГУ
+# ПАРСИНГ ДІАПАЗОНІВ ТА ПОРОГІВ
 # ══════════════════════════════════════════════════════════════════
 
-def _parse_threshold_with_unit(question: str) -> Tuple[Optional[float], str]:
-    m = re.search(r'(\d+\.?\d*)\s*°?\s*F\b', question)
-    if m: return float(m.group(1)), 'F'
-
-    m = re.search(r'(\d+\.?\d*)\s*°?\s*C\b', question)
-    if m: return float(m.group(1)), 'C'
-
-    fahrenheit_cities = {"chicago", "dallas", "nyc", "new york", "san francisco",
-                         "miami", "los angeles", "seattle", "atlanta", "boston",
-                         "denver", "phoenix", "las vegas", "austin", "minneapolis",
-                         "portland", "houston", "nashville", "charlotte", "orlando"}
+def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Optional[float], str]:
+    """
+    Парсить запитання на предмет діапазонів або одинарних порогів температур.
+    Повертає: (kind, val_min, val_max, unit)
+    """
     q_lower = question.lower()
-    is_fahrenheit_city = any(city in q_lower for city in fahrenheit_cities)
+    
+    # Визначаємо одиницю вимірювання (США за замовчуванням Фаренгейт)
+    unit = 'C'
+    if '°f' in q_lower or ' f ' in q_lower or 'fahrenheit' in q_lower or q_lower.endswith('f') or 'f?' in q_lower:
+        unit = 'F'
+    else:
+        fahrenheit_cities = {"chicago", "dallas", "nyc", "new york", "san francisco",
+                             "miami", "los angeles", "seattle", "atlanta", "boston",
+                             "denver", "phoenix", "las vegas", "austin", "minneapolis",
+                             "portland", "houston", "nashville", "charlotte", "orlando"}
+        if any(city in q_lower for city in fahrenheit_cities):
+            unit = 'F'
 
-    m = re.search(r'be (\d+\.?\d*)', question)
+    # 1. Пошук діапазону температур "between X and Y" або "between X-Y" або "X-Y°F"
+    range_match = re.search(r'(?:between\s+)?(\d+\.?\d*)\s*[-–to\s+a-nd]+\s*(\d+\.?\d*)', q_lower)
+    if range_match:
+        try:
+            val1 = float(range_match.group(1))
+            val2 = float(range_match.group(2))
+            if val1 < 120 and val2 < 120 and val1 != val2:
+                val_min = min(val1, val2)
+                val_max = max(val1, val2)
+                return "range", val_min, val_max, unit
+        except ValueError:
+            pass
+
+    # 2. Одинарні пороги
+    kind = "categorical"
+    if any(w in q_lower for w in ["or higher", "or above", "above", "exceed"]):
+        kind = "above"
+    elif any(w in q_lower for w in ["or below", "or lower", "below", "under"]):
+        kind = "below"
+
+    # Парсинг одинарного значення
+    m = re.search(r'(\d+\.?\d*)\s*°?\s*[FfCcb]\b', q_lower)
     if m:
-        val = float(m.group(1))
-        if val > 40 and is_fahrenheit_city:
-            return val, 'F'
-        if val > 50:
-            return val, 'F'
-        return val, 'C'
+        return kind, float(m.group(1)), None, unit
 
-    return None, 'C'
+    m = re.search(r'be (\d+\.?\d*)', q_lower)
+    if m:
+        return kind, float(m.group(1)), None, unit
+
+    return kind, None, None, unit
 
 
 def _f_to_c(f: float) -> float:
@@ -89,10 +109,6 @@ def _detect_market_kind(question: str) -> str:
         return "below"
     return "categorical"
 
-
-# ══════════════════════════════════════════════════════════════════
-# CONFIDENCE (Впевненість)
-# ══════════════════════════════════════════════════════════════════
 
 def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
     if not forecast or not forecast.sources_used:
@@ -117,28 +133,72 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     if not forecast:
         return 0.50, 0.0, "no_forecast"
 
-    raw_threshold, unit = _parse_threshold_with_unit(market.question)
+    kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
+    is_low = 'lowest' in market.question.lower()
 
-    if raw_threshold is not None:
+    if kind == "range":
+        members = forecast.temp_low_members if is_low else forecast.temp_high_members
+        
         if unit == 'F':
-            threshold_c = _f_to_c(raw_threshold)
-            unit_label = f"{raw_threshold:.0f}°F={threshold_c:.1f}°C"
+            # Для Фаренгейту межі бакета [val_min - 0.5, val_max + 0.5]
+            t_min_f = val_min - 0.5
+            t_max_f = val_max + 0.5
+            
+            if members:
+                # Частота попадання членів ансамблю в діапазон після конвертації в F
+                count = sum(1 for m in members if t_min_f <= m * 9/5 + 32 < t_max_f)
+                p = count / len(members)
+                if p == 0.0:
+                    mean_f = (sum(members) / len(members)) * 9/5 + 32
+                    p = 0.03 if abs(mean_f - (val_min + val_max)/2) <= 2.5 else 0.01
+            else:
+                # Fallback: один прогноз
+                mean_f = (forecast.temp_low_c if is_low else forecast.temp_high_c) * 9/5 + 32
+                sigma = 3.6  # ~2.0°C у Фаренгейтах
+                p_high = 0.5 * (1 + math.erf((t_max_f - mean_f) / (sigma * math.sqrt(2))))
+                p_low  = 0.5 * (1 + math.erf((t_min_f - mean_f) / (sigma * math.sqrt(2))))
+                p = p_high - p_low
+            label = f"range|{val_min}-{val_max}°F"
+            threshold_c = _f_to_c((val_min + val_max) / 2)
         else:
-            threshold_c = raw_threshold
-            unit_label = f"{raw_threshold:.0f}°C"
+            # Для Цельсія межі [val_min - 0.5, val_max + 0.5]
+            t_min_c = val_min - 0.5
+            t_max_c = val_max + 0.5
+            
+            if members:
+                count = sum(1 for m in members if t_min_c <= m < t_max_c)
+                p = count / len(members)
+                if p == 0.0:
+                    mean_c = sum(members) / len(members)
+                    p = 0.03 if abs(mean_c - (val_min + val_max)/2) <= 1.5 else 0.01
+            else:
+                mean_c = forecast.temp_low_c if is_low else forecast.temp_high_c
+                sigma = 2.0
+                p_high = 0.5 * (1 + math.erf((t_max_c - mean_c) / (sigma * math.sqrt(2))))
+                p_low  = 0.5 * (1 + math.erf((t_min_c - mean_c) / (sigma * math.sqrt(2))))
+                p = p_high - p_low
+            label = f"range|{val_min}-{val_max}°C"
+            threshold_c = (val_min + val_max) / 2
+
+        return round(max(0.01, min(0.99, p)), 4), threshold_c, label
+
+    # Звичайний одинарний поріг
+    if val_min is not None:
+        if unit == 'F':
+            threshold_c = _f_to_c(val_min)
+            unit_label = f"{val_min:.0f}°F={threshold_c:.1f}°C"
+        else:
+            threshold_c = val_min
+            unit_label = f"{val_min:.0f}°C"
     else:
         threshold_c = market.threshold_value or 0.0
         unit_label = f"{threshold_c:.0f}°C(fallback)"
-
-    kind = _detect_market_kind(market.question)
-    is_low = 'lowest' in market.question.lower()
 
     if kind == "above":
         p = forecast.prob_above_temp_c(threshold_c, is_low)
     elif kind == "below":
         p = forecast.prob_below_temp_c(threshold_c, is_low)
     else:
-        # Categorical ринки — серце стратегії fridius2
         p = forecast.prob_exact_temp_c(threshold_c, is_low)
 
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
@@ -169,34 +229,28 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     confidence = _confidence_from_forecast(forecast)
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
     
-    # Використовуємо ASK для розрахунку реальної вартості входу
     market_prob = market.best_ask_yes
     if market_prob <= 0.001 or market_prob >= 0.99:
         return None 
 
-    kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
     tc = forecast.temp_low_c if is_low else forecast.temp_high_c
-    fc_temp = f"{tc:.1f}°C"
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
-    # Ефективний edge з урахуванням впевненості моделі
     eff_edge = (our_prob - market_prob) * confidence
 
-    # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
-    # Мінімум 2¢: ринки по 0.3-1¢ — мертві (нема ліквідності, ніхто не купить).
-    # fridius2 купує по 3-10¢, не по 0.3¢.
+    # 🎣 СТРАТЕГІЯ 1: GRID YES (Хвости)
     GRID_MIN_PRICE = 0.02
     is_grid_yes = (
-        kind == "categorical"
+        "range" not in kind_label  # Грід-сітка тільки для точкових категоріальних температур
         and market_prob >= GRID_MIN_PRICE
         and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
         and our_prob >= 0.08
         and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES
     )
 
-    # 🎯 СТРАТЕГІЯ 2: SNIPER YES (Основний прогноз)
+    # 🎯 СТРАТЕГІЯ 2: SNIPER YES (Основний прогноз або діапазони)
     is_sniper_yes = (
         eff_edge >= config.MIN_EDGE_ENTRY 
         and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
@@ -209,7 +263,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         size_usd = config.BASE_POSITION_USD
         reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
-        # Ми ПОВНІСТЮ ігноруємо BUY_NO в цій версії
         return None
 
     return EdgeResult(
@@ -226,10 +279,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         threshold_c=threshold_c,
     )
 
-
-# ══════════════════════════════════════════════════════════════════
-# СКАНУВАННЯ
-# ══════════════════════════════════════════════════════════════════
 
 def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results = []
@@ -256,7 +305,6 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             logger.info(f"✅ EDGE: {edge.summary}")
             results.append(edge)
 
-    # Сортування: Grid угоди мають пріоритет за потенціалом R:R
     results.sort(key=lambda r: r.edge, reverse=True)
 
     logger.info(

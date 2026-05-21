@@ -1,11 +1,6 @@
 """
 safeguards.py — Polymarket Weather Bot 2026
 Захисні механізми: circuit breakers, drawdown monitor, аварійна зупинка.
-
-v26-railway: Подвійне збереження стану
-  PRIMARY:  JSONBin.io (хмара) — виживає після будь-якого рестарту
-  FALLBACK: локальний bot_state.json — якщо JSONBin недоступний
-v10 (WIN/LOSS FIXED): Нормалізація ID під час відновлення позицій.
 """
 
 import logging
@@ -22,18 +17,13 @@ logger = logging.getLogger(__name__)
 
 STATE_FILE = os.path.join(config.DATA_DIR, "bot_state.json")
 
-# ══════════════════════════════════════════════════════════════════
-# JSONBin.io — хмарне збереження стану
-# ══════════════════════════════════════════════════════════════════
-
 _JSONBIN_KEY    = os.getenv("JSONBIN_KEY", "")
 _JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID", "")
 _JSONBIN_BASE   = "https://api.jsonbin.io/v3/b"
-_JSONBIN_TTL    = 15  # v28: збільшено timeout
+_JSONBIN_TTL    = 15
 
 
 def _jsonbin_save(data: dict, _retries: int = 2) -> bool:
-    """v28: retry 2 рази при timeout."""
     if not _JSONBIN_KEY or not _JSONBIN_BIN_ID:
         return False
     import time as _time
@@ -81,10 +71,6 @@ def _jsonbin_load() -> Optional[dict]:
     return None
 
 
-# ══════════════════════════════════════════════════════════════════
-# BotState
-# ══════════════════════════════════════════════════════════════════
-
 @dataclass
 class BotState:
     initial_capital: float = config.INITIAL_CAPITAL
@@ -99,10 +85,13 @@ class BotState:
     start_time: str = datetime.now(timezone.utc).isoformat()
     last_update: str = datetime.now(timezone.utc).isoformat()
     open_positions: Dict = None
+    closed_positions: Dict = None  # Сховище для збереження _recently_closed між перезапусками
 
     def __post_init__(self):
         if self.open_positions is None:
             self.open_positions = {}
+        if self.closed_positions is None:
+            self.closed_positions = {}
 
     @property
     def win_rate(self) -> float:
@@ -123,10 +112,6 @@ class BotState:
         return (self.current_capital - self.initial_capital) / self.initial_capital
 
 
-# ══════════════════════════════════════════════════════════════════
-# SafeguardManager
-# ══════════════════════════════════════════════════════════════════
-
 class SafeguardManager:
 
     def __init__(self):
@@ -138,7 +123,6 @@ class SafeguardManager:
     def _load_state(self) -> BotState:
         os.makedirs(config.DATA_DIR, exist_ok=True)
 
-        # 1. JSONBin (хмара)
         cloud_data = _jsonbin_load()
         if cloud_data:
             try:
@@ -149,7 +133,6 @@ class SafeguardManager:
             except Exception as e:
                 logger.warning(f"JSONBin parse error: {e}")
 
-        # 2. Локальний файл
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE) as f:
@@ -161,7 +144,6 @@ class SafeguardManager:
             except Exception as e:
                 logger.warning(f"Локальний стан пошкоджений: {e}")
 
-        # 3. Новий стан
         logger.info("🆕 Новий стан (перший запуск)")
         return BotState()
 
@@ -169,7 +151,6 @@ class SafeguardManager:
         self.state.last_update = datetime.now(timezone.utc).isoformat()
         data = asdict(self.state)
 
-        # Primary: JSONBin
         ok = _jsonbin_save(data)
         if ok:
             self._jsonbin_fail_count = 0
@@ -180,7 +161,6 @@ class SafeguardManager:
                     f"⚠️  JSONBin недоступний (#{self._jsonbin_fail_count}) — fallback на локальний файл"
                 )
 
-        # Backup: локальний файл
         try:
             os.makedirs(config.DATA_DIR, exist_ok=True)
             with open(STATE_FILE, "w") as f:
@@ -205,6 +185,26 @@ class SafeguardManager:
                     "market_type":   pos.market_type,
                 }
             self.state.open_positions = serialized
+
+            # Збереження та очищення застарілих closed_positions (>24h)
+            now = datetime.now(timezone.utc)
+            cleaned_closed = {}
+            import trader as _trader
+            
+            for cid, closed_dt in _trader._recently_closed.items():
+                dt_str = closed_dt.isoformat() if hasattr(closed_dt, "isoformat") else str(closed_dt)
+                cleaned_closed[cid] = dt_str
+
+            if self.state.closed_positions:
+                for cid, dt_str in self.state.closed_positions.items():
+                    try:
+                        dt = datetime.fromisoformat(dt_str)
+                        if (now - dt).total_seconds() < 86400:  # Лишаємо в базі 24 години
+                            cleaned_closed[cid] = dt_str
+                    except Exception:
+                        pass
+            
+            self.state.closed_positions = cleaned_closed
             self.save_state()
         except Exception as e:
             logger.error(f"Помилка збереження позицій: {e}")
@@ -213,31 +213,40 @@ class SafeguardManager:
         import trader as _trader
         restored = {}
         try:
-            for cid, d in self.state.open_positions.items():
-                # ВИПРАВЛЕННЯ: Лікуємо старі "короткі" або неправильні ID з бази
-                norm_cid = _trader.normalize_condition_id(cid)
+            if self.state.open_positions:
+                for cid, d in self.state.open_positions.items():
+                    norm_cid = _trader.normalize_condition_id(cid)
 
-                entry_time = datetime.fromisoformat(d["entry_time"]) if "entry_time" in d else datetime.now(timezone.utc)
-                if entry_time.tzinfo is None:
-                    entry_time = entry_time.replace(tzinfo=timezone.utc)
-                
-                pos = _trader.Position(
-                    condition_id=norm_cid,
-                    question=d.get("question", ""),
-                    direction=d.get("direction", "BUY_NO"),
-                    token_id=d.get("token_id", ""),
-                    entry_price=float(d.get("entry_price", 0)),
-                    current_price=float(d.get("entry_price", 0)),
-                    size_usd=float(d.get("size_usd", 0)),
-                    shares=float(d.get("shares", 0)),
-                    entry_time=entry_time,
-                    edge_at_entry=float(d.get("edge_at_entry", 0)),
-                    city=d.get("city", ""),
-                    market_type=d.get("market_type", "temperature"),
-                )
-                restored[norm_cid] = pos
+                    entry_time = datetime.fromisoformat(d["entry_time"]) if "entry_time" in d else datetime.now(timezone.utc)
+                    if entry_time.tzinfo is None:
+                        entry_time = entry_time.replace(tzinfo=timezone.utc)
+                    
+                    pos = _trader.Position(
+                        condition_id=norm_cid,
+                        question=d.get("question", ""),
+                        direction=d.get("direction", "BUY_NO"),
+                        token_id=d.get("token_id", ""),
+                        entry_price=float(d.get("entry_price", 0)),
+                        current_price=float(d.get("entry_price", 0)),
+                        size_usd=float(d.get("size_usd", 0)),
+                        shares=float(d.get("shares", 0)),
+                        entry_time=entry_time,
+                        edge_at_entry=float(d.get("edge_at_entry", 0)),
+                        city=d.get("city", ""),
+                        market_type=d.get("market_type", "temperature"),
+                    )
+                    restored[norm_cid] = pos
+
+            # Відновлення списку нещодавно закритих угод
+            if self.state.closed_positions:
+                for cid, dt_str in self.state.closed_positions.items():
+                    try:
+                        _trader._recently_closed[cid] = datetime.fromisoformat(dt_str)
+                    except Exception:
+                        pass
+            
             if restored:
-                logger.info(f"♻️  Відновлено {len(restored)} позицій після рестарту (ID нормалізовані)")
+                logger.info(f"♻️  Відновлено {len(restored)} позицій після рестарту (ID та closed_positions нормалізовані)")
         except Exception as e:
             logger.error(f"Помилка відновлення позицій: {e}")
         return restored
@@ -305,7 +314,7 @@ class SafeguardManager:
             self.state.current_capital -= size_usd
         self.save_state()
 
-    def record_trade_close(self, pnl_usd: float, size_usd: float = 0.0):
+    def record_trade_close(self, pnl_usd: float, size_usd: float = 0.0, condition_id: str = None):
         self.state.total_pnl += pnl_usd
         if pnl_usd > 0:
             self.state.winning_trades += 1
@@ -315,6 +324,17 @@ class SafeguardManager:
             self.state.current_capital += size_usd + pnl_usd
             if self.state.current_capital > self.state.peak_capital:
                 self.state.peak_capital = self.state.current_capital
+        
+        # Миттєвий запис у локальну та хмарну базу закритих позицій
+        if condition_id:
+            import trader as _trader
+            norm_cid = _trader.normalize_condition_id(condition_id)
+            now_str = datetime.now(timezone.utc).isoformat()
+            if self.state.closed_positions is None:
+                self.state.closed_positions = {}
+            self.state.closed_positions[norm_cid] = now_str
+            _trader._recently_closed[norm_cid] = datetime.now(timezone.utc)
+
         self.save_state()
 
     def print_summary(self):

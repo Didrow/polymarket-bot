@@ -1,5 +1,5 @@
 """
-trader.py — Polymarket Weather Bot 2026 (v13 BULLETPROOF API - CLEAN)
+trader.py — Polymarket Weather Bot 2026 (GRID / YES LADDERING EDITION)
 """
 
 import math
@@ -49,7 +49,6 @@ class Position:
     def update_pnl(self, current_price: float):
         self.current_price = current_price
         if self.entry_price > 0 and self.shares > 0:
-            # Правильна формула для binary option: shares * current_price - cost_basis
             self.pnl_usd = round(self.shares * current_price - self.size_usd, 4)
             self.pnl_pct = self.pnl_usd / self.size_usd
 
@@ -71,8 +70,7 @@ _resolution_attempt_count: Dict[str, int] = {}
 def _check_resolution_by_clob(position: "Position") -> Optional[bool]:
     """
     Резервна перевірка resolution через CLOB midpoint.
-    Коли ринок закривається, YES-токен → ціна 1.0 (якщо YES), або 0.0 (якщо NO).
-    Тільки для BUY_YES, де token_id = YES токен.
+    Викликається тільки для підтверджених CLOSED ринків.
     """
     if not position or not position.token_id:
         return None
@@ -85,10 +83,8 @@ def _check_resolution_by_clob(position: "Position") -> Optional[bool]:
         if r.status_code == 200:
             mid = float(r.json().get("mid", 0.5))
             if mid >= 0.98:
-                # YES токен = $1 → YES переміг (BUY_YES = WIN, BUY_NO = LOSS)
                 return True if position.direction == "BUY_YES" else False
             if mid <= 0.02:
-                # YES токен = $0 → NO переміг (BUY_YES = LOSS, BUY_NO = WIN)
                 return False if position.direction == "BUY_YES" else True
     except Exception:
         pass
@@ -110,6 +106,50 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
         pass
     return None
 
+
+def _try_query(target_hex: str):
+    """
+    Точковий запит до Gamma API за правильним параметром фільтрації 'condition_id'.
+    """
+    try:
+        params = {"condition_id": target_hex}
+        r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
+        if r.status_code == 200:
+            markets = r.json()
+            if isinstance(markets, dict) and "markets" in markets:
+                markets = markets["markets"]
+            elif isinstance(markets, dict):
+                markets = [markets]
+            
+            if isinstance(markets, list) and markets:
+                for m in markets:
+                    m_cid = normalize_condition_id(m.get("conditionId", ""))
+                    if m_cid == target_hex:
+                        is_closed   = m.get("closed", False)
+                        is_resolved = m.get("resolved", False)
+
+                        if not is_closed and not is_resolved:
+                            return "OPEN", None
+
+                        tokens = m.get("tokens", [])
+                        if tokens:
+                            for t in tokens:
+                                winner_val = t.get("winner")
+                                if winner_val is True or str(winner_val).strip().lower() == "true":
+                                    res = (t.get("outcome", "").strip().upper() == "YES")
+                                    return "RESOLVED", res
+
+                        res = _parse_outcome_prices(m.get("outcomePrices"))
+                        if res is not None:
+                            return "RESOLVED", res
+
+                        return "CLOSED", None
+    except Exception as e:
+        logger.debug(f"API query exception for {target_hex[:15]}: {e}")
+        
+    return "UNKNOWN", None
+
+
 def check_market_resolved(condition_id: str, position: "Position" = None) -> Optional[bool]:
     clean_id = normalize_condition_id(condition_id)
     if clean_id in _resolution_cache:
@@ -117,78 +157,21 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
     _resolution_attempt_count[clean_id] = _resolution_attempt_count.get(clean_id, 0) + 1
 
-    def _try_query(target_hex: str):
-        api_id = target_hex
-        for closed_status in [None, "true", "false"]:
-            try:
-                for param_name in ["ids", "conditionId"]:
-                    params = {param_name: api_id}
-                    if closed_status:
-                        params["closed"] = closed_status
-
-                    r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
-                    if r.status_code != 200:
-                        continue
-
-                    data = r.json()
-                    if isinstance(data, list):
-                        markets = data
-                    elif isinstance(data, dict):
-                        if "markets" in data:
-                            markets = data["markets"]
-                        elif "conditionId" in data or "id" in data:
-                            markets = [data]
-                        else:
-                            markets = []
-                    else:
-                        markets = []
-
-                    if not markets:
-                        continue
-
-                    for m in markets:
-                        m_cid = normalize_condition_id(m.get("conditionId", ""))
-                        m_id  = normalize_condition_id(m.get("id", ""))
-                        if m_cid == target_hex or m_id == target_hex:
-                            is_closed   = m.get("closed", False)
-                            is_resolved = m.get("resolved", False)
-
-                            if not is_closed and not is_resolved:
-                                return "OPEN", None
-
-                            tokens = m.get("tokens", [])
-                            if tokens:
-                                for t in tokens:
-                                    winner_val = t.get("winner")
-                                    if winner_val is True or str(winner_val).strip().lower() == "true":
-                                        res = (t.get("outcome", "").strip().upper() == "YES")
-                                        _resolution_cache[target_hex] = res
-                                        return "RESOLVED", res
-
-                            res = _parse_outcome_prices(m.get("outcomePrices"))
-                            if res is not None:
-                                _resolution_cache[target_hex] = res
-                                return "RESOLVED", res
-
-                            return "CLOSED", None
-            except Exception:
-                pass
-        return "UNKNOWN", None
-
-    # Спочатку пробуємо Gamma API
     status, result = _try_query(clean_id)
 
-    # Якщо ринок відкритий — нічого не робимо (не резолвимо через CLOB midpoint)
-    if status == "OPEN":
+    # Якщо статус OPEN або UNKNOWN (наприклад, збій мережі), ринок не закриваємо
+    if status in ["OPEN", "UNKNOWN"]:
         return None
 
-    # Якщо ринок закритий, але Gamma ще не встановила переможця, або якщо запит завершився помилкою ("UNKNOWN")
-    # ТІЛЬКИ тоді застосовуємо резервний метод CLOB midpoint
-    if result is None and position is not None and status in ["CLOSED", "UNKNOWN"]:
+    # Тільки якщо CLOSED (але Gamma ще не визначила переможця), застосовуємо CLOB midpoint
+    if result is None and position is not None and status == "CLOSED":
         result = _check_resolution_by_clob(position)
         if result is not None:
             _resolution_cache[clean_id] = result
             logger.debug(f"Resolution via CLOB fallback: {result} for {condition_id[:20]}")
+
+    if result is not None:
+        _resolution_cache[clean_id] = result
 
     return result
 
@@ -205,7 +188,6 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
     vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
 
-    # Kelly for binary: f = (p*b - q) / b
     p = edge_result.estimated_prob
     q = 1.0 - p
     b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001)
@@ -227,15 +209,13 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     if clean_cid in _active_positions:
         return None
 
-    # БАГ ВИПРАВЛЕНО: блокуємо повторне відкриття закритих позицій.
-    # Попередня версія перевіряла лише _active_positions, ігноруючи _recently_closed.
-    # Наслідок: Seoul 17°C закривалась як LOSS → відразу відкривалась знову (3 цикли поспіль).
+    # Захист від купівлі нещодавно закритих ринків
     if clean_cid in _recently_closed:
         closed_at = _recently_closed[clean_cid]
         if isinstance(closed_at, datetime):
             age_hours = (datetime.now(timezone.utc) - closed_at).total_seconds() / 3600
             if age_hours < 12.0:
-                return None  # Не відкриваємо знову протягом 12 годин
+                return None  
 
     if edge_result.edge_direction == "BUY_YES":
         price = market.best_ask_yes
@@ -326,7 +306,6 @@ def cleanup_stale_positions() -> List[Position]:
 
         if not is_weather or age_hours > 120:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
-            # ВИПРАВЛЕНО: спробуємо визначити реальний результат перед видаленням
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
                 pos.resolve(resolved)
@@ -334,7 +313,6 @@ def cleanup_stale_positions() -> List[Position]:
                     f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'} (при cleanup): "
                     f"{pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}"
                 )
-            # else: залишаємо поточний MTM pnl_usd (краще ніж обнуляти)
             del _active_positions[cid]
             removed.append(pos)
 
