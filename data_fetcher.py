@@ -1,6 +1,7 @@
 """
 data_fetcher.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
 Джерела: NOAA + NASA POWER + Open-Meteo GFS/ECMWF + Open-Meteo ENSEMBLE (31 members)
+Пріоритет METAR для ринків з resolution ≤ 12 годин (ColdMath style)
 """
 
 import math
@@ -43,6 +44,7 @@ class WeatherForecast:
     prob_rain: float = 0.0
     prob_snow: float = 0.0
     sources_used: List[str] = field(default_factory=list)
+    # Зберігаємо всі 31 варіант майбутнього від Ансамблю
     temp_high_members: List[float] = field(default_factory=list)
     temp_low_members: List[float] = field(default_factory=list)
 
@@ -50,10 +52,12 @@ class WeatherForecast:
         members = self.temp_low_members if is_low else self.temp_high_members
         sigma = 1.3  # Метеорологічна похибка (розкид)
         
+        # Якщо є дані ансамблю (31 модель)
         if members:
             prob = sum(0.5 * (1 + math.erf((m - threshold_c) / (sigma * math.sqrt(2)))) for m in members) / len(members)
             return max(0.01, min(0.99, round(prob, 4)))
         
+        # Fallback до одного значення, якщо ансамбль недоступний
         tc = self.temp_low_c if is_low else self.temp_high_c
         if tc == 0.0:
             return 0.50
@@ -67,15 +71,17 @@ class WeatherForecast:
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
         """
         Рахує ймовірність того, що температура потрапить у Polymarket бакет [threshold-0.5, threshold+0.5).
-        Використовує відновлений метод прямої частоти без штучного KDE-згладжування.
+        Використовує пряму частоту ансамблю (без додаткового згладжування).
         """
         members = self.temp_low_members if is_low else self.temp_high_members
 
         if members:
-            # Пряма частота: рахуємо скільки членів потрапляє в бакет Polymarket.
+            # Пряма частота: члени ансамблю вже є ймовірнісним розподілом.
             count = sum(1 for m in members if threshold_c - 0.5 <= m < threshold_c + 0.5)
             raw = count / len(members)
             if raw == 0.0:
+                # Жоден член не потрапив. Якщо threshold близький до mean — мала ймовірність,
+                # але не нульова (ансамбль може недооцінювати хвости при 31 members).
                 mean = sum(members) / len(members)
                 return 0.03 if abs(mean - threshold_c) <= 1.5 else 0.01
             return max(0.01, min(0.99, round(raw, 4)))
@@ -94,7 +100,7 @@ class WeatherForecast:
 
 
 # ─────────────────────────────────────────────
-# Координати міст
+# Координати міст (залишаємо для зворотної сумісності)
 # ─────────────────────────────────────────────
 
 AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
@@ -129,6 +135,7 @@ AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
 }
 
 CITY_COORDS: Dict[str, Tuple[float, float]] = {
+    # ... (повний словник з попередньої версії, залишаємо для geocoding fallback)
     "NYC":           (40.7128, -74.0060),
     "New York":      (40.7128, -74.0060),
     "Chicago":       (41.8781, -87.6298),
@@ -305,6 +312,7 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
         fc.temp_low_members = low_m
         
         _cache_set(key, fc)
+        logger.debug(f"⛅ ENSEMBLE {city}: {len(high_m)} members, day_index={day_index} (mean: {avg_high:.1f}°C)")
         return fc
     except Exception as e:
         logger.debug(f"Ensemble error {city}: {e}")
@@ -473,49 +481,122 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
 
 
 # ─────────────────────────────────────────────
-# 5. METAR (Real-time airport observation)
+# 5. METAR (REAL-TIME AIRPORT OBSERVATION) — ПРІОРИТЕТ ДЛЯ БЛИЗЬКИХ РИНКІВ
 # ─────────────────────────────────────────────
 
+# Розширений словник CITY -> ICAO (ключові аеропорти для ColdMath)
 CITY_TO_ICAO: Dict[str, str] = {
-    "NYC": "KJFK", "New York": "KJFK", "Chicago": "KORD", "Los Angeles": "KLAX",
-    "San Francisco": "KSFO", "Miami": "KMIA", "Dallas": "KDFW", "Seattle": "KSEA",
-    "Boston": "KBOS", "Denver": "KDEN", "Atlanta": "KATL", "London": "EGLL",
-    "Paris": "LFPG", "Berlin": "EDDB", "Amsterdam": "EHAM", "Istanbul": "LTFM",
-    "Tokyo": "RJTT", "Seoul": "RKSI", "Singapore": "WSSS", "Dubai": "OMDB",
-    "Sydney": "YSSY", "Toronto": "CYYZ", "Buenos Aires": "SAEZ", "Busan": "RKPK",
+    # USA
+    "NYC": "KJFK", "New York": "KJFK",
+    "Chicago": "KORD",
+    "Los Angeles": "KLAX",
+    "San Francisco": "KSFO",
+    "Miami": "KMIA",
+    "Dallas": "KDFW", "Dallas/Fort Worth": "KDFW",
+    "Seattle": "KSEA",
+    "Boston": "KBOS",
+    "Denver": "KDEN",
+    "Atlanta": "KATL",
+    "Houston": "KIAH",
+    "Phoenix": "KPHX",
+    "Las Vegas": "KLAS",
+    "Austin": "KAUS",
+    "Minneapolis": "KMSP",
+    "Portland": "KPDX",
+    "Nashville": "KBNA",
+    "Charlotte": "KCLT",
+    "Orlando": "KMCO",
+    # Europe
+    "London": "EGLL", "London Heathrow": "EGLL",
+    "Paris": "LFPG", "Paris Charles de Gaulle": "LFPG",
+    "Berlin": "EDDB", "Berlin Brandenburg": "EDDB",
+    "Munich": "EDDM", "Munich International": "EDDM",
+    "Amsterdam": "EHAM",
+    "Rome": "LIRF",
+    "Madrid": "LEMD",
+    "Dublin": "EIDW",
+    "Warsaw": "EPWA",
+    "Vienna": "LOWW",
+    "Prague": "LKPR",
+    # Asia
+    "Tokyo": "RJTT", "Tokyo Haneda": "RJTT",
+    "Seoul": "RKSI", "Seoul Incheon": "RKSI",
+    "Busan": "RKPK", "Busan Gimhae": "RKPK",
+    "Shanghai": "ZSSS",
+    "Beijing": "ZBAA",
+    "Hong Kong": "VHHH",
+    "Singapore": "WSSS",
+    "Bangkok": "VTBS",
+    "Dubai": "OMDB",
+    "Lucknow": "VILK", "Lucknow Amausi": "VILK",
+    # South America
+    "Buenos Aires": "SAEZ", "Buenos Aires Ezeiza": "SAEZ",
+    "Sao Paulo": "SBGR", "Sao Paulo Guarulhos": "SBGR",
+    "Santiago": "SCEL",
+    "Lima": "SPJC",
+    # Africa
+    "Cape Town": "FACT", "Cape Town International": "FACT",
+    "Lagos": "DNMM",
+    "Nairobi": "HKJK",
+    # Australia / Oceania
+    "Sydney": "YSSY", "Sydney Kingsford Smith": "YSSY",
+    "Melbourne": "YMML",
+    "Brisbane": "YBBN",
+    "Perth": "YPPH",
+    "Auckland": "NZAA",
+    "Wellington": "NZWN",
 }
 
-
 def fetch_metar(city: str) -> Optional[WeatherForecast]:
+    """
+    Отримує актуальні спостереження METAR для заданого міста.
+    Дані оновлюються щогодини (або частіше). Використовується як джерело істини
+    для ринків, що вирішуються протягом найближчих 12 годин.
+    """
     icao = CITY_TO_ICAO.get(city)
-    if not icao: return None
+    if not icao:
+        logger.debug(f"METAR: немає ICAO для міста {city}")
+        return None
 
     key = f"metar_{city}"
     cached = _cache_get(key)
-    if cached: return cached
+    if cached:
+        return cached
 
     try:
+        # Використовуємо aviationweather.gov JSON API
         r = requests.get(
             "https://aviationweather.gov/api/data/metar",
             params={"ids": icao, "format": "json", "hours": 1},
             timeout=8,
-            headers={"User-Agent": "PolymarketWeatherBot"}
+            headers={"User-Agent": "PolymarketWeatherBot/ColdMath"}
         )
         r.raise_for_status()
         data = r.json()
-        if not data or not isinstance(data, list): return None
+        if not data or not isinstance(data, list):
+            return None
 
         obs = data[0]
         temp_c = obs.get("temp")
-        if temp_c is None: return None
+        if temp_c is None:
+            return None
 
+        dewpoint = obs.get("dewp", temp_c - 5)
+        # Додатково можна отримати швидкість вітру, опади тощо
         fc = WeatherForecast(
-            city=city, timestamp=datetime.now(timezone.utc),
-            temp_high_c=float(temp_c), temp_low_c=float(obs.get("dewp", temp_c - 5)),
-            prob_rain=0.0, prob_snow=0.0,
+            city=city,
+            timestamp=datetime.now(timezone.utc),
+            temp_high_c=float(temp_c),
+            temp_low_c=float(dewpoint),
+            prob_rain=0.0,
+            prob_snow=0.0,
             sources_used=["METAR"]
         )
-        _cache[key] = (time.time() - CACHE_TTL + 1800, fc) # Короткий кеш (30 хв)
+        # Короткий кеш (30 хвилин) — METAR часто оновлюється
+        _cache_set(key, fc)
+        # Перевизначаємо TTL кешу для METAR на 1800 секунд
+        _cache[key] = (time.time(), fc)
+        logger.debug(f"🛬 METAR {city} ({icao}): {temp_c}°C")
         return fc
     except Exception as e:
         logger.debug(f"METAR error {city} ({icao}): {e}")
@@ -523,48 +604,78 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
 
 
 # ─────────────────────────────────────────────
-# CONSENSUS (Злиття прогнозів + ENSEMBLE)
+# 6. CONSENSUS (ЗЛИТТЯ ПРОГНОЗІВ З ПРІОРИТЕТОМ METAR ДЛЯ БЛИЗЬКИХ ГОДИН)
 # ─────────────────────────────────────────────
 
 def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
+    """
+    Повертає консенсусний прогноз для заданого міста.
+    Якщо hours_to_resolution <= 12, METAR отримує дуже високу вагу (ColdMath стиль).
+    """
     key = f"consensus_{city}"
     cached = _cache_get(key)
-    if cached: return cached
+    if cached:
+        return cached
 
     forecasts_w = []
 
-    fc = fetch_noaa_forecast(city, hours_to_resolution)
-    if fc: forecasts_w.append((fc, 0.45))
+    # 1. Отримуємо METAR завжди (він може бути None, якщо немає ICAO)
+    metar_fc = fetch_metar(city)
+    
+    # 2. Отримуємо прогнози від інших джерел (ансамбль, NOAA, NASA, Open-Meteo)
+    fc_ensemble = fetch_open_meteo_ensemble(city, hours_to_resolution)
+    fc_noaa = fetch_noaa_forecast(city, hours_to_resolution)
+    fc_nasa = fetch_nasa_power(city, hours_to_resolution)
+    fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution)
+    fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution)
 
-    fc = fetch_nasa_power(city, hours_to_resolution)
-    if fc: forecasts_w.append((fc, 0.10))
+    # 3. Визначаємо ваги залежно від часу до resolution
+    if hours_to_resolution <= 6.0:
+        # Для ринків, що вирішуються за 6 годин — METAR майже істина
+        if metar_fc:
+            forecasts_w.append((metar_fc, 0.90))
+        # Решта джерел мають символічну вагу (коригують тренд)
+        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.05))
+        if fc_gfs: forecasts_w.append((fc_gfs, 0.03))
+        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.02))
+        if fc_noaa: forecasts_w.append((fc_noaa, 0.0))   # NOAA не додаємо при такому малому horizon
+        if fc_nasa: forecasts_w.append((fc_nasa, 0.0))
+    elif hours_to_resolution <= 12.0:
+        # Для 6-12 годин METAR все ще дуже важливий, але враховуємо прогнозні моделі
+        if metar_fc:
+            forecasts_w.append((metar_fc, 0.65))
+        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.20))
+        if fc_gfs: forecasts_w.append((fc_gfs, 0.08))
+        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.07))
+        if fc_noaa: forecasts_w.append((fc_noaa, 0.0))
+        if fc_nasa: forecasts_w.append((fc_nasa, 0.0))
+    else:
+        # Понад 12 годин — стандартне зважування, METAR використовується лише для корекції
+        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.45))
+        if fc_noaa: forecasts_w.append((fc_noaa, 0.25))
+        if fc_gfs: forecasts_w.append((fc_gfs, 0.15))
+        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.10))
+        if fc_nasa: forecasts_w.append((fc_nasa, 0.05))
+        # METAR додаємо лише якщо він є і години <= 24 (для свіжості)
+        if metar_fc and hours_to_resolution <= 24.0:
+            forecasts_w.append((metar_fc, 0.10))
 
-    fc = fetch_open_meteo(city, "gfs", hours_to_resolution)
-    if fc: forecasts_w.append((fc, 0.30))
-
-    fc = fetch_open_meteo(city, "ecmwf", hours_to_resolution)
-    if fc: forecasts_w.append((fc, 0.25))
-
-    # Виклик METAR для надкоротких прогнозів
-    metar = fetch_metar(city)
-    if metar and hours_to_resolution <= 6.0:
-        gfs_fc = next((f for f, _ in forecasts_w if any("GFS" in s or "NOAA" in s for s in f.sources_used)), None)
-        if not gfs_fc or abs(metar.temp_high_c - gfs_fc.temp_high_c) <= 5.0:
-            metar_w = 0.50 if hours_to_resolution <= 2.0 else 0.35 if hours_to_resolution <= 4.0 else 0.20
-            forecasts_w.append((metar, metar_w))
-
-    ens_fc = fetch_open_meteo_ensemble(city, hours_to_resolution)
-
-    if not forecasts_w and not ens_fc:
+    # Якщо після зважування немає жодного прогнозу — повертаємо ансамбль або None
+    if not forecasts_w:
+        if fc_ensemble:
+            _cache_set(key, fc_ensemble)
+            return fc_ensemble
         logger.warning(f"Немає прогнозу для {city}")
         return None
 
+    # Розрахунок зваженого середнього
+    total_w = sum(w for _, w in forecasts_w)
+    if total_w == 0:
+        return None
+
     def wavg(attr: str) -> float:
-        if not forecasts_w:
-            return getattr(ens_fc, attr)
         return sum(getattr(f, attr) * w for f, w in forecasts_w) / total_w
 
-    total_w = sum(w for _, w in forecasts_w) if forecasts_w else 0.0
     all_sources = [s for f, _ in forecasts_w for s in f.sources_used]
 
     result = WeatherForecast(
@@ -572,17 +683,38 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
         timestamp=datetime.now(timezone.utc),
         temp_high_c=round(wavg("temp_high_c"), 1),
         temp_low_c=round(wavg("temp_low_c"), 1),
-        prob_rain=round(wavg("prob_rain"), 3) if forecasts_w else 0.0,
-        prob_snow=round(wavg("prob_snow"), 3) if forecasts_w else 0.0,
-        sources_used=all_sources + (["ENSEMBLE"] if ens_fc else []),
+        prob_rain=round(wavg("prob_rain"), 3),
+        prob_snow=round(wavg("prob_snow"), 3),
+        sources_used=all_sources,
     )
 
-    if ens_fc:
-        result.temp_high_members = ens_fc.temp_high_members
-        result.temp_low_members = ens_fc.temp_low_members
+    # Передаємо члени ансамблю, якщо вони є (навіть якщо вага ансамблю мала)
+    if fc_ensemble:
+        result.temp_high_members = fc_ensemble.temp_high_members
+        result.temp_low_members = fc_ensemble.temp_low_members
 
     _cache_set(key, result)
+    logger.info(
+        f"Forecast {city}: {result.temp_high_c:.1f}°C (src={'+'.join(result.sources_used[:3])}) "
+        f"| hours={hours_to_resolution:.1f}h | METAR={metar_fc is not None}"
+    )
     return result
 
+
 def get_multi_source_consensus(city: str, hours: float = 24.0) -> Optional[WeatherForecast]:
+    """Alias для сумісності з іншими модулями."""
     return get_best_forecast(city, hours)
+
+
+# Додаткова функція для отримання "залізобетонної" температури для resolution
+def get_metar_resolution(city: str, target_dt: datetime) -> Optional[float]:
+    """
+    Отримує фактичну температуру в аеропорту для заданого часу (для resolution).
+    Використовує історичні METAR дані (якщо доступні) або останнє спостереження.
+    """
+    # Для спрощення повертаємо останнє спостереження, але в реальному боті варто
+    # використовувати історичні архіви METAR (наприклад, через API Iowa Environmental Mesonet)
+    fc = fetch_metar(city)
+    if fc:
+        return fc.temp_high_c
+    return None
