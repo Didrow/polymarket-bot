@@ -74,21 +74,32 @@ class WeatherForecast:
 
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
         """
-        МАГІЯ СІТКИ (Grid): рахує ймовірність того, що температура потрапить у Polymarket бакет.
-        Бакет Polymarket "exactly 25°C" означає діапазон [24.5°C, 25.49°C].
-        Завдяки sigma=1.3, бот бачить ймовірність сусідніх температур.
+        Рахує ймовірність того, що температура потрапить у Polymarket бакет [threshold-0.5, threshold+0.5).
+
+        БАГ ВИПРАВЛЕНО: попередня версія застосовувала додатковий σ=1.3 до кожного члена ансамблю.
+        Ансамблеві члени вже є реалізаціями розподілу — подвійний σ завищував ймовірності у 3-10x.
+        Наприклад: Seoul 17°C при mean=18.1°C → хибно 21%, реально 0-3%. Ринок = 2.6¢ (3%).
+
+        Правильний підхід: пряма частота (скільки членів потрапляє в бакет).
+        Fallback (без ансамблю): Gaussian із σ=2.0 — реалістична добова σ.
         """
         members = self.temp_low_members if is_low else self.temp_high_members
-        sigma = 1.3
-        
-        if members:
-            prob = 0.0
-            for m in members:
-                p_high = 0.5 * (1 + math.erf((threshold_c + 0.5 - m) / (sigma * math.sqrt(2))))
-                p_low  = 0.5 * (1 + math.erf((threshold_c - 0.5 - m) / (sigma * math.sqrt(2))))
-                prob += (p_high - p_low)
-            return max(0.01, min(0.99, round(prob / len(members), 4)))
 
+        if members:
+            # Пряма частота: члени ансамблю вже є ймовірнісним розподілом.
+            # Рахуємо скільки з них потрапляє в бакет Polymarket.
+            count = sum(1 for m in members if threshold_c - 0.5 <= m < threshold_c + 0.5)
+            raw = count / len(members)
+            if raw == 0.0:
+                # Жоден член не потрапив. Якщо threshold близький до mean — мала ймовірність,
+                # але не нульова (ансамбль може недооцінювати хвости при 31 members).
+                mean = sum(members) / len(members)
+                return 0.03 if abs(mean - threshold_c) <= 1.5 else 0.01
+            return max(0.01, min(0.99, round(raw, 4)))
+
+        # Fallback: один детермінований прогноз без ансамблю.
+        # σ=2.0 — реалістична добова невизначеність прогнозу температури.
+        sigma = 2.0
         tc = self.temp_low_c if is_low else self.temp_high_c
         if tc == 0.0:
             return 0.01

@@ -48,9 +48,10 @@ class Position:
 
     def update_pnl(self, current_price: float):
         self.current_price = current_price
-        if self.entry_price > 0:
-            self.pnl_pct = (current_price - self.entry_price) / self.entry_price
-            self.pnl_usd = self.pnl_pct * self.size_usd
+        if self.entry_price > 0 and self.shares > 0:
+            # Правильна формула для binary option: shares * current_price - cost_basis
+            self.pnl_usd = round(self.shares * current_price - self.size_usd, 4)
+            self.pnl_pct = self.pnl_usd / self.size_usd
 
     def resolve(self, resolved_yes: bool):
         if self.direction == "BUY_YES":
@@ -225,6 +226,16 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
 
     if clean_cid in _active_positions:
         return None
+
+    # БАГ ВИПРАВЛЕНО: блокуємо повторне відкриття закритих позицій.
+    # Попередня версія перевіряла лише _active_positions, ігноруючи _recently_closed.
+    # Наслідок: Seoul 17°C закривалась як LOSS → відразу відкривалась знову (3 цикли поспіль).
+    if clean_cid in _recently_closed:
+        closed_at = _recently_closed[clean_cid]
+        if isinstance(closed_at, datetime):
+            age_hours = (datetime.now(timezone.utc) - closed_at).total_seconds() / 3600
+            if age_hours < 12.0:
+                return None  # Не відкриваємо знову протягом 12 годин
 
     if edge_result.edge_direction == "BUY_YES":
         price = market.best_ask_yes
