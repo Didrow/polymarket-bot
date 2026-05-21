@@ -1,5 +1,5 @@
 """
-trader.py — Polymarket Weather Bot 2026 (GRID / YES LADDERING EDITION)
+trader.py — Polymarket Weather Bot 2026 (CLEAN + COMPOUND + KELLY)
 """
 
 import math
@@ -68,10 +68,6 @@ _resolution_attempt_count: Dict[str, int] = {}
 
 
 def _check_resolution_by_clob(position: "Position") -> Optional[bool]:
-    """
-    Резервна перевірка resolution через CLOB midpoint.
-    Викликається тільки для підтверджених CLOSED ринків.
-    """
     if not position or not position.token_id:
         return None
     try:
@@ -106,11 +102,7 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
         pass
     return None
 
-
 def _try_query(target_hex: str):
-    """
-    Точковий запит до Gamma API за правильним параметром фільтрації 'condition_id'.
-    """
     try:
         params = {"condition_id": target_hex}
         r = requests.get(f"{config.GAMMA_URL}/markets", params=params, timeout=10)
@@ -149,7 +141,6 @@ def _try_query(target_hex: str):
         
     return "UNKNOWN", None
 
-
 def check_market_resolved(condition_id: str, position: "Position" = None) -> Optional[bool]:
     clean_id = normalize_condition_id(condition_id)
     if clean_id in _resolution_cache:
@@ -159,11 +150,9 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
     status, result = _try_query(clean_id)
 
-    # Якщо статус OPEN або UNKNOWN (наприклад, збій мережі), ринок не закриваємо
     if status in ["OPEN", "UNKNOWN"]:
         return None
 
-    # Тільки якщо CLOSED (але Gamma ще не визначила переможця), застосовуємо CLOB midpoint
     if result is None and position is not None and status == "CLOSED":
         result = _check_resolution_by_clob(position)
         if result is not None:
@@ -175,32 +164,56 @@ def check_market_resolved(condition_id: str, position: "Position" = None) -> Opt
 
     return result
 
-
 def _get_market_vol(token_id: str) -> float:
     return 0.18  
+
+# ══════════════════════════════════════════════════════════════════
+# НОВА ЛОГІКА ВИЗНАЧЕННЯ РОЗМІРУ СТАВКИ (COMPOUND + KELLY)
+# ══════════════════════════════════════════════════════════════════
 
 def decide_position_size(edge_result: EdgeResult, current_capital: float) -> float:
     market = edge_result.market
     direction = edge_result.edge_direction
     entry_price = market.best_ask_yes if direction == "BUY_YES" else (1 - market.best_bid_yes)
     
+    # 1. Volatility targeting (базова оцінка)
     vol = _get_market_vol("")
     target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
     vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
 
-    p = edge_result.estimated_prob
-    q = 1.0 - p
-    b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001)
-    kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-    kelly_size = current_capital * kelly_raw * 0.25  # Quarter-Kelly
-    
-    final = min(vol_size, kelly_size)
-    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
+    # 2. Якщо використовуємо компаундинг
+    if config.ENABLE_COMPOUND:
+        if config.USE_KELLY:
+            # Kelly для binary: f = (p*b - q) / b
+            p = edge_result.estimated_prob
+            q = 1.0 - p
+            b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
+            kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
+            kelly_size = current_capital * kelly_raw * 0.25  # Quarter-Kelly
+            final = min(vol_size, kelly_size)
+        else:
+            # Фіксований відсоток від капіталу
+            fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT
+            final = min(vol_size, fixed_pct_size)
+    else:
+        # Стара логіка (без компаундингу)
+        p = edge_result.estimated_prob
+        q = 1.0 - p
+        b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
+        kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
+        kelly_size = current_capital * kelly_raw * 0.25
+        final = min(vol_size, kelly_size)
+        final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
 
+    # Обмеження для Grid YES (дешеві контракти)
     if direction == "BUY_YES" and market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES:
         final = min(final, config.EXTREME_TAIL_MAX_SIZE_USD)
 
+    # Абсолютні межі
+    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * 0.1))
+
     return round(final, 2)
+
 
 def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) -> Optional[Position]:
     market = edge_result.market
@@ -209,7 +222,6 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     if clean_cid in _active_positions:
         return None
 
-    # Захист від купівлі нещодавно закритих ринків
     if clean_cid in _recently_closed:
         closed_at = _recently_closed[clean_cid]
         if isinstance(closed_at, datetime):
@@ -244,7 +256,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     )
 
     if config.DRY_RUN:
-        logger.info(f"🧪 DRY-RUN: Відкрито {edge_result.edge_direction} | {market.question[:60]}")
+        logger.info(f"🧪 DRY-RUN: Відкрито {edge_result.edge_direction} | {market.question[:60]} | size=${size_usd:.2f} (cap=${current_capital:.2f})")
         _active_positions[clean_cid] = pos
         return pos
 
