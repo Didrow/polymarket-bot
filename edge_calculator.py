@@ -1,5 +1,11 @@
 """
 edge_calculator.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
+
+Адаптовано під стратегію "fridius2" + ColdMath:
+- Повністю вимкнено пошук угод BUY_NO.
+- Агресивний пошук дешевих BUY_YES (до 12 центів) через Ансамблеві ймовірності.
+- Купівля сусідніх температур для створення "Рибальської сітки" навколо прогнозу.
+- Адаптивна фільтрація за спредом (max spread 3 центи) для уникнення неліквідних ринків.
 """
 
 import math
@@ -22,7 +28,7 @@ class EdgeResult:
     estimated_prob: float
     market_prob: float
     edge: float
-    edge_direction: str      
+    edge_direction: str      # Тепер завжди "BUY_YES"
     confidence: float
     reason: str
     is_tradeable: bool
@@ -43,7 +49,7 @@ class EdgeResult:
 
 
 # ══════════════════════════════════════════════════════════════════
-# ПАРСИНГ ДІАПАЗОНІВ ТА ПОРОГІВ
+# ПАРСИНГ ДІАПАЗОНІВ ТА ПОРОГІВ (оновлено для підтримки range)
 # ══════════════════════════════════════════════════════════════════
 
 def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Optional[float], str]:
@@ -65,7 +71,7 @@ def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Opti
         if any(city in q_lower for city in fahrenheit_cities):
             unit = 'F'
 
-    # 1. Пошук діапазону температур "between X and Y" або "between X-Y" або "X-Y°F"
+    # 1. Пошук діапазону температур "between X and Y" або "X-Y°F"
     range_match = re.search(r'(?:between\s+)?(\d+\.?\d*)\s*[-–to\s+a-nd]+\s*(\d+\.?\d*)', q_lower)
     if range_match:
         try:
@@ -86,7 +92,7 @@ def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Opti
         kind = "below"
 
     # Парсинг одинарного значення
-    m = re.search(r'(\d+\.?\d*)\s*°?\s*[FfCcb]\b', q_lower)
+    m = re.search(r'(\d+\.?\d*)\s*°?\s*[FfCc]\b', q_lower)
     if m:
         return kind, float(m.group(1)), None, unit
 
@@ -126,7 +132,7 @@ def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
 
 
 # ══════════════════════════════════════════════════════════════════
-# РОЗРАХУНОК ЙМОВІРНОСТІ
+# РОЗРАХУНОК ЙМОВІРНОСТІ (з підтримкою діапазонів)
 # ══════════════════════════════════════════════════════════════════
 
 def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -> Tuple[float, float, str]:
@@ -205,7 +211,7 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
 
 
 # ══════════════════════════════════════════════════════════════════
-# ОБЧИСЛЕННЯ EDGE
+# ОБЧИСЛЕННЯ EDGE (з фільтром спреду)
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -222,6 +228,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
+    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 3 ЦЕНТИ)
+    # Якщо різниця між ask та bid більша за 0.03 (3 центи), ринок неліквідний – пропускаємо
+    spread = market.best_ask_yes - market.best_bid_yes
+    if spread > 0.03:
+        logger.debug(f"Пропускаємо {market.question[:40]} через широкий спред: {spread:.3f}")
+        return None
+
     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution)
     if not forecast:
         return None
@@ -229,18 +242,22 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     confidence = _confidence_from_forecast(forecast)
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
     
+    # Використовуємо ASK для розрахунку реальної вартості входу
     market_prob = market.best_ask_yes
     if market_prob <= 0.001 or market_prob >= 0.99:
         return None 
 
+    kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
     tc = forecast.temp_low_c if is_low else forecast.temp_high_c
+    fc_temp = f"{tc:.1f}°C"
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
+    # Ефективний edge з урахуванням впевненості моделі
     eff_edge = (our_prob - market_prob) * confidence
 
-    # 🎣 СТРАТЕГІЯ 1: GRID YES (Хвости)
+    # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     GRID_MIN_PRICE = 0.02
     is_grid_yes = (
         "range" not in kind_label  # Грід-сітка тільки для точкових категоріальних температур
@@ -263,6 +280,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         size_usd = config.BASE_POSITION_USD
         reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
+        # Ми ПОВНІСТЮ ігноруємо BUY_NO в цій версії
         return None
 
     return EdgeResult(
@@ -280,9 +298,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     )
 
 
+# ══════════════════════════════════════════════════════════════════
+# СКАНУВАННЯ
+# ══════════════════════════════════════════════════════════════════
+
 def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results = []
-    skip_vol = skip_city = skip_hours = skip_none = 0
+    skip_vol = skip_city = skip_hours = skip_none = skip_spread = 0
 
     for market in markets:
         if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
@@ -295,6 +317,11 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             if market.detected_city not in config.CITY_WHITELIST:
                 skip_city += 1
                 continue
+        # Лічильник для спреду (тільки для логування)
+        spread = market.best_ask_yes - market.best_bid_yes
+        if spread > 0.03:
+            skip_spread += 1
+            continue
 
         edge = calculate_edge(market)
         if edge is None:
@@ -305,10 +332,11 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             logger.info(f"✅ EDGE: {edge.summary}")
             results.append(edge)
 
+    # Сортування: Grid угоди мають пріоритет за потенціалом R:R
     results.sort(key=lambda r: r.edge, reverse=True)
 
     logger.info(
         f"Edge scan: {len(results)} tradeable / {len(markets)} ринків "
-        f"| skip: vol={skip_vol}, hours={skip_hours}, city={skip_city}, none={skip_none}"
+        f"| skip: vol={skip_vol}, hours={skip_hours}, city={skip_city}, spread={skip_spread}, none={skip_none}"
     )
     return results
