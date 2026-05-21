@@ -1,11 +1,23 @@
 """
 main.py — Polymarket Weather Bot 2026
+Головний 24/7 цикл бота. Запуск: python main.py
+
+СТЕК:
+  data_fetcher     → NOAA + Open-Meteo прогнози (безкоштовно)
+  market_scanner   → Gamma API weather ринки
+  edge_calculator  → Порівняння прогноз vs ринок
+  trader           → Volatility Targeting + Kelly позиції
+  safeguards       → Circuit breakers, drawdown limit
+  security         → Bot Bible 2026 rules
+  osint_module     → Whale tracking, insider detection
+  notifier         → Email сповіщення (Gmail SMTP)
 """
 
 import os
 import sys
 import time
 import signal
+import atexit
 import logging
 import logging.handlers
 import threading
@@ -14,6 +26,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+# Завантажуємо .env перед імпортом config
 load_dotenv()
 
 import config
@@ -23,9 +36,10 @@ from safeguards import SafeguardManager
 from market_scanner import fetch_weather_markets
 from edge_calculator import scan_all_edges
 from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions, cleanup_stale_positions
-import trader as _trader  
+import trader as _trader  # v26-fix: global module ref (NameError fix)
 from osint_module import scan_all_osint
 
+# ─── Логування ───────────────────────────────────────────────
 os.makedirs(config.LOGS_DIR, exist_ok=True)
 os.makedirs(config.DATA_DIR, exist_ok=True)
 os.makedirs(config.CACHE_DIR, exist_ok=True)
@@ -35,11 +49,13 @@ log_formatter = logging.Formatter(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 
+# Файловий хендлер (rotating, 10MB × 5 файлів)
 file_handler = logging.handlers.RotatingFileHandler(
     config.LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5
 )
 file_handler.setFormatter(log_formatter)
 
+# Консольний хендлер
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
 
@@ -50,7 +66,11 @@ root_logger.addHandler(console_handler)
 
 logger = logging.getLogger(__name__)
 
+# ─── Глобальні змінні для збереження стану ───────────────────
+_running = True
+_safeguard = None   # буде встановлено після ініціалізації
 
+# ─── Health check сервер для Render Free Tier ─────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
     safeguard_manager = None
 
@@ -59,9 +79,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
             try:
                 manager = _HealthHandler.safeguard_manager
                 if manager is not None:
-                    import config
-                    from datetime import datetime, timezone
-                    
+                    # Reset the running instance in place
                     active_positions_count = len(manager.state.open_positions or {})
                     manager.state.initial_capital = config.INITIAL_CAPITAL
                     manager.state.current_capital = config.INITIAL_CAPITAL
@@ -75,6 +93,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
                     manager.state.start_time = datetime.now(timezone.utc).isoformat()
                     manager.state.last_update = datetime.now(timezone.utc).isoformat()
                     
+                    # Save state to local file and JSONBin
                     manager.save_state()
                     
                     summary = (
@@ -92,6 +111,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(f"SUCCESS!\n\n{summary}".encode("utf-8"))
                 else:
+                    # Fallback if manager is not loaded yet
                     from reset_stats import reset_statistics_api
                     summary = reset_statistics_api()
                     self.send_response(200)
@@ -117,20 +137,40 @@ def _start_health_server():
     thread.start()
     logger.info(f"🌐 Health check сервер запущено на порту {port}")
 
-_running = True
-
+# ─── Функції завершення (збереження стану) ───────────────────
+def _save_state_and_exit():
+    """Зберігає всі позиції та стан бота перед виходом."""
+    global _safeguard
+    logger.info("💾 Зберігаємо стан перед виходом...")
+    if _safeguard is not None:
+        # Зберігаємо активні позиції
+        _safeguard.save_positions(_trader._active_positions)
+        # Зберігаємо загальний стан
+        _safeguard.save_state()
+        logger.info("✅ Стан збережено")
+    else:
+        logger.warning("SafeguardManager не ініціалізовано, пропускаємо збереження")
 
 def _signal_handler(sig, frame):
     global _running
-    logger.info("⏹ Отримано сигнал завершення, зупиняємось...")
+    logger.info(f"⏹ Отримано сигнал {sig}, завершуємо роботу...")
     _running = False
+    # Негайно зберігаємо стан (на випадок, якщо цикл не встигне)
+    _save_state_and_exit()
+    sys.exit(0)
 
-
+# Реєструємо обробники сигналів
 signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
+# Реєструємо atexit – викличеться при нормальному завершенні
+atexit.register(_save_state_and_exit)
 
-
+# ─── Ініціалізація CLOB клієнта ──────────────────────────────
 def init_clob_client():
+    """
+    Ініціалізувати py-clob-client з приватним ключем з .env.
+    В dry-run режимі повертає None.
+    """
     if config.DRY_RUN:
         logger.info("🧪 DRY-RUN: CLOB клієнт не ініціалізується")
         return None
@@ -149,11 +189,14 @@ def init_clob_client():
             chain_id=config.CHAIN_ID,
         )
 
+        # Отримати або створити API credentials
         api_key = os.getenv("POLY_API_KEY", "")
         if not api_key:
             logger.info("Генеруємо нові API credentials...")
             creds = client.create_or_derive_api_creds()
             logger.info(f"API Key: {creds.api_key}")
+            logger.info("💡 Збережи ці credentials в .env файлі!")
+            # Встановлюємо credentials
             client.set_api_creds(creds)
         else:
             from py_clob_client.clob_types import ApiCreds
@@ -173,19 +216,29 @@ def init_clob_client():
         return None
 
 
+# ─── Один цикл сканування ────────────────────────────────────
 def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 0) -> int:
+    """
+    Один цикл бота:
+    1. Перевірити безпеку
+    2. Закрити позиції що виходять
+    3. Знайти weather ринки
+    4. Розрахувати edge
+    5. Відкрити нові позиції
+    """
     current_capital = safeguard.state.current_capital
 
+    # ── 1. Circuit breaker check ────────────────────────────
     if not safeguard.can_trade():
         return 0
 
-    # Очищення фантомних та застарілих позицій
+    # ── 2. Перевірка та закриття існуючих позицій ──────────
+    # v27: cleanup у кожному циклі — видаляє non-weather позиції що з'явились під час роботи
     stale = cleanup_stale_positions()
     for pos in stale:
         safeguard.record_trade_close(pos.pnl_usd, pos.size_usd, condition_id=pos.condition_id)
         logger.warning(f"🧹 Cleanup closed: {pos.question[:60]} | PnL ${pos.pnl_usd:.2f}")
 
-    # Перевірка та закриття завершених позицій
     closed = check_and_close_positions(clob_client)
     for pos in closed:
         safeguard.record_trade_close(pos.pnl_usd, pos.size_usd, condition_id=pos.condition_id)
@@ -197,28 +250,32 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             reason=pos.status,
         )
 
-    # Сканування ринків
+    # ── 3. Пошук weather ринків ─────────────────────────────
     markets = fetch_weather_markets()
     if not markets:
         logger.info("Немає активних weather-ринків (< 48h). Чекаємо...")
         return 0
 
+    # ── 4. OSINT сканування (кожен 5-й цикл) ───────────────
     if cycle_count % 5 == 0:
         osint_data = scan_all_osint(markets)
         for whale in osint_data.get("whales", []):
             if whale.is_known_insider:
                 notifier.notify_whale_alert(whale.summary)
 
+    # ── 5. Розрахунок edge ──────────────────────────────────
     edge_results = scan_all_edges(markets)
     tradeable = [r for r in edge_results if r.is_tradeable]
-    safeguard.check_high_edge_warning(tradeable)  
+    safeguard.check_high_edge_warning(tradeable)  # попередження про аномальні edge
 
+    # Логуємо відкриті позиції
     portfolio = get_portfolio_summary()
     if portfolio["active_positions"] > 0:
         logger.info(
             f"📂 Відкриті позиції: {portfolio['active_positions']} | "
             f"Unrealized PnL: ${portfolio['total_pnl']:+.2f}"
         )
+        # Детальний дамп позицій кожні 10 циклів для діагностики resolution
         if cycle_count % 10 == 0:
             for cid, pos in _trader._active_positions.items():
                 age_h = (datetime.now(timezone.utc) - pos.entry_time).total_seconds() / 3600
@@ -232,14 +289,21 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         logger.info("Немає ринків з достатнім edge. Чекаємо...")
         return 0
 
+    # ── 6. Відкриття позицій ─────────────────────────────────
     opened_this_cycle = 0
     for edge_result in tradeable:
         if opened_this_cycle >= 2:
-            break  
+            break  # Відкрили 2 — достатньо
+        # Перевірка ліміту активних позицій
         if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
             logger.info(f"📊 Ліміт {config.MAX_ACTIVE_POSITIONS} позицій — пропускаємо")
             break
         if not safeguard.check_hourly_trade_limit():
+            break
+        # Перевіряємо ліміт активних позицій
+        portfolio = get_portfolio_summary()
+        if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
+            logger.info(f"📊 Ліміт позицій {config.MAX_ACTIVE_POSITIONS} — нові не відкриваємо")
             break
 
         size = getattr(edge_result, 'size_usd', edge_result.edge * current_capital * config.MAX_POSITION_PCT)
@@ -264,7 +328,9 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     return opened_this_cycle
 
 
+# ─── ГОЛОВНИЙ ЦИКЛ ───────────────────────────────────────────
 def main():
+    global _safeguard
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
@@ -278,25 +344,33 @@ def main():
     logger.info("=" * 60)
     logger.info("")
 
+    # Security checks
     sec_ok = security.run_security_checks()
     if not sec_ok and not config.DRY_RUN:
         logger.error("Security checks провалено. Зупинка.")
         sys.exit(1)
 
+    # Ініціалізація
     clob_client = init_clob_client()
     safeguard = SafeguardManager()
+    _safeguard = safeguard
     _HealthHandler.safeguard_manager = safeguard
 
+    # ♻️ Відновлення позицій після рестарту
     restored = safeguard.restore_positions()
     if restored:
         _trader._active_positions.update(restored)
 
+    # Одразу після restore — примусово видаляємо фантомні позиції:
+    # старі > 48h або з нереальним PnL > $50
     removed = cleanup_stale_positions()
     if removed:
         logger.warning(f"🧹 Очищено {len(removed)} застарілих/фантомних позицій при старті")
+        # Зберігаємо в JSONBin щоб вони не повернулись після наступного рестарту
         safeguard.save_positions(_trader._active_positions)
         logger.info(f"💾 JSONBin оновлено: {len(_trader._active_positions)} активних позицій")
 
+    # Email startup notification
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
 
     logger.info("🚀 Бот запущено. Ctrl+C для зупинки.\n")
@@ -323,9 +397,11 @@ def main():
             else:
                 empty_cycles = 0
 
+            # Зберігаємо позиції після кожного циклу (захист від рестарту)
             safeguard.save_positions(_trader._active_positions)
 
-            if time.time() - last_summary_time >= 1800:  
+            # Щогодинний звіт
+            if time.time() - last_summary_time >= 1800:  # Кожні 30 хвилин
                 safeguard.print_summary()
                 summary = safeguard.state
                 notifier.notify_daily_summary(
@@ -341,7 +417,7 @@ def main():
         except Exception as e:
             logger.error(f"❌ Помилка циклу: {e}", exc_info=True)
             notifier.notify_error(str(e))
-            time.sleep(30)  
+            time.sleep(30)  # Пауза після помилки
 
         if _running:
             sleep_time = config.SCAN_INTERVAL_SEC
@@ -352,6 +428,7 @@ def main():
                 logger.info(f"💤 Сплю {sleep_time}s...\n")
             time.sleep(sleep_time)
 
+    # Завершення (додаткове збереження)
     logger.info("\n⏹ Бот зупинено")
     safeguard.print_summary()
     safeguard.save_state()
