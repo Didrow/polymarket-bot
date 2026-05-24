@@ -284,7 +284,7 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
         r.raise_for_status()
         daily = r.json().get("daily", {})
         
-        day_index = min(max(int(hours_to_resolution / 24), 0), 4)
+        day_index = min(max(round(hours_to_resolution / 24), 0), 4)
         
         high_m, low_m = [], []
         for i in range(1, 32):
@@ -460,7 +460,7 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
         daily = r.json().get("daily", {})
         if not daily: return None
 
-        day_index = min(max(int(hours_to_resolution / 24), 0), 4)
+        day_index = min(max(round(hours_to_resolution / 24), 0), 4)
         high_c     = daily["temperature_2m_max"][day_index] if len(daily.get("temperature_2m_max", [])) > day_index else daily["temperature_2m_max"][0]
         low_c      = daily["temperature_2m_min"][day_index] if len(daily.get("temperature_2m_min", [])) > day_index else daily["temperature_2m_min"][0]
         rain_probs = daily.get("precipitation_probability_max", [0])

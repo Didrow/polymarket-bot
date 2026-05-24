@@ -385,14 +385,22 @@ def check_and_close_positions(clob_client) -> List[Position]:
 
         resolved = check_market_resolved(cid, position=pos)
 
-        # Gamma не знайшла ринок → пробуємо CLOB напряму по token_id
-        # (для старих/resolved ринків Gamma часто повертає None)
-        if resolved is None and pos.token_id and age_hours >= 6:
-            resolved = _check_resolution_by_clob(pos)
-            if resolved is not None:
-                logger.info(
-                    f"🔍 Resolution via direct CLOB (Gamma miss, age={age_hours:.1f}h)"
-                )
+        # Gamma не знайшла ринок → пробуємо CLOB напряму по token_id,
+        # але ТІЛЬКИ якщо ринок вже мав час завершитись:
+        # - якщо end_date відомий: перевіряємо що час вийшов
+        # - fallback: age >= 24h (половина max-lifetime 48h)
+        # Це запобігає хибному закриттю як LOSS коли ринок ще торгується
+        if resolved is None and pos.token_id:
+            market_ended = (
+                (pos.end_date and now > pos.end_date)
+                or (pos.end_date is None and age_hours >= 24)
+            )
+            if market_ended:
+                resolved = _check_resolution_by_clob(pos)
+                if resolved is not None:
+                    logger.info(
+                        f"🔍 Resolution via direct CLOB (Gamma miss, age={age_hours:.1f}h)"
+                    )
 
         if resolved is not None:
             pos.resolve(resolved)
