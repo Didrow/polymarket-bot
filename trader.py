@@ -403,8 +403,11 @@ def check_and_close_positions(clob_client) -> List[Position]:
             continue
 
         # Примусове закриття: погодні ринки живуть max 48h — якщо вік >36h і
-        # нічого не визначилось, закриваємо з поточною CLOB-ціною як оцінкою PnL
+        # нічого не визначилось, визначаємо результат через CLOB з relaxed threshold.
+        # Логіка direction ідентична _check_resolution_by_clob(), але поріг 0.95/0.05
+        # (для force-close після 36h можна бути менш суворими ніж 0.98/0.02).
         if age_hours >= 36 and pos.token_id:
+            resolved_yes = None
             try:
                 r = requests.get(
                     f"{config.CLOB_URL}/midpoint",
@@ -412,13 +415,22 @@ def check_and_close_positions(clob_client) -> List[Position]:
                     timeout=5,
                 )
                 if r.status_code == 200:
-                    mid = float(r.json().get("mid", pos.entry_price))
-                    pos.update_pnl(mid)
+                    mid = float(r.json().get("mid", 0.5))
+                    # token_id для BUY_YES = YES-токен, для BUY_NO = NO-токен
+                    if mid >= 0.95:
+                        resolved_yes = True if pos.direction == "BUY_YES" else False
+                    elif mid <= 0.05:
+                        resolved_yes = False if pos.direction == "BUY_YES" else True
+                    else:
+                        pos.update_pnl(mid)  # mid в "нічийній зоні" — MTM-оцінка
             except Exception:
-                pass  # залишаємо pnl_usd = 0
-            pos.status = "EXPIRED"
+                pass
+            if resolved_yes is not None:
+                pos.resolve(resolved_yes)  # встановлює RESOLVED_YES/RESOLVED_NO + правильний PnL
+            else:
+                pos.status = "EXPIRED"     # не вдалось визначити
             logger.warning(
-                f"⏰ Force-close >36h (unresolved): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}"
+                f"⏰ Force-close >36h: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
             )
             closed.append(pos)
             del _active_positions[cid]
