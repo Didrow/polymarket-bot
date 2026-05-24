@@ -366,7 +366,7 @@ def cleanup_stale_positions() -> List[Position]:
         is_weather = any(kw in pos.question.lower() for kw in WEATHER_KEYWORDS)
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        if not is_weather or age_hours > 120:
+        if not is_weather or age_hours > 36:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
@@ -379,17 +379,53 @@ def cleanup_stale_positions() -> List[Position]:
 
 def check_and_close_positions(clob_client) -> List[Position]:
     closed = []
+    now = datetime.now(timezone.utc)
     for cid, pos in list(_active_positions.items()):
+        age_hours = (now - pos.entry_time).total_seconds() / 3600
+
         resolved = check_market_resolved(cid, position=pos)
+
+        # Gamma не знайшла ринок → пробуємо CLOB напряму по token_id
+        # (для старих/resolved ринків Gamma часто повертає None)
+        if resolved is None and pos.token_id and age_hours >= 6:
+            resolved = _check_resolution_by_clob(pos)
+            if resolved is not None:
+                logger.info(
+                    f"🔍 Resolution via direct CLOB (Gamma miss, age={age_hours:.1f}h)"
+                )
+
         if resolved is not None:
             pos.resolve(resolved)
             logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'}: {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
             closed.append(pos)
             del _active_positions[cid]
-            _recently_closed[cid] = datetime.now(timezone.utc)
+            _recently_closed[cid] = now
             continue
 
-        # Оновлюємо MTM ціну
+        # Примусове закриття: погодні ринки живуть max 48h — якщо вік >36h і
+        # нічого не визначилось, закриваємо з поточною CLOB-ціною як оцінкою PnL
+        if age_hours >= 36 and pos.token_id:
+            try:
+                r = requests.get(
+                    f"{config.CLOB_URL}/midpoint",
+                    params={"token_id": pos.token_id},
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    mid = float(r.json().get("mid", pos.entry_price))
+                    pos.update_pnl(mid)
+            except Exception:
+                pass  # залишаємо pnl_usd = 0
+            pos.status = "EXPIRED"
+            logger.warning(
+                f"⏰ Force-close >36h (unresolved): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}"
+            )
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
+
+        # Оновлюємо MTM ціну для відкритих позицій
         price = _get_market_price_from_gamma(cid)
         if price:
             pos.update_pnl(1.0 - price if pos.direction == "BUY_NO" else price)
