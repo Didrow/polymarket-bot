@@ -259,8 +259,17 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     GRID_MIN_PRICE = 0.02
+    # Фільтр відстані: categorical ринок не може бути далі 3°C від прогнозу.
+    # Захищає від хибного edge коли members і temp_high_c розходяться (METAR vs Ensemble).
+    _dist_ok = True
+    if "categorical" in kind_label and threshold_c > 0 and tc:
+        try:
+            _dist_ok = abs(float(tc.replace("°C", "")) - threshold_c) <= 3.0
+        except Exception:
+            pass
     is_grid_yes = (
         "range" not in kind_label  # Грід-сітка тільки для точкових категоріальних температур
+        and _dist_ok              # Ціль не далі 3°C від прогнозу
         and market_prob >= GRID_MIN_PRICE
         and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
         and our_prob >= 0.08
