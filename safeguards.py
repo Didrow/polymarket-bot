@@ -41,8 +41,11 @@ def _jsonbin_save(data: dict, _retries: int = 2) -> bool:
             )
             if r.status_code == 200:
                 return True
-            logger.warning(f"JSONBin save HTTP {r.status_code}: {r.text[:80]}")
-            return False
+            logger.warning(f"JSONBin save HTTP {r.status_code} (спроба {attempt+1}/{_retries+1}): {r.text[:80]}")
+            if attempt < _retries:
+                _time.sleep(2)
+            else:
+                return False
         except Exception as e:
             if attempt < _retries:
                 _time.sleep(2)
@@ -310,8 +313,7 @@ class SafeguardManager:
     def record_trade_open(self, size_usd: float):
         self._trade_count_hour += 1
         self.state.total_trades += 1
-        if not config.DRY_RUN:
-            self.state.current_capital -= size_usd
+        self.state.current_capital -= size_usd
         self.save_state()
 
     def record_trade_close(self, pnl_usd: float, size_usd: float = 0.0, condition_id: str = None):
@@ -320,10 +322,9 @@ class SafeguardManager:
             self.state.winning_trades += 1
         else:
             self.state.losing_trades += 1
-        if not config.DRY_RUN:
-            self.state.current_capital += size_usd + pnl_usd
-            if self.state.current_capital > self.state.peak_capital:
-                self.state.peak_capital = self.state.current_capital
+        self.state.current_capital += size_usd + pnl_usd
+        if self.state.current_capital > self.state.peak_capital:
+            self.state.peak_capital = self.state.current_capital
         
         # Миттєвий запис у локальну та хмарну базу закритих позицій
         if condition_id:

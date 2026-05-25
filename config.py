@@ -5,7 +5,7 @@ config.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION + COMPOUND)
 from typing import List
 import os
 
-DRY_RUN: bool = True                    # 🧪 Завжди починай з True для тестування
+DRY_RUN: bool = True                    # 🧪 Тестовий режим (реальна торгівля — False)
 LOG_LEVEL: str = "INFO"
 LOG_FILE: str = "logs/bot.log"
 
