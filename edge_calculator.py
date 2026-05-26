@@ -263,9 +263,15 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
     _dist_ok = True
     if "categorical" in kind_label and threshold_c is not None and fc_temp is not None:
-        _dist_ok = abs(fc_temp - threshold_c) <= 3.0
+        _dist_ok = abs(fc_temp - threshold_c) <= 1.5
         if not _dist_ok:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >3°C")
+            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >1.5°C")
+        # Не купуємо categorical YES, якщо прогноз НИЖЧЕ порогу
+        # Polymarket categorical бакет = [threshold-0.5, threshold+0.5)
+        # Якщо прогноз нижче бакета — майже гарантований програш
+        if _dist_ok and fc_temp < threshold_c - 0.5:
+            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C нижче порогу {threshold_c:.0f}°C (бакет від {threshold_c-0.5:.1f}°C)")
+            _dist_ok = False
     
     is_grid_yes = (
         "range" not in kind_label           # Грід-сітка тільки для точкових категоріальних температур
