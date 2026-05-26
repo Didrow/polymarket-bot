@@ -206,7 +206,8 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     elif kind == "below":
         p = forecast.prob_below_temp_c(threshold_c, is_low)
     else:
-        p = forecast.prob_exact_temp_c(threshold_c, is_low)
+        half_width = 0.2778 if unit == 'F' else 0.5
+        p = forecast.prob_exact_temp_c(threshold_c, is_low, half_width=half_width)
 
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
 
@@ -229,9 +230,10 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
-    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 5 ЦЕНТІВ)
+    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 5 ЦЕНТІВ, ДЛЯ ДЕШЕВИХ КВИТКІВ 10 ЦЕНТІВ)
     spread = market.best_ask_yes - market.best_bid_yes
-    if spread > 0.05:
+    max_spread = 0.10 if market.best_ask_yes <= 0.15 else 0.05
+    if spread > max_spread:
         logger.debug(f"Пропускаємо {market.question[:40]} через широкий спред: {spread:.3f}")
         return None
 
@@ -334,7 +336,8 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                 continue
         # Лічильник для спреду
         spread = market.best_ask_yes - market.best_bid_yes
-        if spread > 0.05:
+        max_spread = 0.10 if market.best_ask_yes <= 0.15 else 0.05
+        if spread > max_spread:
             skip_spread += 1
             continue
 

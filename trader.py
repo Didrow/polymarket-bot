@@ -110,35 +110,25 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
 
 
 def _get_market_from_gamma(condition_id: str) -> Optional[Dict]:
-    """
-    Повертає перший знайдений ринок за condition_id.
-    Використовує параметр 'condition_id' (snake_case) – правильний для Gamma API.
-    """
     clean_id = condition_id.lower()
-    # Кілька варіантів параметрів для гарантії
-    for param in ["condition_id", "conditionId", "id"]:
-        try:
-            url = f"{config.GAMMA_URL}/markets"
-            params = {param: clean_id}
-            r = requests.get(url, params=params, timeout=8)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            # Відповідь може бути списком або об'єктом з ключем 'markets'
-            if isinstance(data, list):
-                markets = data
-            elif isinstance(data, dict) and "markets" in data:
-                markets = data["markets"]
-            else:
-                markets = [data] if isinstance(data, dict) else []
-            for m in markets:
-                # Нормалізуємо ID для порівняння
-                m_cid = normalize_condition_id(m.get("conditionId", ""))
-                m_id = normalize_condition_id(m.get("id", ""))
-                if m_cid == clean_id or m_id == clean_id:
-                    return m
-        except Exception as e:
-            logger.debug(f"Gamma query error with {param}: {e}")
+    try:
+        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": clean_id}, timeout=8)
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        if isinstance(data, list):
+            markets = data
+        elif isinstance(data, dict) and "markets" in data:
+            markets = data["markets"]
+        else:
+            markets = [data] if isinstance(data, dict) else []
+        for m in markets:
+            m_cid = normalize_condition_id(m.get("conditionId", ""))
+            m_id = normalize_condition_id(m.get("id", ""))
+            if m_cid == clean_id or m_id == clean_id:
+                return m
+    except Exception as e:
+        logger.debug(f"Gamma query error: {e}")
     return None
 
 
