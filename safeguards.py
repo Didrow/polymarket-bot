@@ -47,7 +47,7 @@ def _get_pg_conn():
         logger.info("🐘 PostgreSQL: таблицю bot_state створено")
         return _pg_conn
     except Exception as e:
-        logger.debug(f"PostgreSQL недоступний: {e}")
+        logger.warning(f"PostgreSQL недоступний: {e}")
         return None
 
 

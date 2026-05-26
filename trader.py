@@ -132,6 +132,8 @@ def _get_market_from_gamma(condition_id: str) -> Optional[Dict]:
     return None
 
 
+_resolution_cache: Dict[str, Optional[bool]] = {}
+
 def check_market_resolved(condition_id: str, position: Optional["Position"] = None) -> Optional[bool]:
     """
     Визначає, чи вирішився ринок, і який результат (True = YES, False = NO).
@@ -208,10 +210,6 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
             logger.warning(f"Market {clean_id[:20]} closed but no winner determined even after 2h, skipping")
             return None
     return None
-
-
-_resolution_cache: Dict[str, Optional[bool]] = {}
-_resolution_attempt_count: Dict[str, int] = {}
 
 
 # ------------------------------------------------------------------

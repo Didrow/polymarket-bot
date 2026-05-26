@@ -128,7 +128,6 @@ def _signal_handler(sig, frame):
     global _running
     logger.info(f"⏹ Отримано сигнал {sig}, завершуємо роботу...")
     _running = False
-    _save_state_and_exit()
     sys.exit(0)
 
 signal.signal(signal.SIGINT, _signal_handler)
@@ -240,11 +239,11 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if not safeguard.pre_trade_check(size, current_capital):
             continue
 
-        logger.info(f"🎯 УГОДА: {edge_result.summary}")
         position = place_trade(edge_result, current_capital, clob_client)
 
         if position:
             opened_this_cycle += 1
+            logger.info(f"🎯 УГОДА: {edge_result.summary}")
             safeguard.record_trade_open(position.size_usd)
             notifier.notify_trade_open(
                 direction=position.direction,
