@@ -126,16 +126,12 @@ class SafeguardManager:
     def _load_state(self) -> BotState:
         os.makedirs(config.DATA_DIR, exist_ok=True)
 
-        cloud_data = _jsonbin_load()
-        if cloud_data:
-            try:
-                valid_keys = BotState.__dataclass_fields__
-                state = BotState(**{k: v for k, v in cloud_data.items() if k in valid_keys})
-                logger.info("☁️  Стан відновлено з JSONBin (хмара)")
-                return state
-            except Exception as e:
-                logger.warning(f"JSONBin parse error: {e}")
+        # RESET_POSITIONS=true → примусово чистий старт (знімає заморожені позиції)
+        if os.environ.get("RESET_POSITIONS", "").lower() == "true":
+            logger.warning("🔄 RESET_POSITIONS=true → починаємо з чистого аркуша")
+            return BotState()
 
+        # PRIMARY: локальний файл (надійний, без мережевих залежностей)
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE) as f:
@@ -146,6 +142,17 @@ class SafeguardManager:
                     return state
             except Exception as e:
                 logger.warning(f"Локальний стан пошкоджений: {e}")
+
+        # FALLBACK: JSONBin (хмара) — тільки якщо локальний файл відсутній
+        cloud_data = _jsonbin_load()
+        if cloud_data:
+            try:
+                valid_keys = BotState.__dataclass_fields__
+                state = BotState(**{k: v for k, v in cloud_data.items() if k in valid_keys})
+                logger.info("☁️  Стан відновлено з JSONBin (хмара-backup)")
+                return state
+            except Exception as e:
+                logger.warning(f"JSONBin parse error: {e}")
 
         logger.info("🆕 Новий стан (перший запуск)")
         return BotState()

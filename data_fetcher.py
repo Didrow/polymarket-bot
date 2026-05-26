@@ -731,7 +731,13 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
         sources_used=all_sources,
     )
 
-    if fc_ensemble:
+    # Передаємо members лише якщо METAR не домінує (вага < 0.5).
+    # При METAR >= 0.5: result.temp_high_c відображає METAR-реальність,
+    # але ensemble members з іншого дня → prob_exact дасть хибний результат.
+    _metar_weight = next(
+        (w for f, w in forecasts_w if "METAR" in f.sources_used), 0.0
+    )
+    if fc_ensemble and _metar_weight < 0.5:
         result.temp_high_members = fc_ensemble.temp_high_members
         result.temp_low_members = fc_ensemble.temp_low_members
 
