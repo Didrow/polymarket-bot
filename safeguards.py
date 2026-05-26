@@ -15,15 +15,86 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# ─────────────────────────────────────────────
+# PostgreSQL persistence (для Render free tier)
+# ─────────────────────────────────────────────
+_DATABASE_URL: Optional[str] = os.environ.get("DATABASE_URL")
+_pg_conn = None
+
+def _get_pg_conn():
+    global _pg_conn
+    if not _DATABASE_URL:
+        return None
+    if _pg_conn is not None:
+        try:
+            _pg_conn.cursor().execute("SELECT 1")
+            return _pg_conn
+        except Exception:
+            _pg_conn = None
+    try:
+        import pg8000
+        _pg_conn = pg8000.connect(dsn=_DATABASE_URL)
+        cur = _pg_conn.cursor()
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS bot_state ("
+            "  id INTEGER PRIMARY KEY,"
+            "  state_json TEXT NOT NULL,"
+            "  updated_at TIMESTAMP DEFAULT NOW()"
+            ")"
+        )
+        _pg_conn.commit()
+        cur.close()
+        logger.info("🐘 PostgreSQL: таблицю bot_state створено")
+        return _pg_conn
+    except Exception as e:
+        logger.debug(f"PostgreSQL недоступний: {e}")
+        return None
+
+
+def _pg_save(data: dict) -> bool:
+    conn = _get_pg_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO bot_state (id, state_json, updated_at) "
+            "VALUES (1, %s, NOW()) "
+            "ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()",
+            (json.dumps(data, default=str),)
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        logger.debug(f"PostgreSQL save error: {e}")
+        return False
+
+
+def _pg_load() -> Optional[dict]:
+    conn = _get_pg_conn()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT state_json FROM bot_state WHERE id = 1")
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            return json.loads(row[0])
+    except Exception as e:
+        logger.debug(f"PostgreSQL load error: {e}")
+    return None
+
 STATE_FILE = os.path.join(config.DATA_DIR, "bot_state.json")
 
-_JSONBIN_KEY    = os.getenv("JSONBIN_KEY", "")
-_JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID", "")
+_JSONBIN_KEY    = config.JSONBIN_KEY
+_JSONBIN_BIN_ID = config.JSONBIN_BIN_ID
 _JSONBIN_BASE   = "https://api.jsonbin.io/v3/b"
 _JSONBIN_TTL    = 15
 
 
-def _jsonbin_save(data: dict, _retries: int = 2) -> bool:
+def _jsonbin_save(data: dict, _retries: int = 0) -> bool:
     if not _JSONBIN_KEY or not _JSONBIN_BIN_ID:
         return False
     import time as _time
@@ -41,16 +112,11 @@ def _jsonbin_save(data: dict, _retries: int = 2) -> bool:
             )
             if r.status_code == 200:
                 return True
-            logger.warning(f"JSONBin save HTTP {r.status_code} (спроба {attempt+1}/{_retries+1}): {r.text[:80]}")
             if attempt < _retries:
                 _time.sleep(2)
-            else:
-                return False
         except Exception as e:
             if attempt < _retries:
                 _time.sleep(2)
-            else:
-                logger.warning(f"JSONBin save error (спроба {attempt+1}/{_retries+1}): {e}")
     return False
 
 
@@ -117,11 +183,13 @@ class BotState:
 
 class SafeguardManager:
 
-    def __init__(self):
+    def __init__(self, config_obj):
+        self.config = config_obj
         self.state = self._load_state()
         self._trade_count_hour = 0
         self._hour_mark = datetime.now().hour
         self._jsonbin_fail_count = 0
+        self._pg_working = None
 
     def _load_state(self) -> BotState:
         os.makedirs(config.DATA_DIR, exist_ok=True)
@@ -143,16 +211,27 @@ class SafeguardManager:
             except Exception as e:
                 logger.warning(f"Локальний стан пошкоджений: {e}")
 
-        # FALLBACK: JSONBin (хмара) — тільки якщо локальний файл відсутній
+        # FALLBACK 1: JSONBin (хмара) — якщо локальний файл відсутній
         cloud_data = _jsonbin_load()
         if cloud_data:
             try:
                 valid_keys = BotState.__dataclass_fields__
                 state = BotState(**{k: v for k, v in cloud_data.items() if k in valid_keys})
-                logger.info("☁️  Стан відновлено з JSONBin (хмара-backup)")
+                logger.info("☁️  Стан відновлено з JSONBin")
                 return state
             except Exception as e:
                 logger.warning(f"JSONBin parse error: {e}")
+
+        # FALLBACK 2: PostgreSQL (Render free tier — персистентний)
+        pg_data = _pg_load()
+        if pg_data:
+            try:
+                valid_keys = BotState.__dataclass_fields__
+                state = BotState(**{k: v for k, v in pg_data.items() if k in valid_keys})
+                logger.info("🐘 Стан відновлено з PostgreSQL")
+                return state
+            except Exception as e:
+                logger.warning(f"PostgreSQL parse error: {e}")
 
         logger.info("🆕 Новий стан (перший запуск)")
         return BotState()
@@ -161,16 +240,19 @@ class SafeguardManager:
         self.state.last_update = datetime.now(timezone.utc).isoformat()
         data = asdict(self.state)
 
-        ok = _jsonbin_save(data)
-        if ok:
-            self._jsonbin_fail_count = 0
+        # 1. PostgreSQL (персистентний на Render)
+        pg_ok = _pg_save(data)
+        if pg_ok:
+            if self._pg_working is None or not self._pg_working:
+                logger.info("🐘 PostgreSQL: стан збережено")
+            self._pg_working = True
         else:
-            self._jsonbin_fail_count += 1
-            if self._jsonbin_fail_count <= 3 or self._jsonbin_fail_count % 20 == 0:
-                logger.warning(
-                    f"⚠️  JSONBin недоступний (#{self._jsonbin_fail_count}) — fallback на локальний файл"
-                )
+            self._pg_working = False
 
+        # 2. JSONBin (хмара-backup, тільки 1 спроба)
+        _jsonbin_save(data)
+
+        # 3. Локальний файл (епемерний на Render, але працює локально)
         try:
             os.makedirs(config.DATA_DIR, exist_ok=True)
             with open(STATE_FILE, "w") as f:
@@ -320,7 +402,8 @@ class SafeguardManager:
     def record_trade_open(self, size_usd: float):
         self._trade_count_hour += 1
         self.state.total_trades += 1
-        self.state.current_capital -= size_usd
+        if not config.DRY_RUN:
+            self.state.current_capital -= size_usd
         self.save_state()
 
     def record_trade_close(self, pnl_usd: float, size_usd: float = 0.0, condition_id: str = None):
@@ -329,7 +412,8 @@ class SafeguardManager:
             self.state.winning_trades += 1
         else:
             self.state.losing_trades += 1
-        self.state.current_capital += size_usd + pnl_usd
+        if not config.DRY_RUN:
+            self.state.current_capital += size_usd + pnl_usd
         if self.state.current_capital > self.state.peak_capital:
             self.state.peak_capital = self.state.current_capital
         

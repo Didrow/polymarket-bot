@@ -229,10 +229,9 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
-    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 3 ЦЕНТИ)
-    # Якщо різниця між ask та bid більша за 0.03 (3 центи), ринок неліквідний – пропускаємо
+    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 5 ЦЕНТІВ)
     spread = market.best_ask_yes - market.best_bid_yes
-    if spread > 0.03:
+    if spread > 0.05:
         logger.debug(f"Пропускаємо {market.question[:40]} через широкий спред: {spread:.3f}")
         return None
 
@@ -327,9 +326,9 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             if market.detected_city not in config.CITY_WHITELIST:
                 skip_city += 1
                 continue
-        # Лічильник для спреду (тільки для логування)
+        # Лічильник для спреду
         spread = market.best_ask_yes - market.best_bid_yes
-        if spread > 0.03:
+        if spread > 0.05:
             skip_spread += 1
             continue
 

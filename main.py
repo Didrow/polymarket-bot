@@ -274,7 +274,7 @@ def main():
             logger.info(f"  Розмір:   {config.COMPOUND_RISK_PCT:.1%} від капіталу")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
     logger.info(f"  Edge min:  {config.MIN_EDGE_ENTRY:.0%}")
-    logger.info(f"  Спред max: 3 центи")
+    logger.info(f"  Спред max: 5 центів")
     logger.info(f"  Правило:   тільки weather ринки < {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
     logger.info("")
