@@ -11,7 +11,6 @@ from typing import Any, Optional, Dict, List
 from dataclasses import dataclass, field
 
 import config
-from db import log_trade, log_error
 from edge_calculator import EdgeResult
 from market_scanner import PolyMarket
 
@@ -309,12 +308,6 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         market_type=market.market_type,
         end_date=market.end_date,
     )
-    # Log trade creation (pnl unknown at open)
-    try:
-        from db import log_trade, log_error
-        log_trade(clean_cid, edge_result.edge_direction, size_usd, price, None)
-    except Exception as e:
-        logger.error(f"Error logging trade open for {clean_cid}: {e}")
 
     if config.DRY_RUN:
         logger.info(f"🧪 DRY-RUN: Відкрито {edge_result.edge_direction} | {market.question[:60]} | size=${size_usd:.2f} (cap=${current_capital:.2f})")
@@ -356,9 +349,21 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
 
     best_ask = float(market_data.get("bestAsk") or 0.0)
     best_bid = float(market_data.get("bestBid") or 0.0)
-    if best_ask == 0.0 or best_bid == 0.0:
-        return None
-    yes_price = (best_ask + best_bid) / 2.0
+    last_trade = float(market_data.get("lastTradePrice") or 0.0)
+
+    if best_ask == 0.0 and best_bid == 0.0:
+        if last_trade > 0.0:
+            yes_price = last_trade
+        else:
+            return None
+    else:
+        if best_ask == 0.0:
+            best_ask = 1.0
+        if best_bid == 0.0:
+            yes_price = best_ask / 2.0
+        else:
+            yes_price = (best_ask + best_bid) / 2.0
+
     _mtm_price_cache[clean_id] = (time.time(), yes_price)
     return yes_price
 

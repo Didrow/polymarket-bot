@@ -6,6 +6,7 @@ edge_calculator.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
 - Агресивний пошук дешевих BUY_YES (до 12 центів) через Ансамблеві ймовірності.
 - Купівля сусідніх температур для створення "Рибальської сітки" навколо прогнозу.
 - Адаптивна фільтрація за спредом (max spread 3 центи) для уникнення неліквідних ринків.
+- Фільтр відстані для categorical ринків (max 3°C від прогнозу) з коректною обробкою 0°C та мінусових температур.
 """
 
 import math
@@ -211,7 +212,7 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
 
 
 # ══════════════════════════════════════════════════════════════════
-# ОБЧИСЛЕННЯ EDGE (з фільтром спреду)
+# ОБЧИСЛЕННЯ EDGE (з фільтром спреду та відстані)
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -249,8 +250,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
-    tc = forecast.temp_low_c if is_low else forecast.temp_high_c
-    fc_temp = f"{tc:.1f}°C"
+    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c   # float
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
@@ -259,8 +259,18 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     GRID_MIN_PRICE = 0.02
+    
+    # Фільтр відстані для categorical ринків.
+    # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
+    _dist_ok = True
+    if "categorical" in kind_label and threshold_c is not None and fc_temp is not None:
+        _dist_ok = abs(fc_temp - threshold_c) <= 3.0
+        if not _dist_ok:
+            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >3°C")
+    
     is_grid_yes = (
-        "range" not in kind_label  # Грід-сітка тільки для точкових категоріальних температур
+        "range" not in kind_label           # Грід-сітка тільки для точкових категоріальних температур
+        and _dist_ok                        # Ціль не далі 3°C від прогнозу
         and market_prob >= GRID_MIN_PRICE
         and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
         and our_prob >= 0.08

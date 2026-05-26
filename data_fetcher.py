@@ -603,6 +603,68 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
         return None
 
 
+def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
+    """
+    Отримує спостережені погодинні температури за сьогодні з Open-Meteo.
+    Повертає (min_so_far, max_so_far) або None.
+    Використовується як фізичне обмеження для ринків, що вирішуються сьогодні.
+    """
+    coords = _get_coords(city, prefer_airport=True)
+    if not coords:
+        return None
+
+    key = f"obs_{city}"
+    cached = _cache_get(key)
+    if cached:
+        return cached
+
+    lat, lon = coords
+    try:
+        r = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": "temperature_2m",
+                "past_hours": 48,
+                "forecast_hours": 0,
+                "timezone": "auto",
+            },
+            timeout=10
+        )
+        r.raise_for_status()
+        data = r.json()
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+
+        if not times or not temps:
+            return None
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        today_temps = []
+        for t_str, temp in zip(times, temps):
+            try:
+                t = datetime.fromisoformat(t_str)
+                if t >= today_start and temp is not None:
+                    today_temps.append(temp)
+            except:
+                pass
+
+        if len(today_temps) < 2:
+            return None
+
+        result = (min(today_temps), max(today_temps))
+        _cache_set(key, result)
+        logger.debug(f"📊 Observed today {city}: min={result[0]:.1f}°C, max={result[1]:.1f}°C ({len(today_temps)} hours)")
+        return result
+    except Exception as e:
+        logger.debug(f"Observed today error {city}: {e}")
+        return None
+
+
 # ─────────────────────────────────────────────
 # 6. CONSENSUS (ЗЛИТТЯ ПРОГНОЗІВ З ПРІОРИТЕТОМ METAR ДЛЯ БЛИЗЬКИХ ГОДИН)
 # ─────────────────────────────────────────────
@@ -629,36 +691,17 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
     fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution)
     fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution)
 
-    # 3. Визначаємо ваги залежно від часу до resolution
-    if hours_to_resolution <= 6.0:
-        # Для ринків, що вирішуються за 6 годин — METAR майже істина
-        if metar_fc:
-            forecasts_w.append((metar_fc, 0.90))
-        # Решта джерел мають символічну вагу (коригують тренд)
-        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.05))
-        if fc_gfs: forecasts_w.append((fc_gfs, 0.03))
-        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.02))
-        if fc_noaa: forecasts_w.append((fc_noaa, 0.0))   # NOAA не додаємо при такому малому horizon
-        if fc_nasa: forecasts_w.append((fc_nasa, 0.0))
-    elif hours_to_resolution <= 12.0:
-        # Для 6-12 годин METAR все ще дуже важливий, але враховуємо прогнозні моделі
-        if metar_fc:
-            forecasts_w.append((metar_fc, 0.65))
-        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.20))
-        if fc_gfs: forecasts_w.append((fc_gfs, 0.08))
-        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.07))
-        if fc_noaa: forecasts_w.append((fc_noaa, 0.0))
-        if fc_nasa: forecasts_w.append((fc_nasa, 0.0))
+    # 3. Визначаємо ваги залежно від часу до resolution (Тільки моделі, без METAR!)
+    if hours_to_resolution <= 12.0:
+        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.50))
+        if fc_gfs: forecasts_w.append((fc_gfs, 0.25))
+        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.25))
     else:
-        # Понад 12 годин — стандартне зважування, METAR використовується лише для корекції
         if fc_ensemble: forecasts_w.append((fc_ensemble, 0.45))
         if fc_noaa: forecasts_w.append((fc_noaa, 0.25))
         if fc_gfs: forecasts_w.append((fc_gfs, 0.15))
         if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.10))
         if fc_nasa: forecasts_w.append((fc_nasa, 0.05))
-        # METAR додаємо лише якщо він є і години <= 24 (для свіжості)
-        if metar_fc and hours_to_resolution <= 24.0:
-            forecasts_w.append((metar_fc, 0.10))
 
     # Якщо після зважування немає жодного прогнозу — повертаємо ансамбль або None
     if not forecasts_w:
@@ -688,10 +731,41 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
         sources_used=all_sources,
     )
 
-    # Передаємо члени ансамблю, якщо вони є (навіть якщо вага ансамблю мала)
     if fc_ensemble:
         result.temp_high_members = fc_ensemble.temp_high_members
         result.temp_low_members = fc_ensemble.temp_low_members
+
+    # Застосовуємо спостережені дані як фізичне обмеження для ринків, що вирішуються сьогодні
+    if hours_to_resolution <= 24.0:
+        observed = _fetch_observed_daily_extremes(city)
+        if observed:
+            obs_low, obs_high = observed
+            # Добовий максимум не може бути нижчим за вже спостережений максимум
+            result.temp_high_c = max(result.temp_high_c, obs_high)
+            # Добовий мінімум не може бути вищим за вже спостережений мінімум
+            result.temp_low_c = min(result.temp_low_c, obs_low)
+
+            if result.temp_high_members:
+                result.temp_high_members = [max(m, obs_high) for m in result.temp_high_members]
+            if result.temp_low_members:
+                result.temp_low_members = [min(m, obs_low) for m in result.temp_low_members]
+
+            if "OBSERVED" not in result.sources_used:
+                result.sources_used.append("OBSERVED")
+
+        # Додаткове обмеження через METAR (поточна температура, найсвіжіші дані)
+        if metar_fc:
+            current_temp = metar_fc.temp_high_c
+            result.temp_high_c = max(result.temp_high_c, current_temp)
+            result.temp_low_c = min(result.temp_low_c, current_temp)
+
+            if result.temp_high_members:
+                result.temp_high_members = [max(m, current_temp) for m in result.temp_high_members]
+            if result.temp_low_members:
+                result.temp_low_members = [min(m, current_temp) for m in result.temp_low_members]
+
+            if "METAR" not in result.sources_used:
+                result.sources_used.append("METAR")
 
     _cache_set(key, result)
     logger.info(

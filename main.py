@@ -3,7 +3,6 @@ main.py — Polymarket Weather Bot 2026 (COMPOUND READY)
 """
 
 import os
-from db import init_schema
 import sys
 import time
 import signal
@@ -116,11 +115,6 @@ def _start_health_server():
     logger.info(f"🌐 Health check сервер запущено на порту {port}")
 
 def _save_state_and_exit():
-    # Ensure DB schema is initialized on shutdown (no-op if already)
-    try:
-        init_schema()
-    except Exception as e:
-        logger.error(f"DB schema init on exit failed: {e}")
     global _safeguard
     logger.info("💾 Зберігаємо стан перед виходом...")
     if _safeguard is not None:
@@ -264,11 +258,6 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     return opened_this_cycle
 
 def main():
-    # Initialize DB schema before any operations
-    try:
-        init_schema()
-    except Exception as e:
-        logger.error(f"Failed to init DB schema: {e}")
     global _safeguard
     _start_health_server()
     logger.info("")
