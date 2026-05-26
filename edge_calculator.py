@@ -223,7 +223,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if not city or (hasattr(config, 'CITY_WHITELIST') and city not in config.CITY_WHITELIST):
         return None
 
-    if market.hours_to_resolution < 1.5 or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
+    if market.hours_to_resolution < config.MIN_RESOLUTION_HOURS or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
         return None
 
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
@@ -325,7 +325,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
         if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
             skip_vol += 1
             continue
-        if market.hours_to_resolution < 1.5 or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
+        if market.hours_to_resolution < config.MIN_RESOLUTION_HOURS or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
             skip_hours += 1
             continue
         if market.detected_city and hasattr(config, 'CITY_WHITELIST') and config.CITY_WHITELIST:

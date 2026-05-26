@@ -42,6 +42,7 @@ MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
+MIN_RESOLUTION_HOURS: float = 0.5       # Мінімум годин до резолву (0.5 = 30хв для DRY-RUN, у бойовому 1.5)
 MIN_MARKET_VOLUME_USD: float = 100.0    
 SCAN_INTERVAL_SEC: int = 600            # Сканування кожні 10 хвилин
 OSINT_SCAN_INTERVAL_SEC: int = 300
