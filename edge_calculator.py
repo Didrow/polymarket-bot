@@ -5,8 +5,7 @@ edge_calculator.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
 - Повністю вимкнено пошук угод BUY_NO.
 - Агресивний пошук дешевих BUY_YES (до 12 центів) через Ансамблеві ймовірності.
 - Купівля сусідніх температур для створення "Рибальської сітки" навколо прогнозу.
-- Адаптивна фільтрація за спредом (max spread 5 центів) для уникнення неліквідних ринків.
-- Фільтр відстані для categorical ринків (max 3°C від прогнозу) з коректною обробкою 0°C та мінусових температур.
+- Адаптивна фільтрація за спредом (max spread 3 центи) для уникнення неліквідних ринків.
 """
 
 import math
@@ -206,14 +205,13 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     elif kind == "below":
         p = forecast.prob_below_temp_c(threshold_c, is_low)
     else:
-        half_width = 0.2778 if unit == 'F' else 0.5
-        p = forecast.prob_exact_temp_c(threshold_c, is_low, half_width=half_width)
+        p = forecast.prob_exact_temp_c(threshold_c, is_low)
 
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
 
 
 # ══════════════════════════════════════════════════════════════════
-# ОБЧИСЛЕННЯ EDGE (з фільтром спреду та відстані)
+# ОБЧИСЛЕННЯ EDGE (з фільтром спреду)
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -224,16 +222,16 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if not city or (hasattr(config, 'CITY_WHITELIST') and city not in config.CITY_WHITELIST):
         return None
 
-    if market.hours_to_resolution < config.MIN_RESOLUTION_HOURS or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
+    if market.hours_to_resolution < 1.5 or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
         return None
 
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
-    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 5 ЦЕНТІВ, ДЛЯ ДЕШЕВИХ КВИТКІВ 10 ЦЕНТІВ)
+    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 3 ЦЕНТИ)
+    # Якщо різниця між ask та bid більша за 0.03 (3 центи), ринок неліквідний – пропускаємо
     spread = market.best_ask_yes - market.best_bid_yes
-    max_spread = 0.10 if market.best_ask_yes <= 0.15 else 0.05
-    if spread > max_spread:
+    if spread > 0.03:
         logger.debug(f"Пропускаємо {market.question[:40]} через широкий спред: {spread:.3f}")
         return None
 
@@ -251,7 +249,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
-    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c   # float
+    tc = forecast.temp_low_c if is_low else forecast.temp_high_c
+    fc_temp = f"{tc:.1f}°C"
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
@@ -260,24 +259,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     GRID_MIN_PRICE = 0.02
-    
-    # Фільтр відстані для categorical ринків.
-    # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
-    _dist_ok = True
-    if "categorical" in kind_label and threshold_c is not None and fc_temp is not None:
-        _dist_ok = abs(fc_temp - threshold_c) <= 1.5
-        if not _dist_ok:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >1.5°C")
-        # Не купуємо categorical YES, якщо прогноз НИЖЧЕ порогу
-        # Polymarket categorical бакет = [threshold-0.5, threshold+0.5)
-        # Якщо прогноз нижче бакета — майже гарантований програш
-        if _dist_ok and fc_temp < threshold_c - 0.5:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C нижче порогу {threshold_c:.0f}°C (бакет від {threshold_c-0.5:.1f}°C)")
-            _dist_ok = False
-    
     is_grid_yes = (
-        "range" not in kind_label           # Грід-сітка тільки для точкових категоріальних температур
-        and _dist_ok                        # Ціль не далі 3°C від прогнозу
+        "range" not in kind_label  # Грід-сітка тільки для точкових категоріальних температур
         and market_prob >= GRID_MIN_PRICE
         and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
         and our_prob >= 0.08
@@ -327,17 +310,16 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
         if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
             skip_vol += 1
             continue
-        if market.hours_to_resolution < config.MIN_RESOLUTION_HOURS or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
+        if market.hours_to_resolution < 1.5 or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
             skip_hours += 1
             continue
         if market.detected_city and hasattr(config, 'CITY_WHITELIST') and config.CITY_WHITELIST:
             if market.detected_city not in config.CITY_WHITELIST:
                 skip_city += 1
                 continue
-        # Лічильник для спреду
+        # Лічильник для спреду (тільки для логування)
         spread = market.best_ask_yes - market.best_bid_yes
-        max_spread = 0.10 if market.best_ask_yes <= 0.15 else 0.05
-        if spread > max_spread:
+        if spread > 0.03:
             skip_spread += 1
             continue
 

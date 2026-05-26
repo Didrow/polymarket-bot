@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def reset_statistics_api() -> str:
     # Initialize safeguard manager to read current state
-    manager = SafeguardManager(config)
+    manager = SafeguardManager()
     current_state = manager.state
     
     active_positions_count = len(current_state.open_positions or {})

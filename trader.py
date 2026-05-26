@@ -11,6 +11,7 @@ from typing import Any, Optional, Dict, List
 from dataclasses import dataclass, field
 
 import config
+from db import log_trade, log_error
 from edge_calculator import EdgeResult
 from market_scanner import PolyMarket
 
@@ -110,29 +111,37 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
 
 
 def _get_market_from_gamma(condition_id: str) -> Optional[Dict]:
+    """
+    Повертає перший знайдений ринок за condition_id.
+    Використовує параметр 'condition_id' (snake_case) – правильний для Gamma API.
+    """
     clean_id = condition_id.lower()
-    try:
-        r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": clean_id}, timeout=8)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        if isinstance(data, list):
-            markets = data
-        elif isinstance(data, dict) and "markets" in data:
-            markets = data["markets"]
-        else:
-            markets = [data] if isinstance(data, dict) else []
-        for m in markets:
-            m_cid = normalize_condition_id(m.get("conditionId", ""))
-            m_id = normalize_condition_id(m.get("id", ""))
-            if m_cid == clean_id or m_id == clean_id:
-                return m
-    except Exception as e:
-        logger.debug(f"Gamma query error: {e}")
+    # Кілька варіантів параметрів для гарантії
+    for param in ["condition_id", "conditionId", "id"]:
+        try:
+            url = f"{config.GAMMA_URL}/markets"
+            params = {param: clean_id}
+            r = requests.get(url, params=params, timeout=8)
+            if r.status_code != 200:
+                continue
+            data = r.json()
+            # Відповідь може бути списком або об'єктом з ключем 'markets'
+            if isinstance(data, list):
+                markets = data
+            elif isinstance(data, dict) and "markets" in data:
+                markets = data["markets"]
+            else:
+                markets = [data] if isinstance(data, dict) else []
+            for m in markets:
+                # Нормалізуємо ID для порівняння
+                m_cid = normalize_condition_id(m.get("conditionId", ""))
+                m_id = normalize_condition_id(m.get("id", ""))
+                if m_cid == clean_id or m_id == clean_id:
+                    return m
+        except Exception as e:
+            logger.debug(f"Gamma query error with {param}: {e}")
     return None
 
-
-_resolution_cache: Dict[str, Optional[bool]] = {}
 
 def check_market_resolved(condition_id: str, position: Optional["Position"] = None) -> Optional[bool]:
     """
@@ -210,6 +219,10 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
             logger.warning(f"Market {clean_id[:20]} closed but no winner determined even after 2h, skipping")
             return None
     return None
+
+
+_resolution_cache: Dict[str, Optional[bool]] = {}
+_resolution_attempt_count: Dict[str, int] = {}
 
 
 # ------------------------------------------------------------------
@@ -296,6 +309,12 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         market_type=market.market_type,
         end_date=market.end_date,
     )
+    # Log trade creation (pnl unknown at open)
+    try:
+        from db import log_trade, log_error
+        log_trade(clean_cid, edge_result.edge_direction, size_usd, price, None)
+    except Exception as e:
+        logger.error(f"Error logging trade open for {clean_cid}: {e}")
 
     if config.DRY_RUN:
         logger.info(f"🧪 DRY-RUN: Відкрито {edge_result.edge_direction} | {market.question[:60]} | size=${size_usd:.2f} (cap=${current_capital:.2f})")
@@ -337,21 +356,9 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
 
     best_ask = float(market_data.get("bestAsk") or 0.0)
     best_bid = float(market_data.get("bestBid") or 0.0)
-    last_trade = float(market_data.get("lastTradePrice") or 0.0)
-
-    if best_ask == 0.0 and best_bid == 0.0:
-        if last_trade > 0.0:
-            yes_price = last_trade
-        else:
-            return None
-    else:
-        if best_ask == 0.0:
-            best_ask = 1.0
-        if best_bid == 0.0:
-            yes_price = best_ask / 2.0
-        else:
-            yes_price = (best_ask + best_bid) / 2.0
-
+    if best_ask == 0.0 or best_bid == 0.0:
+        return None
+    yes_price = (best_ask + best_bid) / 2.0
     _mtm_price_cache[clean_id] = (time.time(), yes_price)
     return yes_price
 
