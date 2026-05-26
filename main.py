@@ -285,7 +285,7 @@ def main():
         sys.exit(1)
 
     clob_client = init_clob_client()
-    safeguard = SafeguardManager()
+    safeguard = SafeguardManager(config)
     _safeguard = safeguard
     _HealthHandler.safeguard_manager = safeguard
 

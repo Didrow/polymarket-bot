@@ -200,6 +200,7 @@ class SafeguardManager:
             return BotState()
 
         # PRIMARY: локальний файл (надійний, без мережевих залежностей)
+        state = None
         if os.path.exists(STATE_FILE):
             try:
                 with open(STATE_FILE) as f:
@@ -207,34 +208,45 @@ class SafeguardManager:
                     valid_keys = BotState.__dataclass_fields__
                     state = BotState(**{k: v for k, v in data.items() if k in valid_keys})
                     logger.info("💾 Стан відновлено з локального файлу")
-                    return state
             except Exception as e:
                 logger.warning(f"Локальний стан пошкоджений: {e}")
 
         # FALLBACK 1: JSONBin (хмара) — якщо локальний файл відсутній
-        cloud_data = _jsonbin_load()
-        if cloud_data:
-            try:
-                valid_keys = BotState.__dataclass_fields__
-                state = BotState(**{k: v for k, v in cloud_data.items() if k in valid_keys})
-                logger.info("☁️  Стан відновлено з JSONBin")
-                return state
-            except Exception as e:
-                logger.warning(f"JSONBin parse error: {e}")
+        if state is None:
+            cloud_data = _jsonbin_load()
+            if cloud_data:
+                try:
+                    valid_keys = BotState.__dataclass_fields__
+                    state = BotState(**{k: v for k, v in cloud_data.items() if k in valid_keys})
+                    logger.info("☁️  Стан відновлено з JSONBin")
+                except Exception as e:
+                    logger.warning(f"JSONBin parse error: {e}")
 
         # FALLBACK 2: PostgreSQL (Render free tier — персистентний)
-        pg_data = _pg_load()
-        if pg_data:
-            try:
-                valid_keys = BotState.__dataclass_fields__
-                state = BotState(**{k: v for k, v in pg_data.items() if k in valid_keys})
-                logger.info("🐘 Стан відновлено з PostgreSQL")
-                return state
-            except Exception as e:
-                logger.warning(f"PostgreSQL parse error: {e}")
+        if state is None:
+            pg_data = _pg_load()
+            if pg_data:
+                try:
+                    valid_keys = BotState.__dataclass_fields__
+                    state = BotState(**{k: v for k, v in pg_data.items() if k in valid_keys})
+                    logger.info("🐘 Стан відновлено з PostgreSQL")
+                except Exception as e:
+                    logger.warning(f"PostgreSQL parse error: {e}")
 
-        logger.info("🆕 Новий стан (перший запуск)")
-        return BotState()
+        # Якщо стан не знайдено — новий запуск
+        if state is None:
+            logger.info("🆕 Новий стан (перший запуск)")
+            return BotState()
+
+        # DRY-RUN: виправляємо капітал, який міг бути з'їдений старим багом
+        if config.DRY_RUN and state.current_capital < config.INITIAL_CAPITAL:
+            logger.warning(f"🧪 DRY-RUN: виправлено капітал ${state.current_capital:.2f} → ${config.INITIAL_CAPITAL:.2f} (баг old code)")
+            state.current_capital = config.INITIAL_CAPITAL
+            state.peak_capital = config.INITIAL_CAPITAL
+            state.is_halted = False
+            state.halt_reason = ""
+
+        return state
 
     def save_state(self):
         self.state.last_update = datetime.now(timezone.utc).isoformat()
