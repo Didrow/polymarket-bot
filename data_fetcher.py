@@ -68,31 +68,25 @@ class WeatherForecast:
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
         return 1.0 - self.prob_above_temp_c(threshold_c, is_low)
 
-    def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
-        """
-        Рахує ймовірність того, що температура потрапить у Polymarket бакет [threshold-0.5, threshold+0.5).
-        Використовує пряму частоту ансамблю (без додаткового згладжування).
-        """
+    def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
 
         if members:
-            # Пряма частота: члени ансамблю вже є ймовірнісним розподілом.
-            count = sum(1 for m in members if threshold_c - 0.5 <= m < threshold_c + 0.5)
-            raw = count / len(members)
-            if raw == 0.0:
-                # Жоден член не потрапив. Якщо threshold близький до mean — мала ймовірність,
-                # але не нульова (ансамбль може недооцінювати хвости при 31 members).
-                mean = sum(members) / len(members)
-                return 0.03 if abs(mean - threshold_c) <= 1.5 else 0.01
-            return max(0.01, min(0.99, round(raw, 4)))
+            prob = 0.0
+            sigma = 1.3
+            for m in members:
+                p_high = 0.5 * (1 + math.erf(((threshold_c + half_width) - m) / (sigma * math.sqrt(2))))
+                p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - m) / (sigma * math.sqrt(2))))
+                prob += (p_high - p_low)
+            prob /= len(members)
+            return max(0.01, min(0.99, round(prob, 4)))
 
-        # Fallback: один детермінований прогноз без ансамблю.
         sigma = 2.0
         tc = self.temp_low_c if is_low else self.temp_high_c
         if tc == 0.0:
             return 0.01
-        p_high = 0.5 * (1 + math.erf((threshold_c + 0.5 - tc) / (sigma * math.sqrt(2))))
-        p_low  = 0.5 * (1 + math.erf((threshold_c - 0.5 - tc) / (sigma * math.sqrt(2))))
+        p_high = 0.5 * (1 + math.erf((threshold_c + half_width - tc) / (sigma * math.sqrt(2))))
+        p_low  = 0.5 * (1 + math.erf((threshold_c - half_width - tc) / (sigma * math.sqrt(2))))
         return max(0.01, min(0.99, round(p_high - p_low, 4)))
 
     def prob_rain_or_snow(self) -> float:
@@ -284,7 +278,8 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
         r.raise_for_status()
         daily = r.json().get("daily", {})
         
-        day_index = min(max(round(hours_to_resolution / 24), 0), 4)
+        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
         
         high_m, low_m = [], []
         for i in range(1, 32):
@@ -460,7 +455,8 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
         daily = r.json().get("daily", {})
         if not daily: return None
 
-        day_index = min(max(round(hours_to_resolution / 24), 0), 4)
+        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
         high_c     = daily["temperature_2m_max"][day_index] if len(daily.get("temperature_2m_max", [])) > day_index else daily["temperature_2m_max"][0]
         low_c      = daily["temperature_2m_min"][day_index] if len(daily.get("temperature_2m_min", [])) > day_index else daily["temperature_2m_min"][0]
         rain_probs = daily.get("precipitation_probability_max", [0])
@@ -731,7 +727,13 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
         sources_used=all_sources,
     )
 
-    if fc_ensemble:
+    # Передаємо members лише якщо METAR не домінує (вага < 0.5).
+    # При METAR >= 0.5: result.temp_high_c відображає METAR-реальність,
+    # але ensemble members з іншого дня → prob_exact дасть хибний результат.
+    _metar_weight = next(
+        (w for f, w in forecasts_w if "METAR" in f.sources_used), 0.0
+    )
+    if fc_ensemble and _metar_weight < 0.5:
         result.temp_high_members = fc_ensemble.temp_high_members
         result.temp_low_members = fc_ensemble.temp_low_members
 
@@ -748,7 +750,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
             if result.temp_high_members:
                 result.temp_high_members = [max(m, obs_high) for m in result.temp_high_members]
             if result.temp_low_members:
-                result.temp_low_members = [min(m, obs_low) for m in result.temp_low_members]
+                result.temp_low_members = [max(m, obs_low) for m in result.temp_low_members]
 
             if "OBSERVED" not in result.sources_used:
                 result.sources_used.append("OBSERVED")

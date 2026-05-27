@@ -13,3 +13,6 @@ requests>=2.31.0
 # Web3 / Polygon (необхідно для EIP-712 підписів)
 web3>=6.11.0
 eth-account>=0.10.0
+
+# PostgreSQL persistence (Render free tier)
+pg8000>=1.31.0
