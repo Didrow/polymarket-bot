@@ -63,7 +63,12 @@ class WeatherForecast:
             return 0.50
         diff = tc - threshold_c
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
-        return max(0.01, min(0.99, round(prob, 4)))
+        
+        # Обмежуємо максимальну впевненість щоб не купувати "гарантовані" результати, 
+        # які насправді можуть бути помилкою моделі
+        import config
+        max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+        return max(0.01, min(max_cap, round(prob, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
         return 1.0 - self.prob_above_temp_c(threshold_c, is_low)
@@ -81,13 +86,15 @@ class WeatherForecast:
             prob /= len(members)
             return max(0.01, min(0.99, round(prob, 4)))
 
-        sigma = 2.0
+        sigma = 2.5  # Збільшено з 2.0 для більш консервативного розподілу
         tc = self.temp_low_c if is_low else self.temp_high_c
         if tc == 0.0:
             return 0.01
         p_high = 0.5 * (1 + math.erf((threshold_c + half_width - tc) / (sigma * math.sqrt(2))))
         p_low  = 0.5 * (1 + math.erf((threshold_c - half_width - tc) / (sigma * math.sqrt(2))))
-        return max(0.01, min(0.99, round(p_high - p_low, 4)))
+        import config
+        max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+        return max(0.01, min(max_cap, round(p_high - p_low, 4)))
 
     def prob_rain_or_snow(self) -> float:
         return max(0.02, min(0.98, max(self.prob_rain, self.prob_snow)))
@@ -756,7 +763,9 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
                 result.sources_used.append("OBSERVED")
 
         # Додаткове обмеження через METAR (поточна температура, найсвіжіші дані)
-        if metar_fc:
+        # УВАГА: Застосовуємо ТІЛЬКИ якщо до resolution залишилось < 14 годин
+        # Інакше поточна температура не є релевантною межею для завтрашнього дня
+        if metar_fc and hours_to_resolution < 14.0:
             current_temp = metar_fc.temp_high_c
             result.temp_high_c = max(result.temp_high_c, current_temp)
             result.temp_low_c = min(result.temp_low_c, current_temp)

@@ -1,5 +1,5 @@
 """
-config.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION + COMPOUND)
+config.py — Polymarket Weather Bot (SNIPER GRID EDITION v3)
 """
 
 from typing import List
@@ -18,7 +18,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 12          # Max одночасних позицій (Kelly + Grid)
+MAX_ACTIVE_POSITIONS: int = 15          # Max одночасних позицій (Kelly + Grid)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)
 MAX_POSITION_USD: float = 5.0           # Абсолютний ліміт позиції в $
@@ -87,6 +87,6 @@ EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST
 MIN_DATA_POINTS_FALLBACK: int = 5      
 WHALE_THRESHOLD_USD: float = 2000.0    
 
-# ── JSONBIN.IO ────────────────────────────────────────────────
-JSONBIN_KEY:    str = os.getenv("JSONBIN_KEY", "")     
-JSONBIN_BIN_ID: str = os.getenv("JSONBIN_BIN_ID", "")  
+# ── EDGE CAP (запобігання хибним сигналам) ───────────────────
+MAX_EDGE_CAP: float = 0.75             # Якщо edge > 75% — підозріло, cap до цього значення
+MAX_PROB_CAP: float = 0.92             # Максимальна ймовірність — не може бути 97%+ для погоди
