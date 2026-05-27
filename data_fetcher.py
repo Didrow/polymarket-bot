@@ -750,7 +750,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
             if result.temp_high_members:
                 result.temp_high_members = [max(m, obs_high) for m in result.temp_high_members]
             if result.temp_low_members:
-                result.temp_low_members = [max(m, obs_low) for m in result.temp_low_members]
+                result.temp_low_members = [min(m, obs_low) for m in result.temp_low_members]
 
             if "OBSERVED" not in result.sources_used:
                 result.sources_used.append("OBSERVED")

@@ -163,6 +163,44 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
 
     # Якщо ринок явно відкритий – нічого не робимо
     if not is_closed and not is_resolved:
+        # Для DRY-RUN симулюємо resolution, якщо end_date минув
+        if config.DRY_RUN and end_date and position:
+            now = datetime.now(timezone.utc)
+            if now > end_date:
+                # Симулюємо resolution через прогноз погоди (приблизно)
+                from data_fetcher import get_best_forecast
+                forecast = get_best_forecast(position.city, hours_to_resolution=0)
+                if forecast:
+                    is_low = 'lowest' in position.question.lower()
+                    tc = forecast.temp_low_c if is_low else forecast.temp_high_c
+                    # Знайти поріг
+                    from edge_calculator import _parse_range_or_threshold
+                    kind, val_min, val_max, unit = _parse_range_or_threshold(position.question)
+                    
+                    resolved_yes = None
+                    if kind == "range":
+                        if unit == 'F':
+                            tc = tc * 9/5 + 32
+                        resolved_yes = (val_min - 0.5) <= tc < (val_max + 0.5)
+                    elif val_min is not None:
+                        threshold_c = val_min
+                        if unit == 'F':
+                            from edge_calculator import _f_to_c
+                            threshold_c = _f_to_c(threshold_c)
+                            
+                        if kind == "above":
+                            resolved_yes = tc > threshold_c
+                        elif kind == "below":
+                            resolved_yes = tc <= threshold_c
+                        else:
+                            half_width = 0.2778 if unit == 'F' else 0.5
+                            resolved_yes = (threshold_c - half_width) <= tc < (threshold_c + half_width)
+                            
+                    if resolved_yes is not None:
+                        _resolution_cache[clean_id] = resolved_yes
+                        logger.warning(f"🧪 DRY-RUN Simulated resolution via forecast: {resolved_yes} for {clean_id[:20]}")
+                        return resolved_yes
+
         logger.debug(f"Market {clean_id[:20]} is still OPEN (end_date={end_date})")
         return None
 
@@ -366,7 +404,7 @@ def cleanup_stale_positions() -> List[Position]:
         is_weather = any(kw in pos.question.lower() for kw in WEATHER_KEYWORDS)
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        if not is_weather or age_hours > 36:
+        if not is_weather or age_hours > 26:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
@@ -410,11 +448,11 @@ def check_and_close_positions(clob_client) -> List[Position]:
             _recently_closed[cid] = now
             continue
 
-        # Примусове закриття: погодні ринки живуть max 48h — якщо вік >36h і
+        # Примусове закриття: погодні ринки живуть max 48h — якщо вік >26h і
         # нічого не визначилось, визначаємо результат через CLOB з relaxed threshold.
         # Логіка direction ідентична _check_resolution_by_clob(), але поріг 0.95/0.05
-        # (для force-close після 36h можна бути менш суворими ніж 0.98/0.02).
-        if age_hours >= 36 and pos.token_id:
+        # (для force-close після 26h можна бути менш суворими ніж 0.98/0.02).
+        if age_hours >= 26 and pos.token_id:
             resolved_yes = None
             try:
                 r = requests.get(
@@ -464,3 +502,24 @@ def get_portfolio_summary() -> Dict:
 
 def get_active_positions() -> Dict:
     return _active_positions
+
+def startup_cleanup() -> List[Position]:
+    """Примусово перевіряє статус кожної позиції при старті бота"""
+    closed = []
+    now = datetime.now(timezone.utc)
+    for cid, pos in list(_active_positions.items()):
+        logger.info(f"🔄 Перевірка відновленої позиції: {pos.question[:50]}")
+        resolved = check_market_resolved(cid, position=pos)
+        if resolved is not None:
+            pos.resolve(resolved)
+            logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'}: {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
+            
+        # Оновити MTM ціну щоб PnL не був завжди 0 для відкритих
+        price = _get_market_price_from_gamma(cid)
+        if price:
+            pos.update_pnl(1.0 - price if pos.direction == "BUY_NO" else price)
+    return closed

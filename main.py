@@ -23,7 +23,7 @@ import notifier
 from safeguards import SafeguardManager
 from market_scanner import fetch_weather_markets
 from edge_calculator import scan_all_edges
-from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions, cleanup_stale_positions
+from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions, cleanup_stale_positions, startup_cleanup
 import trader as _trader
 from osint_module import scan_all_osint
 
@@ -183,6 +183,24 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     closed = check_and_close_positions(clob_client)
     for pos in closed:
         safeguard.record_trade_close(pos.pnl_usd, pos.size_usd, condition_id=pos.condition_id)
+        from safeguards import log_trade_to_pg
+        log_trade_to_pg({
+            "cycle": cycle_count,
+            "action": "CLOSE",
+            "direction": pos.direction,
+            "market_question": pos.question,
+            "city": pos.city,
+            "forecast_c": 0.0,
+            "threshold_c": 0.0,
+            "our_prob": 0.0,
+            "market_prob": 0.0,
+            "edge": 0.0,
+            "size_usd": pos.size_usd,
+            "entry_price": pos.entry_price,
+            "pnl_usd": pos.pnl_usd,
+            "status": "WIN" if pos.pnl_usd > 0 else "LOSS",
+            "dry_run": config.DRY_RUN
+        })
         notifier.notify_trade_close(
             direction=pos.direction,
             question=pos.question,
@@ -245,6 +263,26 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             opened_this_cycle += 1
             logger.info(f"🎯 УГОДА: {edge_result.summary}")
             safeguard.record_trade_open(position.size_usd)
+            
+            from safeguards import log_trade_to_pg
+            log_trade_to_pg({
+                "cycle": cycle_count,
+                "action": "OPEN",
+                "direction": position.direction,
+                "market_question": position.question,
+                "city": position.city,
+                "forecast_c": getattr(edge_result.forecast, "temp_high_c", 0.0) if edge_result.forecast else 0.0,
+                "threshold_c": getattr(edge_result, "threshold_c", 0.0),
+                "our_prob": edge_result.estimated_prob,
+                "market_prob": edge_result.market_prob,
+                "edge": edge_result.edge,
+                "size_usd": position.size_usd,
+                "entry_price": position.entry_price,
+                "pnl_usd": 0.0,
+                "status": "ADJACENT_GRID" if "ADJACENT" in edge_result.reason else "SNIPER",
+                "dry_run": config.DRY_RUN
+            })
+            
             notifier.notify_trade_open(
                 direction=position.direction,
                 question=position.question,
@@ -292,7 +330,7 @@ def main():
     if restored:
         _trader._active_positions.update(restored)
 
-    removed = cleanup_stale_positions()
+    removed = startup_cleanup()
     if removed:
         logger.warning(f"🧹 Очищено {len(removed)} застарілих/фантомних позицій при старті")
         safeguard.save_positions(_trader._active_positions)

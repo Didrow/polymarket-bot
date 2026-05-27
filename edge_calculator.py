@@ -350,6 +350,54 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             logger.info(f"✅ EDGE: {edge.summary}")
             results.append(edge)
 
+    # 🎯 Другий прохід: пошук Adjacent Grid (сусідніх бакетів для SNIPER)
+    if getattr(config, 'ENABLE_ADJACENT_GRID', False):
+        sniper_results = [r for r in results if "SNIPER" in r.reason]
+        for sniper in sniper_results:
+            city = sniper.market.detected_city
+            end_date = sniper.market.end_date
+            threshold = sniper.threshold_c
+            
+            for market in markets:
+                if market.detected_city != city: continue
+                if abs((market.end_date - end_date).total_seconds()) > 7200: continue
+                if any(r.market.condition_id == market.condition_id for r in results): continue
+                
+                if market.volume_usd < config.MIN_MARKET_VOLUME_USD: continue
+                if market.best_ask_yes > config.ADJACENT_GRID_MAX_ASK: continue
+                if market.best_ask_yes <= 0.001: continue
+                
+                kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
+                if val_min is None: continue
+                
+                adj_threshold = _f_to_c(val_min) if unit == 'F' else val_min
+                # Перевірка: чи є це сусіднім бакетом (різниця не більше 1.5°C)
+                if 0 < abs(adj_threshold - threshold) <= 1.5:
+                    forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution)
+                    if not forecast: continue
+                    
+                    our_prob, adj_th_c, kind_label = estimate_market_probability(market, forecast)
+                    confidence = _confidence_from_forecast(forecast)
+                    market_prob = market.best_ask_yes
+                    eff_edge = (our_prob - market_prob) * confidence
+                    
+                    if eff_edge >= config.ADJACENT_GRID_MIN_EDGE:
+                        edge = EdgeResult(
+                            market=market,
+                            forecast=forecast,
+                            estimated_prob=our_prob,
+                            market_prob=market_prob,
+                            edge=eff_edge,
+                            edge_direction="BUY_YES",
+                            confidence=confidence,
+                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%}",
+                            is_tradeable=True,
+                            size_usd=config.ADJACENT_GRID_SIZE_USD,
+                            threshold_c=adj_th_c,
+                        )
+                        logger.info(f"✅ EDGE: {edge.summary}")
+                        results.append(edge)
+
     # Сортування: Grid угоди мають пріоритет за потенціалом R:R
     results.sort(key=lambda r: r.edge, reverse=True)
 

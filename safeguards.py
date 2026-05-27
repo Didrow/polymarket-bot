@@ -33,7 +33,15 @@ def _get_pg_conn():
             _pg_conn = None
     try:
         import pg8000
-        _pg_conn = pg8000.connect(dsn=_DATABASE_URL)
+        from urllib.parse import urlparse
+        parsed = urlparse(_DATABASE_URL)
+        _pg_conn = pg8000.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            database=parsed.path.lstrip("/"),
+        )
         cur = _pg_conn.cursor()
         cur.execute(
             "CREATE TABLE IF NOT EXISTS bot_state ("
@@ -42,13 +50,69 @@ def _get_pg_conn():
             "  updated_at TIMESTAMP DEFAULT NOW()"
             ")"
         )
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS trade_log ("
+            "    id SERIAL PRIMARY KEY,"
+            "    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),"
+            "    cycle INTEGER,"
+            "    action TEXT,"
+            "    direction TEXT,"
+            "    market_question TEXT,"
+            "    city TEXT,"
+            "    forecast_c REAL,"
+            "    threshold_c REAL,"
+            "    our_prob REAL,"
+            "    market_prob REAL,"
+            "    edge REAL,"
+            "    size_usd REAL,"
+            "    entry_price REAL,"
+            "    pnl_usd REAL,"
+            "    status TEXT,"
+            "    dry_run BOOLEAN DEFAULT TRUE"
+            ")"
+        )
         _pg_conn.commit()
         cur.close()
-        logger.info("🐘 PostgreSQL: таблицю bot_state створено")
+        logger.info("🐘 PostgreSQL: таблиці bot_state та trade_log перевірено/створено")
         return _pg_conn
     except Exception as e:
         logger.warning(f"PostgreSQL недоступний: {e}")
         return None
+
+def log_trade_to_pg(trade_data: dict) -> bool:
+    conn = _get_pg_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO trade_log (cycle, action, direction, market_question, city, forecast_c, threshold_c, our_prob, market_prob, edge, size_usd, entry_price, pnl_usd, status, dry_run) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                trade_data.get("cycle"),
+                trade_data.get("action"),
+                trade_data.get("direction"),
+                trade_data.get("market_question"),
+                trade_data.get("city"),
+                trade_data.get("forecast_c"),
+                trade_data.get("threshold_c"),
+                trade_data.get("our_prob"),
+                trade_data.get("market_prob"),
+                trade_data.get("edge"),
+                trade_data.get("size_usd"),
+                trade_data.get("entry_price"),
+                trade_data.get("pnl_usd"),
+                trade_data.get("status"),
+                trade_data.get("dry_run", True)
+            )
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        logger.debug(f"PostgreSQL log_trade error: {e}")
+        return False
+
 
 
 def _pg_save(data: dict) -> bool:
@@ -414,8 +478,7 @@ class SafeguardManager:
     def record_trade_open(self, size_usd: float):
         self._trade_count_hour += 1
         self.state.total_trades += 1
-        if not config.DRY_RUN:
-            self.state.current_capital -= size_usd
+        self.state.current_capital -= size_usd
         self.save_state()
 
     def record_trade_close(self, pnl_usd: float, size_usd: float = 0.0, condition_id: str = None):
@@ -424,8 +487,7 @@ class SafeguardManager:
             self.state.winning_trades += 1
         else:
             self.state.losing_trades += 1
-        if not config.DRY_RUN:
-            self.state.current_capital += size_usd + pnl_usd
+        self.state.current_capital += size_usd + pnl_usd
         if self.state.current_capital > self.state.peak_capital:
             self.state.peak_capital = self.state.current_capital
         

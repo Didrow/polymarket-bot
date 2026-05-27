@@ -18,7 +18,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 6           # Max одночасних позицій (Kelly + Grid)
+MAX_ACTIVE_POSITIONS: int = 12          # Max одночасних позицій (Kelly + Grid)
 MAX_DRAWDOWN_PCT: float = 0.35          # 35% просадки дозволено
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)
 MAX_POSITION_USD: float = 5.0           # Абсолютний ліміт позиції в $
@@ -35,6 +35,12 @@ ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.12  # Купуємо YES, якщо він коштує 12¢ або дешевше
 EXTREME_TAIL_MAX_SIZE_USD: float = 4.0  # $2-$4 на кожен тікет у "сітці"
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # 20% мінімум після виправлення prob_exact
+
+# ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
+ENABLE_ADJACENT_GRID: bool = True
+ADJACENT_GRID_SIZE_USD: float = 2.0
+ADJACENT_GRID_MIN_EDGE: float = 0.15
+ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
 MIN_EDGE_ENTRY: float = 0.25            # 25% мінімум — після виправлення prob_exact
