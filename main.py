@@ -171,10 +171,6 @@ def init_clob_client():
         return None
 
 def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 0) -> int:
-    current_capital = safeguard.state.current_capital
-    if not safeguard.can_trade():
-        return 0
-
     stale = cleanup_stale_positions()
     for pos in stale:
         safeguard.record_trade_close(pos.pnl_usd, pos.size_usd, condition_id=pos.condition_id)
@@ -208,6 +204,10 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             pnl_pct=pos.pnl_pct,
             reason=pos.status,
         )
+
+    current_capital = safeguard.state.current_capital
+    if not safeguard.can_trade():
+        return 0
 
     markets = fetch_weather_markets()
     if not markets:
