@@ -188,6 +188,9 @@ class BotState:
     initial_capital: float = config.INITIAL_CAPITAL
     current_capital: float = config.INITIAL_CAPITAL
     peak_capital: float = config.INITIAL_CAPITAL
+    peak_equity: float = config.INITIAL_CAPITAL
+    unrealized_pnl: float = 0.0
+    portfolio_value: float = 0.0
     total_trades: int = 0
     winning_trades: int = 0
     losing_trades: int = 0
@@ -213,16 +216,20 @@ class BotState:
         return self.winning_trades / total
 
     @property
+    def equity(self) -> float:
+        return self.current_capital + self.portfolio_value
+
+    @property
     def drawdown_pct(self) -> float:
-        if self.peak_capital == 0:
+        if self.peak_equity == 0:
             return 0.0
-        return (self.peak_capital - self.current_capital) / self.peak_capital
+        return (self.peak_equity - self.equity) / self.peak_equity
 
     @property
     def roi_pct(self) -> float:
         if self.initial_capital == 0:
             return 0.0
-        return (self.current_capital - self.initial_capital) / self.initial_capital
+        return (self.equity - self.initial_capital) / self.initial_capital
 
 
 class SafeguardManager:
@@ -233,6 +240,7 @@ class SafeguardManager:
         self._trade_count_hour = 0
         self._hour_mark = datetime.now().hour
         self._pg_working = None
+        self._last_unrealized_pnl = 0.0
 
     def _load_state(self) -> BotState:
         os.makedirs(config.DATA_DIR, exist_ok=True)
@@ -467,6 +475,18 @@ class SafeguardManager:
         self.save_state()
         logger.info("Бот відновлено")
 
+    def update_portfolio_value(self, portfolio_value: float, unrealized_pnl: float):
+        """Оновлює ринкову вартість портфеля, unrealized PnL та оновлює пікове Equity."""
+        self.state.portfolio_value = portfolio_value
+        self.state.unrealized_pnl = unrealized_pnl
+        
+        # Розраховуємо поточне Equity
+        equity = self.state.equity
+        if equity > self.state.peak_equity:
+            self.state.peak_equity = equity
+            
+        self.save_state()
+
     def record_trade_open(self, size_usd: float):
         self._trade_count_hour += 1
         self.state.total_trades += 1
@@ -485,6 +505,11 @@ class SafeguardManager:
         if self.state.current_capital > self.state.peak_capital:
             self.state.peak_capital = self.state.current_capital
         
+        # Оновлюємо пікове Equity
+        equity = self.state.equity
+        if equity > self.state.peak_equity:
+            self.state.peak_equity = equity
+        
         # Миттєвий запис у локальну та хмарну базу закритих позицій
         if condition_id:
             import trader as _trader
@@ -502,13 +527,16 @@ class SafeguardManager:
         total_resolved = s.winning_trades + s.losing_trades
         logger.info("=" * 50)
         logger.info("📊 ЗВІТ БОТА")
-        logger.info(f"   Капітал:    ${s.current_capital:.2f} (старт ${s.initial_capital:.2f})")
-        logger.info(f"   ROI:        {s.roi_pct:+.1%}")
-        logger.info(f"   Просадка:   {s.drawdown_pct:.1%}")
-        logger.info(f"   Угоди:      {s.total_trades} (виграш: {s.winning_trades}, програш: {s.losing_trades})")
-        logger.info(f"   Win rate:   {s.win_rate:.1%} (з {total_resolved} resolved)")
-        logger.info(f"   PnL total:  ${s.total_pnl:+.2f}")
-        logger.info(f"   Режим:      {'🧪 DRY-RUN' if config.DRY_RUN else '💰 РЕАЛЬНИЙ'}")
+        logger.info(f"   Капітал (кеш): ${s.current_capital:.2f} (старт ${s.initial_capital:.2f})")
+        logger.info(f"   Позиції:       ${s.portfolio_value:.2f}")
+        logger.info(f"   Unrealized:    ${s.unrealized_pnl:+.2f}")
+        logger.info(f"   💎 Equity:     ${s.equity:.2f}")
+        logger.info(f"   ROI:           {s.roi_pct:+.1%} (equity-based)")
+        logger.info(f"   Просадка:      {s.drawdown_pct:.1%}")
+        logger.info(f"   Угоди:         {s.total_trades} (виграш: {s.winning_trades}, програш: {s.losing_trades})")
+        logger.info(f"   Win rate:      {s.win_rate:.1%} (з {total_resolved} resolved)")
+        logger.info(f"   PnL total:     ${s.total_pnl:+.2f} (realized)")
+        logger.info(f"   Режим:         {'🧪 DRY-RUN' if config.DRY_RUN else '💰 РЕАЛЬНИЙ'}")
         pg_status = "✅ активний" if self._pg_working else "❌ недоступний"
-        logger.info(f"   PostgreSQL: {pg_status}")
+        logger.info(f"   PostgreSQL:    {pg_status}")
         logger.info("=" * 50)

@@ -225,6 +225,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     safeguard.check_high_edge_warning(tradeable)
 
     portfolio = get_portfolio_summary()
+    safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
     if portfolio["active_positions"] > 0:
         logger.info(
             f"📂 Відкриті позиції: {portfolio['active_positions']} | "
@@ -239,6 +240,11 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                     f"age={age_h:.1f}h | cid={cid[:20]}"
                 )
 
+    # Фільтруємо edge для вже відкритих позицій
+    active_cids = set(_trader._active_positions.keys())
+    tradeable = [r for r in tradeable
+                 if _trader.normalize_condition_id(r.market.condition_id) not in active_cids]
+
     if not tradeable:
         logger.info("Немає ринків з достатнім edge. Чекаємо...")
         return 0
@@ -250,6 +256,13 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
             logger.info(f"📊 Ліміт {config.MAX_ACTIVE_POSITIONS} позицій — пропускаємо")
             break
+        # Перевірка ліміту позицій на місто (антикореляція)
+        city = edge_result.market.detected_city
+        if city and hasattr(config, 'MAX_POSITIONS_PER_CITY'):
+            city_count = _trader.get_positions_count_by_city(city)
+            if city_count >= config.MAX_POSITIONS_PER_CITY:
+                logger.debug(f"📊 Ліміт {config.MAX_POSITIONS_PER_CITY} позицій для {city} — пропускаємо")
+                continue
         if not safeguard.check_hourly_trade_limit():
             break
 

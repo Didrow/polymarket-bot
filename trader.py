@@ -150,6 +150,16 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
             from data_fetcher import fetch_historical_extreme
             market_date = position.end_date.date()
             extremes = fetch_historical_extreme(position.city, market_date)
+            # Fallback: якщо архівний API ще не має даних, спробувати поточні спостереження
+            if extremes is None:
+                from data_fetcher import _fetch_observed_daily_extremes
+                observed = _fetch_observed_daily_extremes(position.city)
+                if observed:
+                    extremes = observed
+                    logger.info(
+                        f"🔄 DRY-RUN: historical unavailable, "
+                        f"using observed data for {position.city}"
+                    )
             if extremes:
                 obs_low, obs_high = extremes
                 is_low = 'lowest' in position.question.lower()
@@ -261,15 +271,16 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
 #  ЛОГІКА РОЗМІРУ ПОЗИЦІЇ (COMPOUND + KELLY)
 # ------------------------------------------------------------------
 
-def _get_market_vol(token_id: str) -> float:
-    return 0.18
+def _get_market_vol(price: float) -> float:
+    p = max(0.01, min(0.99, price))
+    return math.sqrt(p * (1.0 - p))
 
 def decide_position_size(edge_result: EdgeResult, current_capital: float) -> float:
     market = edge_result.market
     direction = edge_result.edge_direction
     entry_price = market.best_ask_yes if direction == "BUY_YES" else (1 - market.best_bid_yes)
 
-    vol = _get_market_vol("")
+    vol = _get_market_vol(entry_price)
     target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
     vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
 
@@ -415,7 +426,7 @@ def cleanup_stale_positions() -> List[Position]:
         )
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        if not is_weather or market_ended or age_hours > 36:
+        if not is_weather or market_ended or age_hours > 28:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
@@ -518,10 +529,20 @@ def check_and_close_positions(clob_client) -> List[Position]:
 
 
 def get_portfolio_summary() -> Dict:
-    return {"active_positions": len(_active_positions), "total_pnl": sum(p.pnl_usd for p in _active_positions.values())}
+    total_pnl = sum(p.pnl_usd for p in _active_positions.values())
+    total_value = sum(p.shares * p.current_price for p in _active_positions.values())
+    return {
+        "active_positions": len(_active_positions),
+        "total_pnl": total_pnl,
+        "total_value": total_value
+    }
 
 def get_active_positions() -> Dict:
     return _active_positions
+
+def get_positions_count_by_city(city: str) -> int:
+    """Підраховує кількість відкритих позицій для заданого міста."""
+    return sum(1 for p in _active_positions.values() if p.city == city)
 
 def startup_cleanup() -> List[Position]:
     """Примусово перевіряє статус кожної позиції при старті бота"""
