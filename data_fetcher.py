@@ -55,7 +55,9 @@ class WeatherForecast:
         # Якщо є дані ансамблю (31 модель)
         if members:
             prob = sum(0.5 * (1 + math.erf((m - threshold_c) / (sigma * math.sqrt(2)))) for m in members) / len(members)
-            return max(0.01, min(0.99, round(prob, 4)))
+            import config
+            max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+            return max(0.01, min(max_cap, round(prob, 4)))
         
         # Fallback до одного значення, якщо ансамбль недоступний
         tc = self.temp_low_c if is_low else self.temp_high_c
@@ -84,7 +86,9 @@ class WeatherForecast:
                 p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - m) / (sigma * math.sqrt(2))))
                 prob += (p_high - p_low)
             prob /= len(members)
-            return max(0.01, min(0.99, round(prob, 4)))
+            import config
+            max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+            return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = 2.5  # Збільшено з 2.0 для більш консервативного розподілу
         tc = self.temp_low_c if is_low else self.temp_high_c
@@ -762,18 +766,15 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
             if "OBSERVED" not in result.sources_used:
                 result.sources_used.append("OBSERVED")
 
-        # Додаткове обмеження через METAR (поточна температура, найсвіжіші дані)
-        # УВАГА: Застосовуємо ТІЛЬКИ якщо до resolution залишилось < 14 годин
-        # Інакше поточна температура не є релевантною межею для завтрашнього дня
+        # METAR: використовуємо ТІЛЬКИ як дані для корекції середнього прогнозу
+        # НЕ застосовуємо до ensemble members — це створює хибну впевненість (99%)
+        # Поточна температура ≠ добовий максимум/мінімум
+        # temp_low_c коригуємо dewpoint (ночі мінімум ближче до dewpoint, ніж до поточної)
         if metar_fc and hours_to_resolution < 14.0:
             current_temp = metar_fc.temp_high_c
-            result.temp_high_c = max(result.temp_high_c, current_temp)
-            result.temp_low_c = min(result.temp_low_c, current_temp)
-
-            if result.temp_high_members:
-                result.temp_high_members = [max(m, current_temp) for m in result.temp_high_members]
-            if result.temp_low_members:
-                result.temp_low_members = [min(m, current_temp) for m in result.temp_low_members]
+            current_dewp = metar_fc.temp_low_c  # dewpoint з METAR
+            result.temp_high_c = round(result.temp_high_c * 0.9 + current_temp * 0.1, 1)
+            result.temp_low_c = round(result.temp_low_c * 0.9 + current_dewp * 0.1, 1)
 
             if "METAR" not in result.sources_used:
                 result.sources_used.append("METAR")
@@ -802,4 +803,74 @@ def get_metar_resolution(city: str, target_dt: datetime) -> Optional[float]:
     fc = fetch_metar(city)
     if fc:
         return fc.temp_high_c
+    return None
+
+
+def fetch_historical_extreme(city: str, date) -> Optional[Tuple[float, float]]:
+    """
+    Отримує фактичні (історичні) значення min та max температури за конкретну дату.
+    Використовується для DRY-RUN resolution замість прогнозних моделей.
+    Повертає (min_c, max_c) або None.
+    """
+    coords = _get_coords(city, prefer_airport=True)
+    if not coords:
+        return None
+
+    lat, lon = coords
+    if hasattr(date, "strftime"):
+        date_str = date.strftime("%Y-%m-%d")
+    else:
+        date_str = str(date)
+
+    # Кешуємо результат
+    cache_key = f"hist_{city}_{date_str}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached
+
+    try:
+        # Спочатку пробуємо архівний API (точні дані для минулих днів)
+        r = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "start_date": date_str,
+                "end_date": date_str,
+                "daily": "temperature_2m_max,temperature_2m_min",
+                "timezone": "auto",
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            # Fallback: звичайний forecast API (зберігає короткий архів)
+            r = requests.get(
+                "https://api.open-meteo.com/v1/forecast",
+                params={
+                    "latitude": lat,
+                    "longitude": lon,
+                    "start_date": date_str,
+                    "end_date": date_str,
+                    "daily": "temperature_2m_max,temperature_2m_min",
+                    "timezone": "auto",
+                },
+                timeout=10,
+            )
+
+        r.raise_for_status()
+        daily = r.json().get("daily", {})
+        t_max_vals = daily.get("temperature_2m_max", [])
+        t_min_vals = daily.get("temperature_2m_min", [])
+
+        if t_max_vals and t_min_vals:
+            t_max = t_max_vals[0]
+            t_min = t_min_vals[0]
+            if t_max is not None and t_min is not None:
+                result = (float(t_min), float(t_max))
+                _cache_set(cache_key, result)
+                logger.info(f"📊 Historical {city} on {date_str}: min={t_min}°C, max={t_max}°C")
+                return result
+    except Exception as e:
+        logger.debug(f"Historical data error {city} on {date_str}: {e}")
+
     return None

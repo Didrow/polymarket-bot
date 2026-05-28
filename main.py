@@ -334,7 +334,7 @@ def main():
     if removed:
         logger.warning(f"🧹 Очищено {len(removed)} застарілих/фантомних позицій при старті")
         safeguard.save_positions(_trader._active_positions)
-        logger.info(f"💾 JSONBin оновлено: {len(_trader._active_positions)} активних позицій")
+        logger.info(f"💾 Стан збережено: {len(_trader._active_positions)} активних позицій")
 
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
     logger.info("🚀 Бот запущено. Ctrl+C для зупинки.\n")

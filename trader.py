@@ -143,18 +143,21 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
     if clean_id in _resolution_cache:
         return _resolution_cache[clean_id]
 
-    # DRY-RUN fast path: якщо є end_date і він минув
+    # DRY-RUN fast path: якщо є end_date і він минув — використовуємо ІСТОРИЧНІ дані
     if config.DRY_RUN and position and position.end_date:
         now = datetime.now(timezone.utc)
         if now > position.end_date:
-            from data_fetcher import get_best_forecast
-            forecast = get_best_forecast(position.city, hours_to_resolution=0)
-            if forecast:
+            from data_fetcher import fetch_historical_extreme
+            market_date = position.end_date.date()
+            extremes = fetch_historical_extreme(position.city, market_date)
+            if extremes:
+                obs_low, obs_high = extremes
                 is_low = 'lowest' in position.question.lower()
-                tc = forecast.temp_low_c if is_low else forecast.temp_high_c
+                tc = obs_low if is_low else obs_high
+
                 from edge_calculator import _parse_range_or_threshold
                 kind, val_min, val_max, unit = _parse_range_or_threshold(position.question)
-                
+
                 resolved_yes = None
                 if kind == "range":
                     if unit == 'F':
@@ -165,7 +168,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                     if unit == 'F':
                         from edge_calculator import _f_to_c
                         threshold_c = _f_to_c(threshold_c)
-                        
+
                     if kind == "above":
                         resolved_yes = tc > threshold_c
                     elif kind == "below":
@@ -173,11 +176,20 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                     else:
                         half_width = 0.2778 if unit == 'F' else 0.5
                         resolved_yes = (threshold_c - half_width) <= tc < (threshold_c + half_width)
-                        
+
                 if resolved_yes is not None:
                     _resolution_cache[clean_id] = resolved_yes
-                    logger.warning(f"🧪 DRY-RUN Simulated resolution via forecast: {resolved_yes} for {clean_id[:20]}")
+                    logger.warning(
+                        f"🧪 DRY-RUN RESOLVED ({'WIN' if resolved_yes else 'LOSS'}): "
+                        f"{position.question[:50]} | actual={tc:.1f}°C | "
+                        f"date={market_date} | cid={clean_id[:20]}"
+                    )
                     return resolved_yes
+            else:
+                logger.warning(
+                    f"⚠️ DRY-RUN: немає історичних даних для {position.city} на {market_date}, "
+                    f"чекаємо наступного циклу"
+                )
 
     # 1. Отримуємо ринок з Gamma API
     market_data = _get_market_from_gamma(clean_id)
@@ -432,6 +444,14 @@ def check_and_close_positions(clob_client) -> List[Position]:
                     logger.info(
                         f"🔍 Resolution via direct CLOB (Gamma miss, market_ended)"
                     )
+            else:
+                # Debug: чому не резолвиться?
+                if pos.end_date:
+                    hours_left = (pos.end_date - now).total_seconds() / 3600
+                    if hours_left < 1.0:
+                        logger.debug(f"⏳ Resolution чекає end_date: {pos.question[:40]} | залишилось {hours_left*60:.0f}хв")
+                else:
+                    logger.debug(f"⚠️ Позиція без end_date: {pos.question[:40]}")
 
         if resolved is not None:
             pos.resolve(resolved)
@@ -475,8 +495,19 @@ def check_and_close_positions(clob_client) -> List[Position]:
             continue
 
         price = _get_market_price_from_gamma(cid)
-        if price:
+        if price is None and pos.token_id:
+            try:
+                r = requests.get(f"{config.CLOB_URL}/midpoint", params={"token_id": pos.token_id}, timeout=5)
+                if r.status_code == 200:
+                    mid = float(r.json().get("mid", 0))
+                    if 0.01 <= mid <= 0.99:
+                        price = mid
+            except Exception:
+                pass
+        if price is not None:
             pos.update_pnl(1.0 - price if pos.direction == "BUY_NO" else price)
+        else:
+            logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
 
         if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.15:
             logger.info(f"🔴 Stop-loss: {pos.question[:50]}")

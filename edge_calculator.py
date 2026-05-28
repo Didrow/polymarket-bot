@@ -257,6 +257,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     direction = "BUY_YES"
     # Ефективний edge з урахуванням впевненості моделі
     eff_edge = (our_prob - market_prob) * confidence
+    # Cap edge щоб запобігти хибним сигналам від METAR artifacts
+    eff_edge = min(eff_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     GRID_MIN_PRICE = 0.02
