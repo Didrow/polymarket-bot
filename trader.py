@@ -432,6 +432,12 @@ def cleanup_stale_positions() -> List[Position]:
             if resolved is not None:
                 pos.resolve(resolved)
                 logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'} (при cleanup): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
+            else:
+                if config.DRY_RUN and age_hours > 28:
+                    pos.status = "EXPIRED"
+                    pos.pnl_usd = -pos.size_usd
+                    pos.pnl_pct = -1.0
+                    logger.warning(f"⏰ DRY-RUN Expired (stale 28h): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
             del _active_positions[cid]
             removed.append(pos)
     return removed
