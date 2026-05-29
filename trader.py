@@ -361,12 +361,14 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     if not clob_client:
         return None
     try:
+        # Використовуємо IOC (Immediate-or-Cancel) замість FOK (Fill-or-Kill)
+        # Це дозволяє отримати часткове виконання на неліквідних ринках без проковзування ціни
         order = clob_client.create_and_post_order({
             "token_id": token_id,
             "price": round(price, 4),
             "size": round(size_usd, 2),
             "side": "BUY",
-            "order_type": "FOK",
+            "order_type": "IOC",
         })
         if order:
             _active_positions[clean_cid] = pos
