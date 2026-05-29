@@ -240,10 +240,19 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                     f"age={age_h:.1f}h | cid={cid[:20]}"
                 )
 
-    # Фільтруємо edge для вже відкритих позицій
+    # Фільтруємо edge для вже відкритих позицій за condition_id та нормалізованим запитанням
     active_cids = set(_trader._active_positions.keys())
-    tradeable = [r for r in tradeable
-                 if _trader.normalize_condition_id(r.market.condition_id) not in active_cids]
+
+    def _normalize_q(q: str) -> str:
+        return "".join(c for c in q.lower() if c.isalnum())
+
+    active_questions = {_normalize_q(pos.question) for pos in _trader._active_positions.values()}
+
+    tradeable = [
+        r for r in tradeable
+        if _trader.normalize_condition_id(r.market.condition_id) not in active_cids
+        and _normalize_q(r.market.question) not in active_questions
+    ]
 
     if not tradeable:
         logger.info("Немає ринків з достатнім edge. Чекаємо...")
@@ -256,6 +265,12 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
             logger.info(f"📊 Ліміт {config.MAX_ACTIVE_POSITIONS} позицій — пропускаємо")
             break
+
+        norm_q = _normalize_q(edge_result.market.question)
+        if norm_q in active_questions:
+            logger.info(f"📊 Дублікат по питанням — пропускаємо: {edge_result.market.question[:60]}")
+            continue
+
         # Перевірка ліміту позицій на місто (антикореляція)
         city = edge_result.market.detected_city
         if city and hasattr(config, 'MAX_POSITIONS_PER_CITY'):
@@ -274,6 +289,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
         if position:
             opened_this_cycle += 1
+            active_questions.add(norm_q)
             logger.info(f"🎯 УГОДА: {edge_result.summary}")
             safeguard.record_trade_open(position.size_usd)
             
