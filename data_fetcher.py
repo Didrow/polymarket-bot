@@ -137,6 +137,7 @@ AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
     "Buenos Aires":  (-34.8222, -58.5358),
     "Cape Town":     (-33.9715, 18.6021),
     "Busan":         (35.1795, 128.9381),
+    "Lucknow":       (26.7606, 80.8893),   # VILK — Chaudhary Charan Singh International
 }
 
 CITY_COORDS: Dict[str, Tuple[float, float]] = {
