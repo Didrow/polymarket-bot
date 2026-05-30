@@ -404,14 +404,16 @@ class SafeguardManager:
                     )
                     restored[norm_cid] = pos
 
-            # Відновлення списку нещодавно закритих угод
+            # Відновлення списку нещодавно закритих угод (тільки < 24h)
             if self.state.closed_positions:
+                now = datetime.now(timezone.utc)
                 for cid, dt_str in self.state.closed_positions.items():
                     try:
                         dt = datetime.fromisoformat(dt_str)
                         if dt.tzinfo is None:
                             dt = dt.replace(tzinfo=timezone.utc)
-                        _trader._recently_closed[cid] = dt
+                        if (now - dt).total_seconds() < 86400:
+                            _trader._recently_closed[cid] = dt
                     except Exception:
                         pass
             

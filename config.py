@@ -90,4 +90,6 @@ WHALE_THRESHOLD_USD: float = 2000.0
 
 # ── EDGE CAP (запобігання хибним сигналам) ───────────────────
 MAX_EDGE_CAP: float = 0.75             # Якщо edge > 75% — підозріло, cap до цього значення
-MAX_PROB_CAP: float = 0.92             # Максимальна ймовірність — не може бути 97%+ для погоди
+MAX_PROB_CAP: float = 0.92             # Загальний cap (fallback, використовується в data_fetcher)
+MAX_PROB_CAP_RANGE: float = 0.88        # Cap для range/categorical бакетів (точне попадання)
+MAX_PROB_CAP_ABOVE_BELOW: float = 0.94  # Cap для above/below (вища реальна впевненість)

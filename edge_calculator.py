@@ -267,9 +267,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
     _dist_ok = True
     if "categorical" in kind_label and threshold_c is not None and fc_temp is not None:
-        _dist_ok = abs(fc_temp - threshold_c) <= 1.5
+        # Для F-ринків порогова відстань більша: 1°F ≈ 0.556°C, тому 2.7°C ≈ ~5°F
+        _, _, _, unit = _parse_range_or_threshold(market.question)
+        max_dist = 2.7 if unit == 'F' else 1.5
+        _dist_ok = abs(fc_temp - threshold_c) <= max_dist
         if not _dist_ok:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >1.5°C")
+            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >{max_dist}°C ({unit})")
         # Не купуємо categorical YES, якщо прогноз НИЖЧЕ порогу
         # Polymarket categorical бакет = [threshold-0.5, threshold+0.5)
         # Якщо прогноз нижче бакета — майже гарантований програш

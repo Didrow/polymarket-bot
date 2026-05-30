@@ -56,7 +56,7 @@ class WeatherForecast:
         if members:
             prob = sum(0.5 * (1 + math.erf((m - threshold_c) / (sigma * math.sqrt(2)))) for m in members) / len(members)
             import config
-            max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+            max_cap = getattr(config, 'MAX_PROB_CAP_ABOVE_BELOW', 0.94)
             return max(0.01, min(max_cap, round(prob, 4)))
         
         # Fallback до одного значення, якщо ансамбль недоступний
@@ -69,7 +69,7 @@ class WeatherForecast:
         # Обмежуємо максимальну впевненість щоб не купувати "гарантовані" результати, 
         # які насправді можуть бути помилкою моделі
         import config
-        max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+        max_cap = getattr(config, 'MAX_PROB_CAP_ABOVE_BELOW', 0.94)
         return max(0.01, min(max_cap, round(prob, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
@@ -87,7 +87,7 @@ class WeatherForecast:
                 prob += (p_high - p_low)
             prob /= len(members)
             import config
-            max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+            max_cap = getattr(config, 'MAX_PROB_CAP_RANGE', 0.88)
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = 2.5  # Збільшено з 2.0 для більш консервативного розподілу
@@ -97,7 +97,7 @@ class WeatherForecast:
         p_high = 0.5 * (1 + math.erf((threshold_c + half_width - tc) / (sigma * math.sqrt(2))))
         p_low  = 0.5 * (1 + math.erf((threshold_c - half_width - tc) / (sigma * math.sqrt(2))))
         import config
-        max_cap = getattr(config, 'MAX_PROB_CAP', 0.92)
+        max_cap = getattr(config, 'MAX_PROB_CAP_RANGE', 0.88)
         return max(0.01, min(max_cap, round(p_high - p_low, 4)))
 
     def prob_rain_or_snow(self) -> float:
