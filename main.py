@@ -195,6 +195,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             "entry_price": pos.entry_price,
             "pnl_usd": pos.pnl_usd,
             "status": "WIN" if pos.pnl_usd > 0 else "LOSS",
+            "strategy": "UNKNOWN",
             "dry_run": config.DRY_RUN
         })
         notifier.notify_trade_close(
@@ -294,6 +295,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
+            _strategy = "ADJACENT_GRID" if "ADJACENT" in edge_result.reason else ("GRID" if "GRID" in edge_result.reason else "SNIPER")
             log_trade_to_pg({
                 "cycle": cycle_count,
                 "action": "OPEN",
@@ -308,7 +310,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 "size_usd": position.size_usd,
                 "entry_price": position.entry_price,
                 "pnl_usd": 0.0,
-                "status": "ADJACENT_GRID" if "ADJACENT" in edge_result.reason else "SNIPER",
+                "status": _strategy,
+                "strategy": _strategy,
                 "dry_run": config.DRY_RUN
             })
             
@@ -412,8 +415,22 @@ def main():
 
         if _running:
             sleep_time = config.SCAN_INTERVAL_SEC
+            # Розумний адаптивний сон: враховує найближчий resolution та порожні цикли
             if empty_cycles >= 3:
-                sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                # Якщо є позиції — орієнтуємось на найближчий end_date
+                if _trader._active_positions:
+                    end_dates = [p.end_date for p in _trader._active_positions.values() if p.end_date]
+                    if end_dates:
+                        nearest = min(end_dates)
+                        hours_to_nearest = (nearest - datetime.now(timezone.utc)).total_seconds() / 3600
+                        if hours_to_nearest > 2.0:
+                            sleep_time = min(1800, int(hours_to_nearest * 300))
+                        else:
+                            sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                    else:
+                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                else:
+                    sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
                 logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s...\n")
             else:
                 logger.info(f"💤 Сплю {sleep_time}s...\n")

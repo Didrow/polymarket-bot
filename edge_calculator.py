@@ -140,6 +140,7 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     if not forecast:
         return 0.50, 0.0, "no_forecast"
 
+    hours = market.hours_to_resolution
     kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
     is_low = 'lowest' in market.question.lower()
 
@@ -202,12 +203,12 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
         unit_label = f"{threshold_c:.0f}°C(fallback)"
 
     if kind == "above":
-        p = forecast.prob_above_temp_c(threshold_c, is_low)
+        p = forecast.prob_above_temp_c(threshold_c, is_low, hours=hours)
     elif kind == "below":
-        p = forecast.prob_below_temp_c(threshold_c, is_low)
+        p = forecast.prob_below_temp_c(threshold_c, is_low, hours=hours)
     else:
         half_width = 0.2778 if unit == 'F' else 0.5
-        p = forecast.prob_exact_temp_c(threshold_c, is_low, half_width=half_width)
+        p = forecast.prob_exact_temp_c(threshold_c, is_low, half_width=half_width, hours=hours)
 
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
 
@@ -230,12 +231,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
-    # 🛑 АДАПТИВНИЙ ФІЛЬТР ЗА СПРЕДОМ (MAX 5 ЦЕНТІВ, ДЛЯ ДЕШЕВИХ КВИТКІВ 10 ЦЕНТІВ)
-    spread = market.best_ask_yes - market.best_bid_yes
-    max_spread = 0.10 if market.best_ask_yes <= 0.15 else 0.05
-    if spread > max_spread:
-        logger.debug(f"Пропускаємо {market.question[:40]} через широкий спред: {spread:.3f}")
-        return None
+    # Спред вже перевірено в scan_all_edges() — не дублюємо
 
     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution)
     if not forecast:

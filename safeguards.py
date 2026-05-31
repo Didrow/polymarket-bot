@@ -79,9 +79,15 @@ def _get_pg_conn():
             "    entry_price REAL,"
             "    pnl_usd REAL,"
             "    status TEXT,"
+            "    strategy TEXT DEFAULT 'UNKNOWN',"
             "    dry_run BOOLEAN DEFAULT TRUE"
             ")"
         )
+        # Автоматична міграція для існуючих таблиць
+        try:
+            cur.execute("ALTER TABLE trade_log ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'UNKNOWN'")
+        except Exception as migration_err:
+            logger.debug(f"Migration column 'strategy' info/skipped: {migration_err}")
         _pg_conn.commit()
         cur.close()
         _pg_reconnect_attempts = 0
@@ -108,8 +114,8 @@ def log_trade_to_pg(trade_data: dict) -> bool:
         cur.execute(
             "INSERT INTO trade_log (cycle, action, direction, market_question, city, "
             "forecast_c, threshold_c, our_prob, market_prob, edge, size_usd, entry_price, "
-            "pnl_usd, status, dry_run) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "pnl_usd, status, strategy, dry_run) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 trade_data.get("cycle"),
                 trade_data.get("action"),
@@ -125,6 +131,7 @@ def log_trade_to_pg(trade_data: dict) -> bool:
                 trade_data.get("entry_price"),
                 trade_data.get("pnl_usd"),
                 trade_data.get("status"),
+                trade_data.get("strategy", "UNKNOWN"),
                 trade_data.get("dry_run", True)
             )
         )

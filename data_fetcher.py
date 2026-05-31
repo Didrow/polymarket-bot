@@ -48,9 +48,23 @@ class WeatherForecast:
     temp_high_members: List[float] = field(default_factory=list)
     temp_low_members: List[float] = field(default_factory=list)
 
-    def prob_above_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
+    def _get_sigma(self, hours: float = 24.0) -> float:
+        """Динамічний sigma залежно від міста та горизонту прогнозу."""
+        base = {
+            "Lucknow": 1.0, "Miami": 1.0, "Singapore": 0.8, "Dubai": 0.9,
+            "Cape Town": 1.2, "Sao Paulo": 1.1, "Sydney": 1.3,
+            "Buenos Aires": 1.4, "London": 1.4, "Paris": 1.5,
+            "Tokyo": 1.5, "Berlin": 1.6, "Busan": 1.6, "Munich": 1.7,
+            "Seoul": 1.8, "NYC": 1.8, "Seattle": 1.3,
+            "Dallas": 2.0, "Chicago": 2.2,
+        }.get(self.city, 1.3)
+        # Невизначеність зростає з горизонтом прогнозу
+        hour_factor = 1.0 + 0.02 * max(0, hours - 12)
+        return base * min(hour_factor, 1.5)
+
+    def prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
-        sigma = 1.3  # Метеорологічна похибка (розкид)
+        sigma = self._get_sigma(hours)
         
         # Якщо є дані ансамблю (31 модель)
         if members:
@@ -72,15 +86,15 @@ class WeatherForecast:
         max_cap = getattr(config, 'MAX_PROB_CAP_ABOVE_BELOW', 0.94)
         return max(0.01, min(max_cap, round(prob, 4)))
 
-    def prob_below_temp_c(self, threshold_c: float, is_low: bool = False) -> float:
-        return 1.0 - self.prob_above_temp_c(threshold_c, is_low)
+    def prob_below_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
+        return 1.0 - self.prob_above_temp_c(threshold_c, is_low, hours)
 
-    def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5) -> float:
+    def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
 
         if members:
             prob = 0.0
-            sigma = 1.3
+            sigma = self._get_sigma(hours)
             for m in members:
                 p_high = 0.5 * (1 + math.erf(((threshold_c + half_width) - m) / (sigma * math.sqrt(2))))
                 p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - m) / (sigma * math.sqrt(2))))
@@ -90,7 +104,7 @@ class WeatherForecast:
             max_cap = getattr(config, 'MAX_PROB_CAP_RANGE', 0.88)
             return max(0.01, min(max_cap, round(prob, 4)))
 
-        sigma = 2.5  # Збільшено з 2.0 для більш консервативного розподілу
+        sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення
         tc = self.temp_low_c if is_low else self.temp_high_c
         if tc == 0.0:
             return 0.01
@@ -138,6 +152,8 @@ AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
     "Cape Town":     (-33.9715, 18.6021),
     "Busan":         (35.1795, 128.9381),
     "Lucknow":       (26.7606, 80.8893),   # VILK — Chaudhary Charan Singh International
+    "Sao Paulo":     (-23.4356, -46.4731),  # SBGR — Guarulhos
+    "Munich":        (48.3537,  11.7750),   # EDDM — Munich Airport
 }
 
 CITY_COORDS: Dict[str, Tuple[float, float]] = {
@@ -268,7 +284,10 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
     if not coords:
         return None
 
-    key = f"ensemble_{city}"
+    target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+    day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+
+    key = f"ensemble_{city}_{day_index}"
     cached = _cache_get(key)
     if cached:
         return cached
@@ -289,9 +308,6 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
         )
         r.raise_for_status()
         daily = r.json().get("daily", {})
-        
-        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
         
         high_m, low_m = [], []
         for i in range(1, 32):
@@ -337,7 +353,10 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0) -> Optiona
     if not coords:
         return None
 
-    key = f"noaa_{city}"
+    target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+    day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+
+    key = f"noaa_{city}_{day_index}"
     cached = _cache_get(key)
     if cached:
         return cached
@@ -355,18 +374,44 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0) -> Optiona
         r2 = requests.get(forecast_url, timeout=10,
                            headers={"User-Agent": "PolymarketWeatherBot/GridEdition"})
         r2.raise_for_status()
-        periods = r2.json()["properties"]["periods"][:2]
+        periods = r2.json()["properties"]["periods"]
 
-        high_f = max((p.get("temperature", 60) for p in periods if p.get("temperature")), default=60)
-        low_f  = min((p.get("temperature", 50) for p in periods if p.get("temperature")), default=50)
+        # Знаходимо періоди для цільової дати
+        target_date = target_dt.date()
+        high_f, low_f = None, None
+        rain_prob = 0.0
+
+        for p in periods:
+            start_str = p.get("startTime", "")
+            if start_str:
+                try:
+                    p_date = datetime.fromisoformat(start_str.replace("Z", "+00:00")).date()
+                    if p_date == target_date:
+                        temp = p.get("temperature")
+                        if temp is not None:
+                            is_day = p.get("isDaytime", True)
+                            if is_day:
+                                high_f = temp
+                            else:
+                                low_f = temp
+                        pp = p.get("probabilityOfPrecipitation", {})
+                        if pp and pp.get("value") is not None:
+                            rain_prob = max(rain_prob, float(pp["value"]) / 100.0)
+                except Exception:
+                    pass
+
+        # Fallback якщо не знайшли точну дату
+        if high_f is None or low_f is None:
+            sub_periods = periods[:2]
+            high_f = max((p.get("temperature", 60) for p in sub_periods if p.get("temperature")), default=60)
+            low_f  = min((p.get("temperature", 50) for p in sub_periods if p.get("temperature")), default=50)
+            for p in sub_periods:
+                pp = p.get("probabilityOfPrecipitation", {})
+                if pp and pp.get("value") is not None:
+                    rain_prob = max(rain_prob, float(pp["value"]) / 100.0)
+
         high_c = (high_f - 32) * 5 / 9
         low_c  = (low_f  - 32) * 5 / 9
-
-        rain_prob = 0.0
-        for p in periods:
-            pp = p.get("probabilityOfPrecipitation", {})
-            if pp and pp.get("value") is not None:
-                rain_prob = max(rain_prob, float(pp["value"]) / 100.0)
 
         fc = WeatherForecast(
             city=city, timestamp=datetime.now(timezone.utc),
@@ -445,7 +490,10 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
     coords = _get_coords(city, prefer_airport=True)
     if not coords: return None
 
-    key = f"om_{model}_{city}"
+    target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+    day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+
+    key = f"om_{model}_{city}_{day_index}"
     cached = _cache_get(key)
     if cached: return cached
 
@@ -467,8 +515,6 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
         daily = r.json().get("daily", {})
         if not daily: return None
 
-        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
         high_c     = daily["temperature_2m_max"][day_index] if len(daily.get("temperature_2m_max", [])) > day_index else daily["temperature_2m_max"][0]
         low_c      = daily["temperature_2m_min"][day_index] if len(daily.get("temperature_2m_min", [])) > day_index else daily["temperature_2m_min"][0]
         rain_probs = daily.get("precipitation_probability_max", [0])
@@ -682,7 +728,9 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
     Повертає консенсусний прогноз для заданого міста.
     Якщо hours_to_resolution <= 12, METAR отримує дуже високу вагу (ColdMath стиль).
     """
-    key = f"consensus_{city}"
+    # Бакет hours для кешу: ≤12, ≤24, >24
+    _h_bucket = "short" if hours_to_resolution <= 12 else ("mid" if hours_to_resolution <= 24 else "long")
+    key = f"consensus_{city}_{_h_bucket}"
     cached = _cache_get(key)
     if cached:
         return cached

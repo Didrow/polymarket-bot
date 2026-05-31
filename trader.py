@@ -16,7 +16,6 @@ from market_scanner import PolyMarket
 
 logger = logging.getLogger(__name__)
 
-_vol_cache: Dict[str, tuple] = {}
 _active_positions: Dict[str, "Position"] = {}
 _recently_closed: Dict[str, Any] = {}
 
@@ -109,8 +108,15 @@ def _parse_outcome_prices(outcome_prices) -> Optional[bool]:
     return None
 
 
+_gamma_cache: Dict[str, tuple] = {}  # {cid: (timestamp, data)}
+_GAMMA_CACHE_TTL = 120  # 2 хвилини
+
 def _get_market_from_gamma(condition_id: str) -> Optional[Dict]:
     clean_id = condition_id.lower()
+    cached = _gamma_cache.get(clean_id)
+    if cached and time.time() - cached[0] < _GAMMA_CACHE_TTL:
+        return cached[1]
+    result = None
     try:
         r = requests.get(f"{config.GAMMA_URL}/markets", params={"conditionId": clean_id}, timeout=8)
         if r.status_code != 200:
@@ -126,13 +132,17 @@ def _get_market_from_gamma(condition_id: str) -> Optional[Dict]:
             m_cid = normalize_condition_id(m.get("conditionId", ""))
             m_id = normalize_condition_id(m.get("id", ""))
             if m_cid == clean_id or m_id == clean_id:
-                return m
+                result = m
+                break
     except Exception as e:
         logger.debug(f"Gamma query error: {e}")
-    return None
+    if result is not None:
+        _gamma_cache[clean_id] = (time.time(), result)
+    return result
 
 
-_resolution_cache: Dict[str, Optional[bool]] = {}
+_resolution_cache: Dict[str, tuple] = {}  # {cid: (timestamp, result)}
+_RESOLUTION_CACHE_TTL = 3600  # 1 година
 
 def check_market_resolved(condition_id: str, position: Optional["Position"] = None) -> Optional[bool]:
     """
@@ -141,7 +151,9 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
     """
     clean_id = normalize_condition_id(condition_id)
     if clean_id in _resolution_cache:
-        return _resolution_cache[clean_id]
+        _rc_ts, _rc_val = _resolution_cache[clean_id]
+        if time.time() - _rc_ts < _RESOLUTION_CACHE_TTL:
+            return _rc_val
 
     # DRY-RUN fast path: якщо є end_date і він минув — використовуємо ІСТОРИЧНІ дані
     if config.DRY_RUN and position and position.end_date:
@@ -188,7 +200,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                         resolved_yes = (threshold_c - half_width) <= tc < (threshold_c + half_width)
 
                 if resolved_yes is not None:
-                    _resolution_cache[clean_id] = resolved_yes
+                    _resolution_cache[clean_id] = (time.time(), resolved_yes)
                     logger.warning(
                         f"🧪 DRY-RUN RESOLVED ({'WIN' if resolved_yes else 'LOSS'}): "
                         f"{position.question[:50]} | actual={tc:.1f}°C | "
@@ -228,7 +240,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
         if token.get("winner") is True:
             outcome = token.get("outcome", "").upper()
             result = (outcome == "YES")
-            _resolution_cache[clean_id] = result
+            _resolution_cache[clean_id] = (time.time(), result)
             logger.info(f"✅ Resolution via winner token: {result} for {clean_id[:20]}")
             return result
 
@@ -236,7 +248,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
     outcome_prices = market_data.get("outcomePrices")
     result = _parse_outcome_prices(outcome_prices)
     if result is not None:
-        _resolution_cache[clean_id] = result
+        _resolution_cache[clean_id] = (time.time(), result)
         logger.info(f"✅ Resolution via outcomePrices: {result} for {clean_id[:20]}")
         return result
 
@@ -245,7 +257,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
         if position:
             result = _check_resolution_by_clob(position)
             if result is not None:
-                _resolution_cache[clean_id] = result
+                _resolution_cache[clean_id] = (time.time(), result)
                 logger.info(f"✅ Resolution via CLOB fallback (closed market): {result} for {clean_id[:20]}")
                 return result
         # Якщо fallback не допоміг, але ринок закритий давно (end_date > 2h тому) – використовуємо поточну ціну
@@ -257,7 +269,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                     if r.status_code == 200:
                         mid = float(r.json().get("mid", 0.5))
                         result = (mid >= 0.99)  # YES переміг, якщо ціна ~1
-                        _resolution_cache[clean_id] = result
+                        _resolution_cache[clean_id] = (time.time(), result)
                         logger.warning(f"⚠️ Forced resolution by expired end_date + price: {result} for {clean_id[:20]}")
                         return result
                 except:
@@ -420,15 +432,13 @@ def _get_market_price_from_gamma(condition_id: str) -> Optional[float]:
     return yes_price
 
 
-WEATHER_KEYWORDS = ["temperature", "weather", "rain", "snow", "degrees", "london", "paris", "tokyo", "nyc", "chicago", "seoul", "busan", "lucknow", "cape town", "miami", "dallas", "seattle", "berlin", "sydney", "sao paulo", "munich"]
-
 
 def cleanup_stale_positions() -> List[Position]:
     removed: List[Position] = []
     now = datetime.now(timezone.utc)
     for cid, pos in list(_active_positions.items()):
-        is_weather = any(kw in pos.question.lower() for kw in WEATHER_KEYWORDS)
-        
+        is_weather = pos.market_type in ("temperature", "rain", "snow")
+
         market_ended = (
             (pos.end_date and now > pos.end_date + timedelta(hours=2))
         )
@@ -447,6 +457,7 @@ def cleanup_stale_positions() -> List[Position]:
                     pos.pnl_pct = -1.0
                     logger.warning(f"⏰ DRY-RUN Expired (stale 28h): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
             del _active_positions[cid]
+            _recently_closed[cid] = now
             removed.append(pos)
     return removed
 
@@ -454,6 +465,11 @@ def cleanup_stale_positions() -> List[Position]:
 def check_and_close_positions(clob_client) -> List[Position]:
     closed = []
     now = datetime.now(timezone.utc)
+    # Очистка _recently_closed старше 24h (запобігає memory leak)
+    for _rc_cid in list(_recently_closed):
+        if isinstance(_recently_closed[_rc_cid], datetime):
+            if (now - _recently_closed[_rc_cid]).total_seconds() > 86400:
+                del _recently_closed[_rc_cid]
     for cid, pos in list(_active_positions.items()):
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
@@ -538,6 +554,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             logger.info(f"🔴 Stop-loss: {pos.question[:50]}")
             closed.append(pos)
             del _active_positions[cid]
+            _recently_closed[cid] = now
 
     return closed
 

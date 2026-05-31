@@ -57,6 +57,12 @@ def fetch_market_trades(condition_id: str, limit: int = 50) -> List[Dict]:
     Отримати останні угоди на ринку через Gamma API.
     """
     cache_key = f"trades_{condition_id}"
+    # Очистка застарілих записів у кеші для запобігання витоку пам'яті
+    now = time.time()
+    for k in list(_whale_cache):
+        if now - _whale_cache[k][0] > 3600:
+            del _whale_cache[k]
+
     if cache_key in _whale_cache:
         ts = _whale_cache[cache_key][0]
         if time.time() - ts < 60:
@@ -146,7 +152,7 @@ def detect_insider_anomaly(condition_id: str, question: str) -> Optional[Insider
     cutoff = now - timedelta(hours=6)
 
     # Групуємо угоди по гаманцях за останні 6 годин
-    wallet_activity: Dict[str, List[float]] = {}
+    wallet_activity: Dict[str, List[tuple]] = {}
     total_volume = 0
 
     for trade in trades:
@@ -157,12 +163,13 @@ def detect_insider_anomaly(condition_id: str, question: str) -> Optional[Insider
                 continue
 
             wallet = trade.get("maker", trade.get("taker", ""))
-            size = float(trade.get("size", 0)) * float(trade.get("price", 0))
+            price = float(trade.get("price", 0))
+            size = float(trade.get("size", 0)) * price
             total_volume += size
 
             if wallet not in wallet_activity:
                 wallet_activity[wallet] = []
-            wallet_activity[wallet].append(size)
+            wallet_activity[wallet].append((size, price))
         except Exception:
             pass
 
@@ -170,14 +177,16 @@ def detect_insider_anomaly(condition_id: str, question: str) -> Optional[Insider
         return None
 
     # Шукаємо гаманець з аномальною концентрацією
-    for wallet, sizes in wallet_activity.items():
+    for wallet, trades_list in wallet_activity.items():
+        sizes = [item[0] for item in trades_list]
+        prices = [item[1] for item in trades_list]
         wallet_total = sum(sizes)
         concentration = wallet_total / total_volume
 
         # Аномалія: один гаманець > 40% обсягу за 6 годин
         if concentration > 0.40 and wallet_total > config.WHALE_THRESHOLD_USD:
             anomaly_score = min(0.99, concentration)
-            avg_price = sum(sizes) / len(sizes) / (wallet_total / len(sizes) + 1e-6)
+            avg_price = sum(sizes[i] * prices[i] for i in range(len(sizes))) / (wallet_total + 1e-6)
 
             signal = InsiderSignal(
                 wallet=wallet,
