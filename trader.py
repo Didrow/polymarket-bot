@@ -353,6 +353,12 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         end_date=market.end_date,
     )
 
+    if pos.end_date:
+        hours_to_end = (pos.end_date - datetime.now(timezone.utc)).total_seconds() / 3600
+        if hours_to_end < config.MIN_RESOLUTION_HOURS:
+            logger.warning(f"⚠️ Пропускаємо угоду: до resolution лише {hours_to_end:.1f}h")
+            return None
+
     if config.DRY_RUN:
         logger.info(f"🧪 DRY-RUN: Відкрито {edge_result.edge_direction} | {market.question[:60]} | size=${size_usd:.2f} (cap=${current_capital:.2f})")
         _active_positions[clean_cid] = pos
