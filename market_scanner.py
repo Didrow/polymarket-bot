@@ -23,7 +23,7 @@ WEATHER_CITIES = [
     "london", "nyc", "new-york", "cape-town", "wellington", "moscow", "tokyo",
     "san-francisco", "chicago", "chengdu", "ankara", "busan", "jeddah", "karachi",
     "dallas", "buenos-aires", "lagos", "lucknow", "paris", "berlin", "seoul",
-    "miami", "seattle", "sydney", "sao-paulo", "munich",
+    "miami", "seattle", "sydney", "sao-paulo", "munich", "los-angeles",
 ]
 
 
@@ -86,6 +86,7 @@ def _detect_city(text: str) -> str:
         "miami": "Miami", "seattle": "Seattle", "sydney": "Sydney",
         "sao paulo": "Sao Paulo", "são paulo": "Sao Paulo",
         "munich": "Munich", "münchen": "Munich",
+        "los angeles": "Los Angeles", "los angeles ca": "Los Angeles",
     }
     for key, city in cities.items():
         if key in t:

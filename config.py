@@ -74,7 +74,7 @@ EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
 
 # ── WHITELIST МІСТ ────────────────────────────────────────────
 CITY_WHITELIST: List[str] = [
-    "London", "Paris", "NYC", "Chicago",
+    "London", "Paris", "NYC", "Chicago", "Los Angeles",
     "Tokyo", "Seoul", "Buenos Aires",
     "Busan", "Lucknow", "Cape Town",
     "Miami", "Dallas", "Seattle", "Berlin", "Sydney",

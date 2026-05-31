@@ -55,7 +55,7 @@ class WeatherForecast:
             "Cape Town": 1.2, "Sao Paulo": 1.1, "Sydney": 1.3,
             "Buenos Aires": 1.4, "London": 1.4, "Paris": 1.5,
             "Tokyo": 1.5, "Berlin": 1.6, "Busan": 1.6, "Munich": 1.7,
-            "Seoul": 1.8, "NYC": 1.8, "Seattle": 1.3,
+            "Seoul": 1.8, "NYC": 1.8, "Seattle": 1.3, "Los Angeles": 1.2,
             "Dallas": 2.0, "Chicago": 2.2,
         }.get(self.city, 1.3)
         # Невизначеність зростає з горизонтом прогнозу
@@ -543,7 +543,7 @@ CITY_TO_ICAO: Dict[str, str] = {
     # USA
     "NYC": "KJFK", "New York": "KJFK",
     "Chicago": "KORD",
-    "Los Angeles": "KLAX",
+    "Los Angeles": "KLAX", "LA": "KLAX", "Los Angeles CA": "KLAX",
     "San Francisco": "KSFO",
     "Miami": "KMIA",
     "Dallas": "KDFW", "Dallas/Fort Worth": "KDFW",
