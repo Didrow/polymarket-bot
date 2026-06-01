@@ -201,9 +201,13 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
 
                 if resolved_yes is not None:
                     _resolution_cache[clean_id] = (time.time(), resolved_yes)
+                    display_tc = tc
+                    display_unit = 'F' if unit == 'F' else 'C'
+                    if unit == 'F' and kind != 'range':
+                        display_tc = tc * 9 / 5 + 32
                     logger.warning(
                         f"🧪 DRY-RUN RESOLVED ({'WIN' if resolved_yes else 'LOSS'}): "
-                        f"{position.question[:50]} | actual={tc:.1f}°C | "
+                        f"{position.question[:50]} | actual={display_tc:.1f}°{display_unit} | "
                         f"date={market_date} | cid={clean_id[:20]}"
                     )
                     return resolved_yes
