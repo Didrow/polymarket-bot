@@ -69,8 +69,13 @@ class WeatherForecast:
         # Якщо є дані ансамблю (31 модель)
         if members:
             prob = sum(0.5 * (1 + math.erf((m - threshold_c) / (sigma * math.sqrt(2)))) for m in members) / len(members)
-            import config
-            max_cap = getattr(config, 'MAX_PROB_CAP_ABOVE_BELOW', 0.94)
+            # Динамічний кап для above/below
+            if hours <= 6.0:
+                max_cap = 0.975
+            elif hours <= 18.0:
+                max_cap = 0.955
+            else:
+                max_cap = 0.940
             return max(0.01, min(max_cap, round(prob, 4)))
         
         # Fallback до одного значення, якщо ансамбль недоступний
@@ -80,10 +85,13 @@ class WeatherForecast:
         diff = tc - threshold_c
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
         
-        # Обмежуємо максимальну впевненість щоб не купувати "гарантовані" результати, 
-        # які насправді можуть бути помилкою моделі
-        import config
-        max_cap = getattr(config, 'MAX_PROB_CAP_ABOVE_BELOW', 0.94)
+        # Динамічний кап для above/below
+        if hours <= 6.0:
+            max_cap = 0.975
+        elif hours <= 18.0:
+            max_cap = 0.955
+        else:
+            max_cap = 0.940
         return max(0.01, min(max_cap, round(prob, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
@@ -100,8 +108,14 @@ class WeatherForecast:
                 p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - m) / (sigma * math.sqrt(2))))
                 prob += (p_high - p_low)
             prob /= len(members)
-            import config
-            max_cap = getattr(config, 'MAX_PROB_CAP_RANGE', 0.88)
+            
+            # Динамічний кап для range
+            if hours <= 6.0:
+                max_cap = 0.950
+            elif hours <= 18.0:
+                max_cap = 0.920
+            else:
+                max_cap = 0.880
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення
@@ -110,8 +124,14 @@ class WeatherForecast:
             return 0.01
         p_high = 0.5 * (1 + math.erf((threshold_c + half_width - tc) / (sigma * math.sqrt(2))))
         p_low  = 0.5 * (1 + math.erf((threshold_c - half_width - tc) / (sigma * math.sqrt(2))))
-        import config
-        max_cap = getattr(config, 'MAX_PROB_CAP_RANGE', 0.88)
+        
+        # Динамічний кап для range
+        if hours <= 6.0:
+            max_cap = 0.950
+        elif hours <= 18.0:
+            max_cap = 0.920
+        else:
+            max_cap = 0.880
         return max(0.01, min(max_cap, round(p_high - p_low, 4)))
 
     def prob_rain_or_snow(self) -> float:

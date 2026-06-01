@@ -18,7 +18,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 10          # Max одночасних позицій (Kelly + Grid)
+MAX_ACTIVE_POSITIONS: int = 15          # Max одночасних позицій (Kelly + Grid)
 MAX_POSITIONS_PER_CITY: int = 2          # Макс позицій на одне місто (антикореляція)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)
@@ -44,7 +44,7 @@ ADJACENT_GRID_MIN_EDGE: float = 0.15
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.25            # 25% мінімум — після виправлення prob_exact
+MIN_EDGE_ENTRY: float = 0.15            # 15% мінімум — після виправлення prob_exact
 MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────

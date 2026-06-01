@@ -188,8 +188,13 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
             label = f"range|{val_min}-{val_max}°C"
             threshold_c = (val_min + val_max) / 2
 
-        import config as _cfg
-        _max_r = getattr(_cfg, 'MAX_PROB_CAP_RANGE', 0.88)
+        # Динамічний кап для range
+        if hours <= 6.0:
+            _max_r = 0.950
+        elif hours <= 18.0:
+            _max_r = 0.920
+        else:
+            _max_r = 0.880
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
     # Звичайний одинарний поріг
