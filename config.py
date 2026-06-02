@@ -18,7 +18,9 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 15          # Max одночасних позицій (Kelly + Grid)
+MAX_ACTIVE_POSITIONS: int = 20          # Max одночасних позицій (Kelly + Grid)
+RESERVED_FAST_SLOTS: int = 5            # Резервуємо 5 слотів для угод <= 6 годин до резолву
+FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
 MAX_POSITIONS_PER_CITY: int = 2          # Макс позицій на одне місто (антикореляція)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)

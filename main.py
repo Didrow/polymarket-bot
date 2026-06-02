@@ -260,13 +260,30 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         logger.info("Немає ринків з достатнім edge. Чекаємо...")
         return 0
 
+    # Лічильники швидких (≤6h) та довгих (>6h) позицій
+    active_positions = list(_trader._active_positions.values())
+    fast_positions_count = sum(
+        1 for p in active_positions if p.end_date
+        and (p.end_date - datetime.now(timezone.utc)).total_seconds() / 3600 <= config.FAST_SLOT_THRESHOLD_HOURS
+    ) if hasattr(config, 'FAST_SLOT_THRESHOLD_HOURS') else 0
+    slow_positions_count = portfolio["active_positions"] - fast_positions_count
+    _max_slow = config.MAX_ACTIVE_POSITIONS - getattr(config, 'RESERVED_FAST_SLOTS', 0)
+
     opened_this_cycle = 0
     for edge_result in tradeable:
         if opened_this_cycle >= 2:
             break
-        if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
-            logger.info(f"📊 Ліміт {config.MAX_ACTIVE_POSITIONS} позицій — пропускаємо")
-            break
+
+        # Визначаємо тип угоди та застосовуємо відповідний ліміт
+        is_fast = (edge_result.market.hours_to_resolution <= config.FAST_SLOT_THRESHOLD_HOURS)
+        if is_fast:
+            if portfolio["active_positions"] >= config.MAX_ACTIVE_POSITIONS:
+                logger.info(f"📊 Абсолютний ліміт {config.MAX_ACTIVE_POSITIONS} позицій — пропускаємо")
+                break
+        else:
+            if slow_positions_count >= _max_slow:
+                logger.info(f"📊 Слоти для довгих позицій заповнені ({slow_positions_count}/{_max_slow}). Резервуємо {getattr(config, 'RESERVED_FAST_SLOTS', 0)} слотів під швидкі угоди.")
+                continue
 
         norm_q = _normalize_q(edge_result.market.question)
         if norm_q in active_questions:
