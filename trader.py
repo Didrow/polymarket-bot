@@ -180,6 +180,7 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                 from edge_calculator import _parse_range_or_threshold
                 kind, val_min, val_max, unit = _parse_range_or_threshold(position.question)
 
+                tc_c = tc
                 resolved_yes = None
                 if kind == "range":
                     if unit == 'F':
@@ -201,10 +202,8 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
 
                 if resolved_yes is not None:
                     _resolution_cache[clean_id] = (time.time(), resolved_yes)
-                    display_tc = tc
+                    display_tc = tc_c * 9/5 + 32 if unit == 'F' else tc_c
                     display_unit = 'F' if unit == 'F' else 'C'
-                    if unit == 'F':
-                        display_tc = tc * 9 / 5 + 32
                     logger.warning(
                         f"🧪 DRY-RUN RESOLVED ({'WIN' if resolved_yes else 'LOSS'}): "
                         f"{position.question[:50]} | actual={display_tc:.1f}°{display_unit} | "
