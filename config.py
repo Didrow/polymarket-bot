@@ -21,7 +21,7 @@ BASE_POSITION_USD: float = 3.0          # Базовий розмір ставк
 MAX_ACTIVE_POSITIONS: int = 20 if DRY_RUN else 12  # 20 для симуляції, 12 для LIVE
 RESERVED_FAST_SLOTS: int = 5            # Резервуємо 5 слотів для угод <= 6 годин до резолву
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
-MAX_POSITIONS_PER_CITY: int = 2          # Макс позицій на одне місто (антикореляція)
+MAX_POSITIONS_PER_CITY: int = 3          # Макс позицій на одне місто (антикореляція)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)
 MAX_POSITION_USD: float = 5.0           # Абсолютний ліміт позиції в $
