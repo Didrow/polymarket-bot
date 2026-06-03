@@ -155,10 +155,12 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
         if time.time() - _rc_ts < _RESOLUTION_CACHE_TTL:
             return _rc_val
 
-    # DRY-RUN fast path: якщо є end_date і він минув — використовуємо ІСТОРИЧНІ дані
+    # DRY-RUN fast path: чекаємо повного завершення доби (02:00 UTC наступного дня)
     if config.DRY_RUN and position and position.end_date:
         now = datetime.now(timezone.utc)
-        if now > position.end_date:
+        target_date = position.end_date.date()
+        day_completed = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc) + timedelta(days=1, hours=2)
+        if now > day_completed:
             from data_fetcher import fetch_historical_extreme
             market_date = position.end_date.date()
             extremes = fetch_historical_extreme(position.city, market_date)
@@ -338,7 +340,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         closed_at = _recently_closed[clean_cid]
         if isinstance(closed_at, datetime):
             age_hours = (datetime.now(timezone.utc) - closed_at).total_seconds() / 3600
-            if age_hours < 12.0:
+            if age_hours < 4.0:
                 logger.info(f"📋 Нещодавно закрито ({age_hours:.1f}h тому): {market.question[:60]}")
                 return None
 
@@ -450,7 +452,8 @@ def cleanup_stale_positions() -> List[Position]:
         )
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        if not is_weather or market_ended or age_hours > 24:
+        should_cleanup = market_ended or (not is_weather and age_hours > 24)
+        if should_cleanup:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
