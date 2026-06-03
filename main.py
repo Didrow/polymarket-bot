@@ -313,7 +313,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "ADJACENT_GRID" if "ADJACENT" in edge_result.reason else ("GRID" if "GRID" in edge_result.reason else "SNIPER")
+            _strategy = "ADJACENT_GRID" if "ADJACENT" in edge_result.reason else ("GRID" if "GRID" in edge_result.reason else ("VALUE" if "VALUE" in edge_result.reason else "SNIPER"))
             log_trade_to_pg({
                 "cycle": cycle_count,
                 "action": "OPEN",

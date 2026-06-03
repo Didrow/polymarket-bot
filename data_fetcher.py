@@ -66,16 +66,27 @@ class WeatherForecast:
         members = self.temp_low_members if is_low else self.temp_high_members
         sigma = self._get_sigma(hours)
         
-        # Якщо є дані ансамблю (31 модель)
-        if members:
-            prob = sum(0.5 * (1 + math.erf((m - threshold_c) / (sigma * math.sqrt(2)))) for m in members) / len(members)
-            # Динамічний кап для above/below
-            if hours <= 6.0:
-                max_cap = 0.975
-            elif hours <= 18.0:
-                max_cap = 0.955
-            else:
-                max_cap = 0.940
+        # Динамічний кап для above/below
+        if hours <= 6.0:
+            max_cap = 0.96
+        elif hours <= 18.0:
+            max_cap = 0.94
+        else:
+            max_cap = 0.92
+
+        # Якщо є дані ансамблю (31 модель) — використовуємо ЕМПІРИЧНИЙ підрахунок
+        if members and len(members) >= 5:
+            # Емпірична частка members вище порогу
+            count_above = sum(1 for m in members if m > threshold_c)
+            prob_empirical = count_above / len(members)
+            
+            # Невелике параметричне розмиття для граничних випадків
+            # (коли поріг близько до середнього — чиста емпірика дає стрибки)
+            mean = sum(members) / len(members)
+            prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
+            
+            # 75% емпіричний + 25% параметричний — баланс точності та стабільності
+            prob = prob_empirical * 0.75 + prob_parametric * 0.25
             return max(0.01, min(max_cap, round(prob, 4)))
         
         # Fallback до одного значення, якщо ансамбль недоступний
@@ -84,14 +95,6 @@ class WeatherForecast:
             return 0.50
         diff = tc - threshold_c
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
-        
-        # Динамічний кап для above/below
-        if hours <= 6.0:
-            max_cap = 0.975
-        elif hours <= 18.0:
-            max_cap = 0.955
-        else:
-            max_cap = 0.940
         return max(0.01, min(max_cap, round(prob, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
@@ -100,22 +103,31 @@ class WeatherForecast:
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
 
-        if members:
-            prob = 0.0
-            sigma = self._get_sigma(hours)
-            for m in members:
-                p_high = 0.5 * (1 + math.erf(((threshold_c + half_width) - m) / (sigma * math.sqrt(2))))
-                p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - m) / (sigma * math.sqrt(2))))
-                prob += (p_high - p_low)
-            prob /= len(members)
+        # Динамічний кап для range/categorical
+        if hours <= 6.0:
+            max_cap = 0.90
+        elif hours <= 18.0:
+            max_cap = 0.80
+        else:
+            max_cap = 0.70
+
+        if members and len(members) >= 5:
+            # Емпіричний підрахунок: скільки members потрапляють у бакет
+            count_in = sum(1 for m in members if (threshold_c - half_width) <= m < (threshold_c + half_width))
+            prob_empirical = count_in / len(members)
             
-            # Динамічний кап для range
-            if hours <= 6.0:
-                max_cap = 0.950
-            elif hours <= 18.0:
-                max_cap = 0.920
+            # Параметричне розмиття через середнє ансамблю
+            sigma = self._get_sigma(hours)
+            mean = sum(members) / len(members)
+            p_high = 0.5 * (1 + math.erf(((threshold_c + half_width) - mean) / (sigma * math.sqrt(2))))
+            p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
+            prob_parametric = max(0.0, p_high - p_low)
+            
+            # Якщо жоден member не в бакеті — довіряємо параметричній оцінці
+            if prob_empirical == 0.0:
+                prob = prob_parametric * 0.5  # Консервативно
             else:
-                max_cap = 0.880
+                prob = prob_empirical * 0.70 + prob_parametric * 0.30
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення
@@ -124,14 +136,6 @@ class WeatherForecast:
             return 0.01
         p_high = 0.5 * (1 + math.erf((threshold_c + half_width - tc) / (sigma * math.sqrt(2))))
         p_low  = 0.5 * (1 + math.erf((threshold_c - half_width - tc) / (sigma * math.sqrt(2))))
-        
-        # Динамічний кап для range
-        if hours <= 6.0:
-            max_cap = 0.950
-        elif hours <= 18.0:
-            max_cap = 0.920
-        else:
-            max_cap = 0.880
         return max(0.01, min(max_cap, round(p_high - p_low, 4)))
 
     def prob_rain_or_snow(self) -> float:
@@ -827,10 +831,10 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
             # Добовий мінімум не може бути вищим за вже спостережений мінімум
             result.temp_low_c = min(result.temp_low_c, obs_low)
 
-            if result.temp_high_members:
-                result.temp_high_members = [max(m, obs_high) for m in result.temp_high_members]
-            if result.temp_low_members:
-                result.temp_low_members = [min(m, obs_low) for m in result.temp_low_members]
+            # НЕ модифікуємо ensemble members observed даними!
+            # Observed = floor для temp_high_c, але НЕ для ймовірнісних розрахунків.
+            # Підтягування members до observed створює хибну впевненість (99%)
+            # коли поріг близько до поточної температури.
 
             if "OBSERVED" not in result.sources_used:
                 result.sources_used.append("OBSERVED")

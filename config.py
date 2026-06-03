@@ -37,7 +37,7 @@ COLDMATH_MAX_SIZE_USD: float = 0.0
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.12  # Купуємо YES, якщо він коштує 12¢ або дешевше
 EXTREME_TAIL_MAX_SIZE_USD: float = 4.0  # $2-$4 на кожен тікет у "сітці"
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # 20% мінімум після виправлення prob_exact
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.15 # 15% мінімум (знижено — тепер prob калібрований)
 
 # ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
 ENABLE_ADJACENT_GRID: bool = True
@@ -46,7 +46,7 @@ ADJACENT_GRID_MIN_EDGE: float = 0.20
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.25            # 25% мінімум — фільтр маржинальних угод
+MIN_EDGE_ENTRY: float = 0.20            # 20% мінімум — знижено з 25% після калібрування prob
 MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────

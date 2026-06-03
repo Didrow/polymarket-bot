@@ -186,8 +186,10 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                 resolved_yes = None
                 if kind == "range":
                     if unit == 'F':
-                        tc = tc * 9/5 + 32
-                    resolved_yes = (val_min - 0.5) <= tc < (val_max + 0.5)
+                        tc_f = tc * 9/5 + 32  # Конвертуємо спостережену темп. в F
+                        resolved_yes = (val_min - 0.5) <= tc_f < (val_max + 0.5)
+                    else:
+                        resolved_yes = (val_min - 0.5) <= tc < (val_max + 0.5)
                 elif val_min is not None:
                     threshold_c = val_min
                     if unit == 'F':
@@ -301,30 +303,35 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
     vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
 
+    # Confidence впливає на РОЗМІР, а не на edge-фільтрацію
+    confidence = edge_result.confidence
+
     if config.ENABLE_COMPOUND:
         if config.USE_KELLY:
-            p = edge_result.estimated_prob
+            # КРИТИЧНО: cap prob на 0.80 для Kelly — завищені prob ведуть до oversizing
+            p = min(edge_result.estimated_prob, 0.80)
             q = 1.0 - p
             b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
             kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-            kelly_size = current_capital * kelly_raw * 0.25
+            # Восьма-Kelly замість чверть-Kelly для консервативності
+            kelly_size = current_capital * kelly_raw * 0.125 * confidence
             final = min(vol_size, kelly_size)
         else:
-            fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT
+            fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT * confidence
             final = min(vol_size, fixed_pct_size)
     else:
-        p = edge_result.estimated_prob
+        p = min(edge_result.estimated_prob, 0.80)
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-        kelly_size = current_capital * kelly_raw * 0.25
+        kelly_size = current_capital * kelly_raw * 0.125 * confidence
         final = min(vol_size, kelly_size)
         final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
 
     if direction == "BUY_YES" and market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES:
         final = min(final, config.EXTREME_TAIL_MAX_SIZE_USD)
 
-    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * 0.1))
+    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * 0.08))
     return round(final, 2)
 
 

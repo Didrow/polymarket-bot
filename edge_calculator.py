@@ -258,10 +258,11 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
-    # Ефективний edge з урахуванням впевненості моделі
-    eff_edge = (our_prob - market_prob) * confidence
+    # Edge = різниця між нашою ймовірністю та ціною ринку
+    # НЕ множимо на confidence — це має впливати на РОЗМІР позиції, а не на фільтрацію
+    raw_edge = our_prob - market_prob
     # Cap edge щоб запобігти хибним сигналам від METAR artifacts
-    eff_edge = min(eff_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
+    eff_edge = min(raw_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
     GRID_MIN_PRICE = 0.02
@@ -298,12 +299,27 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
     )
 
+    # 💎 СТРАТЕГІЯ 3: VALUE YES (Ринки 12-30¢ з помірним edge 15-24%)
+    # Закриває "мертву зону" між GRID та SNIPER
+    is_value_yes = (
+        not is_grid_yes
+        and not is_sniper_yes
+        and eff_edge >= 0.15
+        and 0.12 < market_prob <= 0.35
+        and our_prob >= 0.20
+        and confidence >= 0.85  # Тільки з якісним прогнозом
+    )
+
     if is_grid_yes:
         size_usd = max(config.MIN_POSITION_USD, min(config.EXTREME_TAIL_MAX_SIZE_USD, 4.0))
         reason = f"🎣 GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     elif is_sniper_yes:
         size_usd = config.BASE_POSITION_USD
         reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
+    elif is_value_yes:
+        # Менший розмір для VALUE — менша впевненість
+        size_usd = max(config.MIN_POSITION_USD, config.BASE_POSITION_USD * 0.7)
+        reason = f"💎 VALUE YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
         # Ми ПОВНІСТЮ ігноруємо BUY_NO в цій версії
         return None
