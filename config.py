@@ -18,7 +18,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 20 if DRY_RUN else 12  # 20 для симуляції, 12 для LIVE
+MAX_ACTIVE_POSITIONS: int = 12  # 12 для всіх режимів (реалістичне тестування)
 RESERVED_FAST_SLOTS: int = 5            # Резервуємо 5 слотів для угод <= 6 годин до резолву
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
 MAX_POSITIONS_PER_CITY: int = 3          # Макс позицій на одне місто (антикореляція)
@@ -42,11 +42,11 @@ EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # 20% мінімум після випр
 # ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
 ENABLE_ADJACENT_GRID: bool = True
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.15
+ADJACENT_GRID_MIN_EDGE: float = 0.20
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.15            # 15% мінімум — після виправлення prob_exact
+MIN_EDGE_ENTRY: float = 0.25            # 25% мінімум — фільтр маржинальних угод
 MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
