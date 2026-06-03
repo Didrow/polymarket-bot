@@ -331,6 +331,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     clean_cid = normalize_condition_id(market.condition_id)
 
     if clean_cid in _active_positions:
+        logger.info(f"📋 Уже в активних позиціях: {market.question[:60]}")
         return None
 
     if clean_cid in _recently_closed:
@@ -338,6 +339,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         if isinstance(closed_at, datetime):
             age_hours = (datetime.now(timezone.utc) - closed_at).total_seconds() / 3600
             if age_hours < 12.0:
+                logger.info(f"📋 Нещодавно закрито ({age_hours:.1f}h тому): {market.question[:60]}")
                 return None
 
     if edge_result.edge_direction == "BUY_YES":
@@ -345,6 +347,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
     else:
         no_price = 1.0 - market.midpoint_yes
         if no_price < 0.015:
+            logger.info(f"📋 NO price < 0.015: {market.question[:60]}")
             return None
         price = no_price
 
@@ -454,11 +457,11 @@ def cleanup_stale_positions() -> List[Position]:
                 pos.resolve(resolved)
                 logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'} (при cleanup): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
             else:
-                if config.DRY_RUN and age_hours > 28:
+                if config.DRY_RUN and age_hours > 12:
                     pos.status = "EXPIRED"
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
-                    logger.warning(f"⏰ DRY-RUN Expired (stale 28h): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
+                    logger.warning(f"⏰ DRY-RUN Expired (stale 12h): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
             del _active_positions[cid]
             _recently_closed[cid] = now
             removed.append(pos)

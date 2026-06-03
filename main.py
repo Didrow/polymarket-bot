@@ -295,7 +295,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if city and hasattr(config, 'MAX_POSITIONS_PER_CITY'):
             city_count = _trader.get_positions_count_by_city(city)
             if city_count >= config.MAX_POSITIONS_PER_CITY:
-                logger.debug(f"📊 Ліміт {config.MAX_POSITIONS_PER_CITY} позицій для {city} — пропускаємо")
+                logger.info(f"📊 Ліміт {config.MAX_POSITIONS_PER_CITY} позицій для {city} — пропускаємо")
                 continue
         if not safeguard.check_hourly_trade_limit():
             break
