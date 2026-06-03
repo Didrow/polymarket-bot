@@ -450,7 +450,7 @@ def cleanup_stale_positions() -> List[Position]:
         )
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        if not is_weather or market_ended or age_hours > 28:
+        if not is_weather or market_ended or age_hours > 24:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
@@ -508,7 +508,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             _recently_closed[cid] = now
             continue
 
-        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=24):
+        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=12):
             resolved_yes = None
             try:
                 r = requests.get(
