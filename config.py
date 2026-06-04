@@ -18,7 +18,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 12  # 12 для всіх режимів (реалістичне тестування)
+MAX_ACTIVE_POSITIONS: int = 15  # 12 → 15: розширено щоб використовувати всі знайдені угоди (20 — забагато для $100 капіталу, 60% exposure)
 RESERVED_FAST_SLOTS: int = 5            # Резервуємо 5 слотів для угод <= 6 годин до резолву
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
 MAX_POSITIONS_PER_CITY: int = 3          # Макс позицій на одне місто (антикореляція)
