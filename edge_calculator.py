@@ -253,18 +253,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         return None 
 
     kind = _detect_market_kind(market.question)
-
-    # ── КОРЕКЦІЯ ЛІТНІХ ТЕМПЕРАТУР ДЛЯ US МІСТ (Rule 1) ─────────────────
-    # Polymarket market-makers системно недооцінюють літні температури.
-    # Для "above" контрактів міст LA, Chicago, Dallas, NYC при ціні 30-50%: our_prob = 0.88 (88%)
-    if city in ["Los Angeles", "Chicago", "Dallas", "NYC"] and kind == "above":
-        if 0.30 <= market_prob <= 0.50:
-            logger.info(
-                f"🔥 Літній едж для {city} (above): коригуємо our_prob з {our_prob:.1%} до 88.0% "
-                f"(market_prob={market_prob:.1%})"
-            )
-            our_prob = 0.88
-
     is_low = 'lowest' in market.question.lower()
     fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c   # float
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
@@ -308,15 +296,15 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # 🎯 СТРАТЕГІЯ 2: SNIPER YES (Основний прогноз або діапазони)
     is_sniper_yes = (
         eff_edge >= config.MIN_EDGE_ENTRY 
-        and market_prob > 0.35
+        and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
     )
 
-    # 💎 СТРАТЕГІЯ 3: VALUE YES (Ринки 12-35¢ з edge >= MIN_EDGE_ENTRY)
+    # 💎 СТРАТЕГІЯ 3: VALUE YES (Ринки 12-30¢ з помірним edge 15-24%)
     # Закриває "мертву зону" між GRID та SNIPER
     is_value_yes = (
         not is_grid_yes
         and not is_sniper_yes
-        and eff_edge >= config.MIN_EDGE_ENTRY
+        and eff_edge >= 0.15
         and 0.12 < market_prob <= 0.35
         and our_prob >= 0.20
         and confidence >= 0.85  # Тільки з якісним прогнозом
