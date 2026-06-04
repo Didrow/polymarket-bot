@@ -188,13 +188,13 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
             label = f"range|{val_min}-{val_max}°C"
             threshold_c = (val_min + val_max) / 2
 
-        # Динамічний кап для range
+        # Кап для range (з config.py, спільний з prob_exact_temp_c)
         if hours <= 6.0:
-            _max_r = 0.950
+            _max_r = config.PROB_CAP_EXACT_SHORT
         elif hours <= 18.0:
-            _max_r = 0.920
+            _max_r = config.PROB_CAP_EXACT_MID
         else:
-            _max_r = 0.880
+            _max_r = config.PROB_CAP_EXACT_LONG
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
     # Звичайний одинарний поріг
@@ -265,7 +265,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     eff_edge = min(raw_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
     # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
-    GRID_MIN_PRICE = 0.02
+    GRID_MIN_PRICE = getattr(config, 'EXTREME_TAIL_MIN_ASK_YES', 0.05)
     
     # Фільтр відстані для categorical ринків.
     # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.

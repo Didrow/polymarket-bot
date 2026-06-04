@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple
 
+import config
+
 logger = logging.getLogger(__name__)
 
 # TTL кеш
@@ -66,13 +68,13 @@ class WeatherForecast:
         members = self.temp_low_members if is_low else self.temp_high_members
         sigma = self._get_sigma(hours)
         
-        # Динамічний кап для above/below
+        # Кап з config.py (змінювати там)
         if hours <= 6.0:
-            max_cap = 0.96
+            max_cap = config.PROB_CAP_ABOVE_SHORT
         elif hours <= 18.0:
-            max_cap = 0.94
+            max_cap = config.PROB_CAP_ABOVE_MID
         else:
-            max_cap = 0.92
+            max_cap = config.PROB_CAP_ABOVE_LONG
 
         # Якщо є дані ансамблю (31 модель) — використовуємо ЕМПІРИЧНИЙ підрахунок
         if members and len(members) >= 5:
@@ -80,13 +82,14 @@ class WeatherForecast:
             count_above = sum(1 for m in members if m > threshold_c)
             prob_empirical = count_above / len(members)
             
-            # Невелике параметричне розмиття для граничних випадків
-            # (коли поріг близько до середнього — чиста емпірика дає стрибки)
+            # Параметрична оцінка (Gaussian через erf)
             mean = sum(members) / len(members)
             prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
             
-            # 75% емпіричний + 25% параметричний — баланс точності та стабільності
-            prob = prob_empirical * 0.75 + prob_parametric * 0.25
+            # ✅ ЗМЕНШЕНО вагу емпірики 75% → 55% (запобігає переоцінці)
+            # Емпірика схильна до 100% коли всі 31 members > threshold (cast)
+            # Параметрична оцінка стійкіша до outliers
+            prob = prob_empirical * 0.55 + prob_parametric * 0.45
             return max(0.01, min(max_cap, round(prob, 4)))
         
         # Fallback до одного значення, якщо ансамбль недоступний
@@ -103,13 +106,13 @@ class WeatherForecast:
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
 
-        # Динамічний кап для range/categorical
+        # Кап з config.py (змінювати там)
         if hours <= 6.0:
-            max_cap = 0.90
+            max_cap = config.PROB_CAP_EXACT_SHORT
         elif hours <= 18.0:
-            max_cap = 0.80
+            max_cap = config.PROB_CAP_EXACT_MID
         else:
-            max_cap = 0.70
+            max_cap = config.PROB_CAP_EXACT_LONG
 
         if members and len(members) >= 5:
             # Емпіричний підрахунок: скільки members потрапляють у бакет
@@ -123,11 +126,11 @@ class WeatherForecast:
             p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
             prob_parametric = max(0.0, p_high - p_low)
             
-            # Якщо жоден member не в бакеті — довіряємо параметричній оцінці
+            # ✅ ЗМЕНШЕНО вагу емпірики 70% → 50% (запобігає переоцінці бакетів)
             if prob_empirical == 0.0:
-                prob = prob_parametric * 0.5  # Консервативно
+                prob = prob_parametric * 0.5
             else:
-                prob = prob_empirical * 0.70 + prob_parametric * 0.30
+                prob = prob_empirical * 0.50 + prob_parametric * 0.50
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення

@@ -36,18 +36,19 @@ COLDMATH_MAX_SIZE_USD: float = 0.0
 # ── 🎣 СТРАТЕГІЯ "РЯТУВАЛЬНА СІТКА" (GRID YES) ───────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.12  # Купуємо YES, якщо він коштує 12¢ або дешевше
+EXTREME_TAIL_MIN_ASK_YES: float = 0.05  # ✅ НОВЕ: не купуємо YES < 5¢ (фантомні ставки)
 EXTREME_TAIL_MAX_SIZE_USD: float = 4.0  # $2-$4 на кожен тікет у "сітці"
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.15 # 15% мінімум (знижено — тепер prob калібрований)
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # ✅ 15% → 20% (підвищено після аналізу cap issue)
 
 # ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
 ENABLE_ADJACENT_GRID: bool = True
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.20
+ADJACENT_GRID_MIN_EDGE: float = 0.25    # ✅ 20% → 25% (підвищено для якості)
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.20            # 20% мінімум — знижено з 25% після калібрування prob
-MIN_EDGE_HOLD: float = 0.02             # Поріг для утримання
+MIN_EDGE_ENTRY: float = 0.25            # ✅ 20% → 25% (підвищено для фільтрації phantom edges)
+MIN_EDGE_HOLD: float = 0.05             # ✅ 2% → 5% (раніше закриваємо при втраті edge)
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
@@ -90,8 +91,17 @@ EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST
 MIN_DATA_POINTS_FALLBACK: int = 5      
 WHALE_THRESHOLD_USD: float = 2000.0    
 
-# ── EDGE CAP (запобігання хибним сигналам) ───────────────────
-MAX_EDGE_CAP: float = 0.75             # Якщо edge > 75% — підозріло, cap до цього значення
-MAX_PROB_CAP: float = 0.92             # Загальний cap (fallback, використовується в data_fetcher)
-MAX_PROB_CAP_RANGE: float = 0.88        # Cap для range/categorical бакетів (точне попадання)
-MAX_PROB_CAP_ABOVE_BELOW: float = 0.94  # Cap для above/below (вища реальна впевненість)
+# ── ЙМОВІРНІСНІ CAPS (ДЖЕРЕЛО ІСТИНИ) ─────────────────────────
+# УВАГА: змінювати тут — зміна поведінки в data_fetcher.py та edge_calculator.py
+# prob_above_temp_c / prob_below_temp_c
+PROB_CAP_ABOVE_SHORT: float = 0.78    # hours <= 6.0
+PROB_CAP_ABOVE_MID: float = 0.72      # hours <= 18.0
+PROB_CAP_ABOVE_LONG: float = 0.68     # hours > 18.0
+
+# prob_exact_temp_c / range / categorical
+PROB_CAP_EXACT_SHORT: float = 0.72    # hours <= 6.0
+PROB_CAP_EXACT_MID: float = 0.62      # hours <= 18.0
+PROB_CAP_EXACT_LONG: float = 0.55     # hours > 18.0
+
+# Максимальний edge (запобігає фантомним edge > 60%)
+MAX_EDGE_CAP: float = 0.60
