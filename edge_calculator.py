@@ -145,48 +145,38 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     is_low = 'lowest' in market.question.lower()
 
     if kind == "range":
-        members = forecast.temp_low_members if is_low else forecast.temp_high_members
-        
+        # БАГ-ФІКС: раніше використовувався raw count з ensemble members,
+        # який давав нереалістично високу prob (62% для Miami 82-83°F при merged 27.5°C).
+        # ВИПРАВЛЕННЯ: Gaussian CDF з merged forecast як mean + sigma, що росте з hours.
+        if is_low:
+            mean_c = forecast.temp_low_c
+            members = forecast.temp_low_members
+        else:
+            mean_c = forecast.temp_high_c
+            members = forecast.temp_high_members
+
         if unit == 'F':
-            # Для Фаренгейту межі бакета [val_min - 0.5, val_max + 0.5]
-            t_min_f = val_min - 0.5
-            t_max_f = val_max + 0.5
-            
-            if members:
-                # Частота попадання членів ансамблю в діапазон після конвертації в F
-                count = sum(1 for m in members if t_min_f <= m * 9/5 + 32 < t_max_f)
-                p = count / len(members)
-                if p == 0.0:
-                    mean_f = (sum(members) / len(members)) * 9/5 + 32
-                    p = 0.03 if abs(mean_f - (val_min + val_max)/2) <= 2.5 else 0.01
-            else:
-                # Fallback: один прогноз
-                mean_f = (forecast.temp_low_c if is_low else forecast.temp_high_c) * 9/5 + 32
-                sigma = 3.6  # ~2.0°C у Фаренгейтах
-                p_high = 0.5 * (1 + math.erf((t_max_f - mean_f) / (sigma * math.sqrt(2))))
-                p_low  = 0.5 * (1 + math.erf((t_min_f - mean_f) / (sigma * math.sqrt(2))))
-                p = p_high - p_low
+            # Конвертуємо F-межі в C для узгодженого Gaussian
+            t_min_c = _f_to_c(val_min - 0.5)
+            t_max_c = _f_to_c(val_max + 0.5)
             label = f"range|{val_min}-{val_max}°F"
             threshold_c = _f_to_c((val_min + val_max) / 2)
+            sigma_base = 1.5  # ~2.7°F у °C
         else:
-            # Для Цельсія межі [val_min - 0.5, val_max + 0.5]
             t_min_c = val_min - 0.5
             t_max_c = val_max + 0.5
-            
-            if members:
-                count = sum(1 for m in members if t_min_c <= m < t_max_c)
-                p = count / len(members)
-                if p == 0.0:
-                    mean_c = sum(members) / len(members)
-                    p = 0.03 if abs(mean_c - (val_min + val_max)/2) <= 1.5 else 0.01
-            else:
-                mean_c = forecast.temp_low_c if is_low else forecast.temp_high_c
-                sigma = 2.0
-                p_high = 0.5 * (1 + math.erf((t_max_c - mean_c) / (sigma * math.sqrt(2))))
-                p_low  = 0.5 * (1 + math.erf((t_min_c - mean_c) / (sigma * math.sqrt(2))))
-                p = p_high - p_low
             label = f"range|{val_min}-{val_max}°C"
             threshold_c = (val_min + val_max) / 2
+            sigma_base = 1.0
+
+        # Sigma росте з hours_to_resolution: далі = більше невизначеність
+        # 6h: sigma=sigma_base*0.71, 12h: sigma=sigma_base, 24h: sigma=sigma_base*1.41
+        sigma = sigma_base * math.sqrt(max(0.5, hours / 12.0))
+
+        # Gaussian CDF (узгоджена з prob_above_temp_c / prob_exact_temp_c)
+        p_high = 0.5 * (1 + math.erf((t_max_c - mean_c) / (sigma * math.sqrt(2))))
+        p_low  = 0.5 * (1 + math.erf((t_min_c - mean_c) / (sigma * math.sqrt(2))))
+        p = p_high - p_low
 
         # Кап для range (з config.py, спільний з prob_exact_temp_c)
         if hours <= 6.0:
