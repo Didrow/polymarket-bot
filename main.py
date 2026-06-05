@@ -271,7 +271,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     opened_this_cycle = 0
     for edge_result in tradeable:
-        if opened_this_cycle >= 2:
+        if opened_this_cycle >= 3:
             break
 
         # Визначаємо тип угоди та застосовуємо відповідний ліміт
@@ -443,7 +443,7 @@ def main():
                         nearest = min(end_dates)
                         hours_to_nearest = (nearest - datetime.now(timezone.utc)).total_seconds() / 3600
                         if hours_to_nearest > 2.0:
-                            sleep_time = min(1800, int(hours_to_nearest * 300))
+                            sleep_time = min(900, int(hours_to_nearest * 300))
                         else:
                             sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
                     else:

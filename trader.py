@@ -313,8 +313,8 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
             q = 1.0 - p
             b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
             kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-            # Восьма-Kelly замість чверть-Kelly для консервативності
-            kelly_size = current_capital * kelly_raw * 0.125 * confidence
+            # Чверть-Kelly — стандарт для алготрейдингу
+            kelly_size = current_capital * kelly_raw * 0.25 * confidence
             final = min(vol_size, kelly_size)
         else:
             fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT * confidence
@@ -324,7 +324,7 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-        kelly_size = current_capital * kelly_raw * 0.125 * confidence
+        kelly_size = current_capital * kelly_raw * 0.25 * confidence
         final = min(vol_size, kelly_size)
         final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
 

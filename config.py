@@ -21,7 +21,7 @@ BASE_POSITION_USD: float = 3.0          # Базовий розмір ставк
 MAX_ACTIVE_POSITIONS: int = 15  # 10 → 15: збільшено для підвищення капіталоемності та ефективності бота
 RESERVED_FAST_SLOTS: int = 2            # Резервуємо 2 слоти для угод <= 6 годин до резолву (достатньо, більшість — довгі 24-48h)
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
-MAX_POSITIONS_PER_CITY: int = 3          # Макс позицій на одне місто (антикореляція)
+MAX_POSITIONS_PER_CITY: int = 4          # Макс позицій на одне місто (розширено для ширшої сітки)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)
 MAX_POSITION_USD: float = 5.0           # Абсолютний ліміт позиції в $
@@ -38,16 +38,16 @@ ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.12  # Купуємо YES, якщо він коштує 12¢ або дешевше
 EXTREME_TAIL_MIN_ASK_YES: float = 0.05  # ✅ НОВЕ: не купуємо YES < 5¢ (фантомні ставки)
 EXTREME_TAIL_MAX_SIZE_USD: float = 4.0  # $2-$4 на кожен тікет у "сітці"
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # ✅ 15% → 20% (підвищено після аналізу cap issue)
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.15 # ✅ 20% → 15% (знижено для більшого обсягу grid-входів, EV залишається позитивним)
 
 # ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
 ENABLE_ADJACENT_GRID: bool = True
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.25    # ✅ 20% → 25% (підвищено для якості)
+ADJACENT_GRID_MIN_EDGE: float = 0.20    # ✅ 25% → 20% (знижено для більшої кількості adjacent-входів)
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.25            # ✅ 15% → 25% (збільшено назад для підтримки якості сигналів)
+MIN_EDGE_ENTRY: float = 0.18            # ✅ 25% → 18% (знижено: 25% занадто жорстко, бот простоює з 87% idle капіталом)
 MIN_EDGE_HOLD: float = 0.05             # ✅ 2% → 5% (раніше закриваємо при втраті edge)
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
