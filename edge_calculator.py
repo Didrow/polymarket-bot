@@ -161,17 +161,14 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
             t_max_c = _f_to_c(val_max + 0.5)
             label = f"range|{val_min}-{val_max}°F"
             threshold_c = _f_to_c((val_min + val_max) / 2)
-            sigma_base = 1.5  # ~2.7°F у °C
         else:
             t_min_c = val_min - 0.5
             t_max_c = val_max + 0.5
             label = f"range|{val_min}-{val_max}°C"
             threshold_c = (val_min + val_max) / 2
-            sigma_base = 1.0
 
-        # Sigma росте з hours_to_resolution: далі = більше невизначеність
-        # 6h: sigma=sigma_base*0.71, 12h: sigma=sigma_base, 24h: sigma=sigma_base*1.41
-        sigma = sigma_base * math.sqrt(max(0.5, hours / 12.0))
+        # Використовуємо динамічну sigma конкретного міста та горизонту прогнозу
+        sigma = forecast._get_sigma(hours)
 
         # Gaussian CDF (узгоджена з prob_above_temp_c / prob_exact_temp_c)
         p_high = 0.5 * (1 + math.erf((t_max_c - mean_c) / (sigma * math.sqrt(2))))
