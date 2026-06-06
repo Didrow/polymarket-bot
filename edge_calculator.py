@@ -258,25 +258,25 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
     _dist_ok = True
     if "categorical" in kind_label and threshold_c is not None and fc_temp is not None:
-        # Для F-ринків порогова відстань більша: 1°F ≈ 0.556°C, тому 2.7°C ≈ ~5°F
+        # ✅ v4 FIX: зменшено distance filter з 2.5°C до 1.5°C
+        # Купівля бакетів на відстані 2.5°C мала мізерний шанс (~5%)
         _, _, _, unit = _parse_range_or_threshold(market.question)
-        max_dist = 2.7 if unit == 'F' else 2.5  # ✅ 1.5 → 2.5°C: розширено для покриття ±2-sigma
+        max_dist = 2.0 if unit == 'F' else 1.5
         _dist_ok = abs(fc_temp - threshold_c) <= max_dist
         if not _dist_ok:
             logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >{max_dist}°C ({unit})")
         # Не купуємо categorical YES, якщо прогноз НИЖЧЕ порогу
         # Polymarket categorical бакет = [threshold-0.5, threshold+0.5)
         # Якщо прогноз нижче бакета — майже гарантований програш
-        if _dist_ok and fc_temp < threshold_c - 1.0:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C нижче порогу {threshold_c:.0f}°C (бакет від {threshold_c-0.5:.1f}°C)")
+        if _dist_ok and fc_temp < threshold_c - 0.8:
+            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C нижче порогу {threshold_c:.0f}°C")
             _dist_ok = False
     
     is_grid_yes = (
-        "range" not in kind_label           # Грід-сітка тільки для точкових категоріальних температур
-        and _dist_ok                        # Ціль не далі 3°C від прогнозу
+        _dist_ok                        # Ціль не далі 1.5°C від прогнозу (або above/below)
         and market_prob >= GRID_MIN_PRICE
         and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
-        and our_prob >= 0.08
+        and our_prob >= 0.15            # ✅ v4 FIX: 0.08 → 0.15 (не купуємо <15% шанс)
         and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES
     )
 
@@ -284,17 +284,18 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     is_sniper_yes = (
         eff_edge >= config.MIN_EDGE_ENTRY 
         and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
+        and our_prob >= 0.25           # ✅ v4 FIX: мінімальна prob для SNIPER
     )
 
-    # 💎 СТРАТЕГІЯ 3: VALUE YES (Ринки 12-30¢ з помірним edge 15-24%)
+    # 💎 СТРАТЕГІЯ 3: VALUE YES (Ринки 12-30¢ з помірним edge)
     # Закриває "мертву зону" між GRID та SNIPER
     is_value_yes = (
         not is_grid_yes
         and not is_sniper_yes
-        and eff_edge >= 0.15
+        and eff_edge >= 0.20            # ✅ v4 FIX: 0.15 → 0.20 (суворіший фільтр)
         and 0.12 < market_prob <= 0.35
-        and our_prob >= 0.20
-        and confidence >= 0.80  # ✅ 0.85 → 0.80: дозволяємо VALUE з менш точними прогнозами
+        and our_prob >= 0.25            # ✅ v4 FIX: 0.20 → 0.25
+        and confidence >= 0.85          # ✅ v4 FIX: 0.80 → 0.85 (тільки надійні прогнози)
     )
 
     if is_grid_yes:

@@ -52,29 +52,24 @@ class WeatherForecast:
 
     def _get_sigma(self, hours: float = 24.0) -> float:
         """Динамічний sigma залежно від міста та горизонту прогнозу."""
+        # ✅ v4 FIX: sigma збільшено на ~70% для відповідності реальній помилці
+        # прогнозу (2-4°C на горизонті 20h+). Старі значення (1.0-2.2)
+        # систематично переоцінювали prob_exact, що призводило до 6.7% win rate.
         base = {
-            "Lucknow": 1.0, "Miami": 1.0, "Singapore": 0.8, "Dubai": 0.9,
-            "Cape Town": 1.2, "Sao Paulo": 1.1, "Sydney": 1.3,
-            "Buenos Aires": 1.4, "London": 1.4, "Paris": 1.5,
-            "Tokyo": 1.5, "Berlin": 1.6, "Busan": 1.6, "Munich": 1.7,
-            "Seoul": 1.8, "NYC": 1.8, "Seattle": 1.3, "Los Angeles": 1.2,
-            "Dallas": 2.0, "Chicago": 2.2,
-        }.get(self.city, 1.3)
+            "Lucknow": 1.8, "Miami": 1.8, "Singapore": 1.5, "Dubai": 1.6,
+            "Cape Town": 2.2, "Sao Paulo": 2.0, "Sydney": 2.3,
+            "Buenos Aires": 2.4, "London": 2.5, "Paris": 2.6,
+            "Tokyo": 2.6, "Berlin": 2.8, "Busan": 2.7, "Munich": 2.9,
+            "Seoul": 3.0, "NYC": 3.0, "Seattle": 2.3, "Los Angeles": 2.0,
+            "Dallas": 3.3, "Chicago": 3.5,
+        }.get(self.city, 2.3)
         # Невизначеність зростає з горизонтом прогнозу
-        hour_factor = 1.0 + 0.02 * max(0, hours - 12)
-        return base * min(hour_factor, 1.5)
+        hour_factor = 1.0 + 0.025 * max(0, hours - 6)
+        return base * min(hour_factor, 1.8)
 
-    def prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
+    def raw_prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
         sigma = self._get_sigma(hours)
-        
-        # Кап з config.py (змінювати там)
-        if hours <= 6.0:
-            max_cap = config.PROB_CAP_ABOVE_SHORT
-        elif hours <= 18.0:
-            max_cap = config.PROB_CAP_ABOVE_MID
-        else:
-            max_cap = config.PROB_CAP_ABOVE_LONG
 
         # Якщо є дані ансамблю (31 модель) — використовуємо ЕМПІРИЧНИЙ підрахунок
         if members and len(members) >= 5:
@@ -86,11 +81,12 @@ class WeatherForecast:
             mean = sum(members) / len(members)
             prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
             
-            # ✅ ЗМЕНШЕНО вагу емпірики 75% → 55% (запобігає переоцінці)
-            # Емпірика схильна до 100% коли всі 31 members > threshold (cast)
-            # Параметрична оцінка стійкіша до outliers
-            prob = prob_empirical * 0.55 + prob_parametric * 0.45
-            return max(0.01, min(max_cap, round(prob, 4)))
+            # ✅ v4 FIX: вагу емпірики знижено до 40% (з 55%)
+            # GFS 31 member — НЕ незалежні прогнози, вони корелюють.
+            # Емпірика дає хибну впевненість коли всі members > threshold.
+            # Параметрика з коректним sigma — надійніша.
+            prob = prob_empirical * 0.40 + prob_parametric * 0.60
+            return prob
         
         # Fallback до одного значення, якщо ансамбль недоступний
         tc = self.temp_low_c if is_low else self.temp_high_c
@@ -98,10 +94,33 @@ class WeatherForecast:
             return 0.50
         diff = tc - threshold_c
         prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
-        return max(0.01, min(max_cap, round(prob, 4)))
+        return prob
+
+    def prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
+        raw_p = self.raw_prob_above_temp_c(threshold_c, is_low, hours)
+        
+        # Кап з config.py (змінювати там)
+        if hours <= 6.0:
+            max_cap = config.PROB_CAP_ABOVE_SHORT
+        elif hours <= 18.0:
+            max_cap = config.PROB_CAP_ABOVE_MID
+        else:
+            max_cap = config.PROB_CAP_ABOVE_LONG
+
+        return max(0.01, min(max_cap, round(raw_p, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
-        return 1.0 - self.prob_above_temp_c(threshold_c, is_low, hours)
+        raw_p = 1.0 - self.raw_prob_above_temp_c(threshold_c, is_low, hours)
+        
+        # Кап з config.py (змінювати там)
+        if hours <= 6.0:
+            max_cap = config.PROB_CAP_ABOVE_SHORT
+        elif hours <= 18.0:
+            max_cap = config.PROB_CAP_ABOVE_MID
+        else:
+            max_cap = config.PROB_CAP_ABOVE_LONG
+
+        return max(0.01, min(max_cap, round(raw_p, 4)))
 
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
@@ -126,11 +145,13 @@ class WeatherForecast:
             p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
             prob_parametric = max(0.0, p_high - p_low)
             
-            # ✅ ЗМЕНШЕНО вагу емпірики 70% → 50% (запобігає переоцінці бакетів)
+            # ✅ v4 FIX: categorical discount 0.55 — корекція за кореляцію
+            # ensemble members і за реальну невизначеність прогнозу.
+            # Без дискаунту: our_prob=30-42% при реальному win rate 7%.
             if prob_empirical == 0.0:
-                prob = prob_parametric * 0.5
+                prob = prob_parametric * 0.35
             else:
-                prob = prob_empirical * 0.50 + prob_parametric * 0.50
+                prob = (prob_empirical * 0.35 + prob_parametric * 0.65) * 0.55
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення

@@ -18,10 +18,10 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 15  # 10 → 15: збільшено для підвищення капіталоемності та ефективності бота
-RESERVED_FAST_SLOTS: int = 2            # Резервуємо 2 слоти для угод <= 6 годин до резолву (достатньо, більшість — довгі 24-48h)
+MAX_ACTIVE_POSITIONS: int = 10  # ✅ v4 FIX: 15 → 10 (менше позицій = вища якість)
+RESERVED_FAST_SLOTS: int = 2            # Резервуємо 2 слоти для угод <= 6 годин до резолву
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
-MAX_POSITIONS_PER_CITY: int = 4          # Макс позицій на одне місто (розширено для ширшої сітки)
+MAX_POSITIONS_PER_CITY: int = 3          # ✅ v4 FIX: 4 → 3 (зменшено корельований ризик)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
 STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для дешевих YES (чекаємо фінального resolution)
 MAX_POSITION_USD: float = 5.0           # Абсолютний ліміт позиції в $
@@ -35,19 +35,19 @@ COLDMATH_MAX_SIZE_USD: float = 0.0
 
 # ── 🎣 СТРАТЕГІЯ "РЯТУВАЛЬНА СІТКА" (GRID YES) ───────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
-EXTREME_TAIL_MAX_ASK_YES: float = 0.12  # Купуємо YES, якщо він коштує 12¢ або дешевше
+EXTREME_TAIL_MAX_ASK_YES: float = 0.15  # ✅ v4 FIX: 0.12 → 0.15 (дозволяє above/below ринки)
 EXTREME_TAIL_MIN_ASK_YES: float = 0.05  # ✅ НОВЕ: не купуємо YES < 5¢ (фантомні ставки)
-EXTREME_TAIL_MAX_SIZE_USD: float = 4.0  # $2-$4 на кожен тікет у "сітці"
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.15 # ✅ 20% → 15% (знижено для більшого обсягу grid-входів, EV залишається позитивним)
+EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # ✅ v4 FIX: $4 → $3 (зменшено ризик на GRID)
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # ✅ v4 FIX: 15% → 20% (суворіший фільтр для GRID)
 
 # ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
 ENABLE_ADJACENT_GRID: bool = True
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.20    # ✅ 25% → 20% (знижено для більшої кількості adjacent-входів)
+ADJACENT_GRID_MIN_EDGE: float = 0.25    # ✅ v4 FIX: 20% → 25% (суворіший adjacent)
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.18            # ✅ 25% → 18% (знижено: 25% занадто жорстко, бот простоює з 87% idle капіталом)
+MIN_EDGE_ENTRY: float = 0.25            # ✅ v4 FIX: 18% → 25% (після корекції prob, реальні edge менші але точніші)
 MIN_EDGE_HOLD: float = 0.05             # ✅ 2% → 5% (раніше закриваємо при втраті edge)
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
@@ -92,16 +92,16 @@ MIN_DATA_POINTS_FALLBACK: int = 5
 WHALE_THRESHOLD_USD: float = 2000.0    
 
 # ── ЙМОВІРНІСНІ CAPS (ДЖЕРЕЛО ІСТИНИ) ─────────────────────────
-# УВАГА: змінювати тут — зміна поведінки в data_fetcher.py та edge_calculator.py
+# ✅ v4 FIX: знижено caps для запобігання переоцінених сигналів
 # prob_above_temp_c / prob_below_temp_c
-PROB_CAP_ABOVE_SHORT: float = 0.78    # hours <= 6.0
-PROB_CAP_ABOVE_MID: float = 0.72      # hours <= 18.0
-PROB_CAP_ABOVE_LONG: float = 0.68     # hours > 18.0
+PROB_CAP_ABOVE_SHORT: float = 0.72    # hours <= 6.0
+PROB_CAP_ABOVE_MID: float = 0.65      # hours <= 18.0
+PROB_CAP_ABOVE_LONG: float = 0.58     # hours > 18.0
 
 # prob_exact_temp_c / range / categorical
-PROB_CAP_EXACT_SHORT: float = 0.72    # hours <= 6.0
-PROB_CAP_EXACT_MID: float = 0.62      # hours <= 18.0
-PROB_CAP_EXACT_LONG: float = 0.55     # hours > 18.0
+PROB_CAP_EXACT_SHORT: float = 0.55    # hours <= 6.0
+PROB_CAP_EXACT_MID: float = 0.42      # hours <= 18.0
+PROB_CAP_EXACT_LONG: float = 0.35     # hours > 18.0
 
-# Максимальний edge (запобігає фантомним edge > 60%)
-MAX_EDGE_CAP: float = 0.60
+# Максимальний edge (запобігає фантомним edge > 45%)
+MAX_EDGE_CAP: float = 0.45            # ✅ v4 FIX: 0.60 → 0.45 (суворіший кап)

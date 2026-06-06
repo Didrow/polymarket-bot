@@ -384,7 +384,30 @@ def main():
     removed = startup_cleanup()
     if removed:
         logger.warning(f"🧹 Очищено {len(removed)} застарілих/фантомних позицій при старті")
+        for pos in removed:
+            safeguard.record_trade_close(pos.pnl_usd, pos.size_usd, condition_id=pos.condition_id)
+            from safeguards import log_trade_to_pg
+            log_trade_to_pg({
+                "cycle": 0,
+                "action": "CLOSE",
+                "direction": pos.direction,
+                "market_question": pos.question,
+                "city": pos.city,
+                "forecast_c": 0.0,
+                "threshold_c": 0.0,
+                "our_prob": 0.0,
+                "market_prob": 0.0,
+                "edge": 0.0,
+                "edge_at_entry": pos.edge_at_entry,
+                "size_usd": pos.size_usd,
+                "entry_price": pos.entry_price,
+                "pnl_usd": pos.pnl_usd,
+                "status": "WIN" if pos.pnl_usd > 0 else "LOSS",
+                "strategy": "STARTUP_CLEANUP",
+                "dry_run": config.DRY_RUN
+            })
         safeguard.save_positions(_trader._active_positions)
+        safeguard.save_state()
         logger.info(f"💾 Стан збережено: {len(_trader._active_positions)} активних позицій")
 
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
