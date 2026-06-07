@@ -36,7 +36,7 @@ COLDMATH_MAX_SIZE_USD: float = 0.0
 # ── 🎣 СТРАТЕГІЯ "РЯТУВАЛЬНА СІТКА" (GRID YES) ───────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.15  # ✅ v4 FIX: 0.12 → 0.15 (дозволяє above/below ринки)
-EXTREME_TAIL_MIN_ASK_YES: float = 0.05  # ✅ НОВЕ: не купуємо YES < 5¢ (фантомні ставки)
+EXTREME_TAIL_MIN_ASK_YES: float = 0.01  # ✅ v5 FIX: 0.05→0.01 (дозволяємо з 1¢, захист через VOL+EDGE)
 EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # ✅ v4 FIX: $4 → $3 (зменшено ризик на GRID)
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # ✅ v4 FIX: 15% → 20% (суворіший фільтр для GRID)
 
@@ -92,16 +92,16 @@ MIN_DATA_POINTS_FALLBACK: int = 5
 WHALE_THRESHOLD_USD: float = 2000.0    
 
 # ── ЙМОВІРНІСНІ CAPS (ДЖЕРЕЛО ІСТИНИ) ─────────────────────────
-# ✅ v4 FIX: знижено caps для запобігання переоцінених сигналів
+# ✅ v5 FIX: збалансовано caps за горизонтом — коротші прогнози точніші
 # prob_above_temp_c / prob_below_temp_c
-PROB_CAP_ABOVE_SHORT: float = 0.72    # hours <= 6.0
-PROB_CAP_ABOVE_MID: float = 0.65      # hours <= 18.0
-PROB_CAP_ABOVE_LONG: float = 0.58     # hours > 18.0
+PROB_CAP_ABOVE_SHORT: float = 0.78    # hours <= 6.0  (v5: 0.72→0.78)
+PROB_CAP_ABOVE_MID:   float = 0.72    # hours <= 18.0 (v5: 0.65→0.72)
+PROB_CAP_ABOVE_LONG:  float = 0.65    # hours > 18.0  (v5: 0.58→0.65)
 
 # prob_exact_temp_c / range / categorical
-PROB_CAP_EXACT_SHORT: float = 0.55    # hours <= 6.0
-PROB_CAP_EXACT_MID: float = 0.42      # hours <= 18.0
-PROB_CAP_EXACT_LONG: float = 0.35     # hours > 18.0
+PROB_CAP_EXACT_SHORT: float = 0.62    # hours <= 6.0  (v5: 0.55→0.62)
+PROB_CAP_EXACT_MID:   float = 0.52    # hours <= 18.0 (v5: 0.42→0.52)
+PROB_CAP_EXACT_LONG:  float = 0.42    # hours > 18.0  (v5: 0.35→0.42)
 
 # Максимальний edge (запобігає фантомним edge > 45%)
 MAX_EDGE_CAP: float = 0.45            # ✅ v4 FIX: 0.60 → 0.45 (суворіший кап)

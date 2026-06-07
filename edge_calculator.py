@@ -272,12 +272,24 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C нижче порогу {threshold_c:.0f}°C")
             _dist_ok = False
     
+    # ✅ v5 FIX: для дуже дешевих ринків (1-5¢) абсолютний edge 20% нереалістичний
+    # Замість цього: або абсолютний edge >= 10%, або our_prob >= 3× ціни ринку
+    # London 18°C: ask=0.018, our_prob=0.11 → ratio=6.1x → дуже вигідний R:R
+    if market_prob <= 0.05:
+        # Дешеві хвости: ratio-based edge (R:R критерій)
+        _grid_edge_ok = (our_prob >= market_prob * 3.0 and eff_edge >= 0.05)
+        _grid_min_prob = 0.05  # Мінімум 5% шанс для дуже дешевих
+    else:
+        # Стандартні GRID 5-15¢: абсолютний edge
+        _grid_edge_ok = (eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES)
+        _grid_min_prob = 0.15  # Мінімум 15% шанс
+
     is_grid_yes = (
         _dist_ok                        # Ціль не далі 1.5°C від прогнозу (або above/below)
         and market_prob >= GRID_MIN_PRICE
         and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
-        and our_prob >= 0.15            # ✅ v4 FIX: 0.08 → 0.15 (не купуємо <15% шанс)
-        and eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES
+        and our_prob >= _grid_min_prob
+        and _grid_edge_ok
     )
 
     # 🎯 СТРАТЕГІЯ 2: SNIPER YES (Основний прогноз або діапазони)
@@ -309,7 +321,15 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         size_usd = max(config.MIN_POSITION_USD, config.BASE_POSITION_USD * 0.7)
         reason = f"💎 VALUE YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
-        # Ми ПОВНІСТЮ ігноруємо BUY_NO в цій версії
+        # ✅ v5 FIX: діагностичний лог для ринків з позитивним edge, що не пройшли фільтри
+        if eff_edge >= 0.10 and our_prob >= 0.10:
+            logger.info(
+                f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
+                f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
+                f"grid={_dist_ok and market_prob >= GRID_MIN_PRICE and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES} | "
+                f"sniper={market_prob > config.EXTREME_TAIL_MAX_ASK_YES and eff_edge >= config.MIN_EDGE_ENTRY} | "
+                f"dist_ok={_dist_ok}"
+            )
         return None
 
     return EdgeResult(
@@ -346,9 +366,15 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             if market.detected_city not in config.CITY_WHITELIST:
                 skip_city += 1
                 continue
-        # Лічильник для спреду
+        # ✅ v5 FIX: spread filter адаптований під GRID YES
+        # Для tail-ринків (ask ≤ 15¢) bid=0 — це норма, spread = ask
+        # Тому для них дозволяємо spread до ask (тобто весь spread)
         spread = market.best_ask_yes - market.best_bid_yes
-        max_spread = 0.10 if market.best_ask_yes <= 0.15 else 0.05
+        if market.best_ask_yes <= 0.15:
+            # GRID-eligible: дозволяємо spread = ask (bid=0 нормально)
+            max_spread = max(0.10, market.best_ask_yes)
+        else:
+            max_spread = 0.05
         if spread > max_spread:
             skip_spread += 1
             continue
