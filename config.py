@@ -38,16 +38,16 @@ ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.15  # ✅ v4 FIX: 0.12 → 0.15 (дозволяє above/below ринки)
 EXTREME_TAIL_MIN_ASK_YES: float = 0.01  # ✅ v5 FIX: 0.05→0.01 (дозволяємо з 1¢, захист через VOL+EDGE)
 EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # ✅ v4 FIX: $4 → $3 (зменшено ризик на GRID)
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.20 # ✅ v4 FIX: 15% → 20% (суворіший фільтр для GRID)
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.12 # ✅ v6: 0.20 → 0.12 (дозволяємо більше якісних GRID угод)
 
 # ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
 ENABLE_ADJACENT_GRID: bool = True
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.25    # ✅ v4 FIX: 20% → 25% (суворіший adjacent)
+ADJACENT_GRID_MIN_EDGE: float = 0.18    # ✅ v6: 0.25 → 0.18 (оптимальний поріг для сусідніх бакетів)
 ADJACENT_GRID_MAX_ASK: float = 0.20
 
 # ── СТАНДАРТНИЙ EDGE (Для Sniper YES угод) ───────────────────
-MIN_EDGE_ENTRY: float = 0.25            # ✅ v4 FIX: 18% → 25% (після корекції prob, реальні edge менші але точніші)
+MIN_EDGE_ENTRY: float = 0.18            # ✅ v6: 0.25 → 0.18 (дозволяє відкривати SNIPER YES при надійному edge)
 MIN_EDGE_HOLD: float = 0.05             # ✅ 2% → 5% (раніше закриваємо при втраті edge)
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────

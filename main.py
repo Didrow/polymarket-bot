@@ -270,6 +270,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     _max_slow = config.MAX_ACTIVE_POSITIONS - getattr(config, 'RESERVED_FAST_SLOTS', 0)
 
     opened_this_cycle = 0
+    logged_slow_slots_full = False
     for edge_result in tradeable:
         if opened_this_cycle >= 3:
             break
@@ -282,7 +283,9 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 break
         else:
             if slow_positions_count >= _max_slow:
-                logger.info(f"📊 Слоти для довгих позицій заповнені ({slow_positions_count}/{_max_slow}). Резервуємо {getattr(config, 'RESERVED_FAST_SLOTS', 0)} слотів під швидкі угоди.")
+                if not logged_slow_slots_full:
+                    logger.info(f"📊 Слоти для довгих позицій заповнені ({slow_positions_count}/{_max_slow}). Резервуємо {getattr(config, 'RESERVED_FAST_SLOTS', 0)} слотів під швидкі угоди.")
+                    logged_slow_slots_full = True
                 continue
 
         norm_q = _normalize_q(edge_result.market.question)
