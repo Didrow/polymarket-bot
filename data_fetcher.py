@@ -50,6 +50,16 @@ class WeatherForecast:
     temp_high_members: List[float] = field(default_factory=list)
     temp_low_members: List[float] = field(default_factory=list)
 
+    def _get_adjusted_members(self, is_low: bool = False) -> List[float]:
+        """Повертає зміщені члени ансамблю, середнє значення яких дорівнює консенсусному."""
+        members = self.temp_low_members if is_low else self.temp_high_members
+        if not members or len(members) < 5:
+            return []
+        consensus_mean = self.temp_low_c if is_low else self.temp_high_c
+        gfs_mean = sum(members) / len(members)
+        bias = consensus_mean - gfs_mean
+        return [m + bias for m in members]
+
     def _get_sigma(self, hours: float = 24.0) -> float:
         """Динамічний sigma залежно від міста та горизонту прогнозу."""
         base = {
@@ -65,7 +75,7 @@ class WeatherForecast:
         return base * min(hour_factor, 1.5)
 
     def raw_prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
-        members = self.temp_low_members if is_low else self.temp_high_members
+        members = self._get_adjusted_members(is_low)
         sigma = self._get_sigma(hours)
 
         # Якщо є дані ансамблю (31 модель) — використовуємо ЕМПІРИЧНИЙ підрахунок
@@ -75,7 +85,7 @@ class WeatherForecast:
             prob_empirical = count_above / len(members)
             
             # Параметрична оцінка (Gaussian через erf)
-            mean = sum(members) / len(members)
+            mean = self.temp_low_c if is_low else self.temp_high_c
             prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
             
             # ✅ v4 FIX: вагу емпірики знижено до 40% (з 55%)
@@ -120,7 +130,7 @@ class WeatherForecast:
         return max(0.01, min(max_cap, round(raw_p, 4)))
 
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5, hours: float = 24.0) -> float:
-        members = self.temp_low_members if is_low else self.temp_high_members
+        members = self._get_adjusted_members(is_low)
 
         # Кап з config.py (змінювати там)
         if hours <= 6.0:
@@ -137,7 +147,7 @@ class WeatherForecast:
             
             # Параметричне розмиття через середнє ансамблю
             sigma = self._get_sigma(hours)
-            mean = sum(members) / len(members)
+            mean = self.temp_low_c if is_low else self.temp_high_c
             p_high = 0.5 * (1 + math.erf(((threshold_c + half_width) - mean) / (sigma * math.sqrt(2))))
             p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
             prob_parametric = max(0.0, p_high - p_low)

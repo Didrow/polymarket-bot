@@ -145,15 +145,8 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     is_low = 'lowest' in market.question.lower()
 
     if kind == "range":
-        # БАГ-ФІКС: раніше використовувався raw count з ensemble members,
-        # який давав нереалістично високу prob (62% для Miami 82-83°F при merged 27.5°C).
-        # ВИПРАВЛЕННЯ: Gaussian CDF з merged forecast як mean + sigma, що росте з hours.
-        if is_low:
-            mean_c = forecast.temp_low_c
-            members = forecast.temp_low_members
-        else:
-            mean_c = forecast.temp_high_c
-            members = forecast.temp_high_members
+        mean_c = forecast.temp_low_c if is_low else forecast.temp_high_c
+        members = forecast._get_adjusted_members(is_low)
 
         if unit == 'F':
             # Конвертуємо F-межі в C для узгодженого Gaussian
@@ -173,7 +166,7 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
         # Gaussian CDF (узгоджена з prob_above_temp_c / prob_exact_temp_c)
         p_high = 0.5 * (1 + math.erf((t_max_c - mean_c) / (sigma * math.sqrt(2))))
         p_low  = 0.5 * (1 + math.erf((t_min_c - mean_c) / (sigma * math.sqrt(2))))
-        p = p_high - p_low
+        prob_parametric = max(0.0, p_high - p_low)
 
         # Кап для range (з config.py, спільний з prob_exact_temp_c)
         if hours <= 6.0:
@@ -182,6 +175,18 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
             _max_r = config.PROB_CAP_EXACT_MID
         else:
             _max_r = config.PROB_CAP_EXACT_LONG
+
+        # Застосовуємо такий самий дискаунт як і для prob_exact_temp_c
+        if members and len(members) >= 5:
+            count_in = sum(1 for m in members if t_min_c <= m < t_max_c)
+            prob_empirical = count_in / len(members)
+            if prob_empirical == 0.0:
+                p = prob_parametric * 0.35
+            else:
+                p = (prob_empirical * 0.35 + prob_parametric * 0.65) * 0.55
+        else:
+            p = prob_parametric * 0.55
+
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
     # Звичайний одинарний поріг
@@ -257,7 +262,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Фільтр відстані для categorical ринків.
     # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
     _dist_ok = True
-    if "categorical" in kind_label and threshold_c is not None and fc_temp is not None:
+    if ("categorical" in kind_label or "range" in kind_label) and threshold_c is not None and fc_temp is not None:
         # ✅ v4 FIX: зменшено distance filter з 2.5°C до 1.5°C
         # Купівля бакетів на відстані 2.5°C мала мізерний шанс (~5%)
         _, _, _, unit = _parse_range_or_threshold(market.question)
