@@ -52,20 +52,17 @@ class WeatherForecast:
 
     def _get_sigma(self, hours: float = 24.0) -> float:
         """Динамічний sigma залежно від міста та горизонту прогнозу."""
-        # ✅ v4 FIX: sigma збільшено на ~70% для відповідності реальній помилці
-        # прогнозу (2-4°C на горизонті 20h+). Старі значення (1.0-2.2)
-        # систематично переоцінювали prob_exact, що призводило до 6.7% win rate.
         base = {
-            "Lucknow": 1.8, "Miami": 1.8, "Singapore": 1.5, "Dubai": 1.6,
-            "Cape Town": 2.2, "Sao Paulo": 2.0, "Sydney": 2.3,
-            "Buenos Aires": 2.4, "London": 2.5, "Paris": 2.6,
-            "Tokyo": 2.6, "Berlin": 2.8, "Busan": 2.7, "Munich": 2.9,
-            "Seoul": 3.0, "NYC": 3.0, "Seattle": 2.3, "Los Angeles": 2.0,
-            "Dallas": 3.3, "Chicago": 3.5,
-        }.get(self.city, 2.3)
+            "Lucknow": 0.9, "Miami": 0.9, "Singapore": 0.8, "Dubai": 0.8,
+            "Cape Town": 1.1, "Sao Paulo": 1.0, "Sydney": 1.2,
+            "Buenos Aires": 1.2, "London": 1.3, "Paris": 1.3,
+            "Tokyo": 1.3, "Berlin": 1.4, "Busan": 1.4, "Munich": 1.5,
+            "Seoul": 1.5, "NYC": 1.5, "Seattle": 1.2, "Los Angeles": 1.0,
+            "Dallas": 1.6, "Chicago": 1.7,
+        }.get(self.city, 1.2)
         # Невизначеність зростає з горизонтом прогнозу
-        hour_factor = 1.0 + 0.025 * max(0, hours - 6)
-        return base * min(hour_factor, 1.8)
+        hour_factor = 1.0 + 0.015 * max(0, hours - 6)
+        return base * min(hour_factor, 1.5)
 
     def raw_prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         members = self.temp_low_members if is_low else self.temp_high_members
