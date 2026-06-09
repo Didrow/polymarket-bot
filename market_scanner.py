@@ -341,3 +341,70 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
 
     _market_cache[cache_key] = (time.time(), all_markets)
     return all_markets
+
+
+def parse_date_from_question(question: str, end_date: datetime) -> Optional[datetime.date]:
+    """
+    Парсить дату події безпосередньо із запитання ринку.
+    Приклад: 'highest temperature in Seoul ... on June 11?' -> June 11
+    """
+    q_lower = question.lower()
+    months_pattern = r"(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)"
+    
+    # Шаблон 1: on [Month] [Day]
+    m1 = re.search(r'on\s+' + months_pattern + r'\s+(\d+)', q_lower)
+    if m1:
+        month_name = m1.group(1)[:3]
+        months = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+        }
+        month_val = months.get(month_name)
+        day_val = int(m1.group(2))
+        if month_val and 1 <= day_val <= 31:
+            try:
+                return datetime(end_date.year, month_val, day_val).date()
+            except ValueError:
+                pass
+            
+    # Шаблон 2: on [Day] [Month]
+    m2 = re.search(r'on\s+(\d+)\s+' + months_pattern, q_lower)
+    if m2:
+        day_val = int(m2.group(1))
+        month_name = m2.group(2)[:3]
+        months = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+        }
+        month_val = months.get(month_name)
+        if month_val and 1 <= day_val <= 31:
+            try:
+                return datetime(end_date.year, month_val, day_val).date()
+            except ValueError:
+                pass
+            
+    return None
+
+
+def get_target_date(question: str, end_date: datetime, city: str) -> datetime.date:
+    """
+    Повертає цільову дату події з урахуванням зміщення часових поясів або парсингу запитання.
+    """
+    parsed = parse_date_from_question(question, end_date)
+    if parsed:
+        return parsed
+    
+    # Fallback зміщення часових поясів
+    offsets = {
+        "NYC": -4, "New York": -4, "Chicago": -5, "Los Angeles": -7, "San Francisco": -7,
+        "Miami": -4, "Dallas": -5, "Seattle": -7, "Boston": -4, "Denver": -6, "Atlanta": -4,
+        "London": 1, "Paris": 2, "Berlin": 2, "Munich": 2, "Rome": 2, "Madrid": 2, "Amsterdam": 2,
+        "Tokyo": 9, "Seoul": 9, "Busan": 9, "Lucknow": 5.5, "Singapore": 8, "Dubai": 4, "Bangkok": 7,
+        "Sydney": 10, "Buenos Aires": -3, "Cape Town": 2, "Sao Paulo": -3, "Moscow": 3, "Lagos": 1,
+        "Wellington": 12,
+    }
+    offset = offsets.get(city, 0)
+    local_end = end_date + timedelta(hours=offset)
+    # Віднімаємо 3 години, щоб гарантовано потрапити на день події
+    return (local_end - timedelta(hours=3)).date()
+

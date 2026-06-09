@@ -157,12 +157,13 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
 
     # DRY-RUN fast path: чекаємо повного завершення доби (02:00 UTC наступного дня)
     if config.DRY_RUN and position and position.end_date:
+        from market_scanner import get_target_date
         now = datetime.now(timezone.utc)
-        target_date = position.end_date.date()
+        target_date = get_target_date(position.question, position.end_date, position.city)
         day_completed = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc) + timedelta(days=1, hours=2)
         if now > day_completed:
             from data_fetcher import fetch_historical_extreme
-            market_date = position.end_date.date()
+            market_date = target_date
             extremes = fetch_historical_extreme(position.city, market_date)
             # Fallback: якщо архівний API ще не має даних, спробувати поточні спостереження
             if extremes is None:
@@ -454,27 +455,31 @@ def cleanup_stale_positions() -> List[Position]:
     for cid, pos in list(_active_positions.items()):
         is_weather = pos.market_type in ("temperature", "rain", "snow")
 
+        # Дозволяємо ринкам висіти до 48 годин після закінчення
         market_ended = (
-            (pos.end_date and now > pos.end_date + timedelta(hours=2))
+            (pos.end_date and now > pos.end_date + timedelta(hours=48))
         )
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        should_cleanup = market_ended or (not is_weather and age_hours > 24)
+        should_cleanup = market_ended or (not is_weather and age_hours > 48)
         if should_cleanup:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
                 pos.resolve(resolved)
                 logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'} (при cleanup): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
+                del _active_positions[cid]
+                _recently_closed[cid] = now
+                removed.append(pos)
             else:
-                if config.DRY_RUN and age_hours > 12:
+                if config.DRY_RUN and age_hours > 48:
                     pos.status = "EXPIRED"
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
-                    logger.warning(f"⏰ DRY-RUN Expired (stale 12h): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
-            del _active_positions[cid]
-            _recently_closed[cid] = now
-            removed.append(pos)
+                    logger.warning(f"⏰ DRY-RUN Expired (stale 48h): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
+                    del _active_positions[cid]
+                    _recently_closed[cid] = now
+                    removed.append(pos)
     return removed
 
 
@@ -518,7 +523,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             _recently_closed[cid] = now
             continue
 
-        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=12):
+        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=48):
             resolved_yes = None
             try:
                 r = requests.get(
@@ -544,7 +549,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
             logger.warning(
-                f"⏰ Force-close >24h after end_date: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
+                f"⏰ Force-close >48h after end_date: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
             )
             closed.append(pos)
             del _active_positions[cid]

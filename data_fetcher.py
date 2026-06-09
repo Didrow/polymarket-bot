@@ -333,14 +333,17 @@ def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float,
 # 1. ENSEMBLE API (ГОЛОВНЕ ДЖЕРЕЛО ДЛЯ GRID YES)
 # ─────────────────────────────────────────────
 
-def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
+def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
     """Отримує 31 варіант погоди для створення ймовірнісної сітки."""
     coords = _get_coords(city, prefer_airport=True)
     if not coords:
         return None
 
-    target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-    day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+    if target_date:
+        day_index = min(max((target_date - datetime.now(timezone.utc).date()).days, 0), 4)
+    else:
+        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
 
     key = f"ensemble_{city}_{day_index}"
     cached = _cache_get(key)
@@ -401,15 +404,20 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0) -> O
 # 2. NOAA/NWS (США)
 # ─────────────────────────────────────────────
 
-def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
+def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
     if city not in US_CITIES:
         return None
     coords = _get_coords(city, prefer_airport=True)
     if not coords:
         return None
 
-    target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-    day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+    if target_date:
+        day_index = min(max((target_date - datetime.now(timezone.utc).date()).days, 0), 4)
+        target_date_obj = target_date
+    else:
+        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+        target_date_obj = target_dt.date()
 
     key = f"noaa_{city}_{day_index}"
     cached = _cache_get(key)
@@ -432,7 +440,7 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0) -> Optiona
         periods = r2.json()["properties"]["periods"]
 
         # Знаходимо періоди для цільової дати
-        target_date = target_dt.date()
+        target_date = target_date_obj
         high_f, low_f = None, None
         rain_prob = 0.0
 
@@ -541,12 +549,15 @@ def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[W
 # 4. Open-Meteo Single (GFS / ECMWF)
 # ─────────────────────────────────────────────
 
-def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
+def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
     coords = _get_coords(city, prefer_airport=True)
     if not coords: return None
 
-    target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-    day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+    if target_date:
+        day_index = min(max((target_date - datetime.now(timezone.utc).date()).days, 0), 4)
+    else:
+        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
+        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
 
     key = f"om_{model}_{city}_{day_index}"
     cached = _cache_get(key)
@@ -778,14 +789,14 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
 # 6. CONSENSUS (ЗЛИТТЯ ПРОГНОЗІВ З ПРІОРИТЕТОМ METAR ДЛЯ БЛИЗЬКИХ ГОДИН)
 # ─────────────────────────────────────────────
 
-def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[WeatherForecast]:
+def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
     """
     Повертає консенсусний прогноз для заданого міста.
     Якщо hours_to_resolution <= 12, METAR отримує дуже високу вагу (ColdMath стиль).
     """
     # Бакет hours для кешу: ≤12, ≤24, >24
     _h_bucket = "short" if hours_to_resolution <= 12 else ("mid" if hours_to_resolution <= 24 else "long")
-    key = f"consensus_{city}_{_h_bucket}"
+    key = f"consensus_{city}_{_h_bucket}_{target_date or ''}"
     cached = _cache_get(key)
     if cached:
         return cached
@@ -796,11 +807,11 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0) -> Optional[
     metar_fc = fetch_metar(city)
     
     # 2. Отримуємо прогнози від інших джерел (ансамбль, NOAA, NASA, Open-Meteo)
-    fc_ensemble = fetch_open_meteo_ensemble(city, hours_to_resolution)
-    fc_noaa = fetch_noaa_forecast(city, hours_to_resolution)
+    fc_ensemble = fetch_open_meteo_ensemble(city, hours_to_resolution, target_date)
+    fc_noaa = fetch_noaa_forecast(city, hours_to_resolution, target_date)
     fc_nasa = fetch_nasa_power(city, hours_to_resolution)
-    fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution)
-    fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution)
+    fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution, target_date)
+    fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution, target_date)
 
     # 3. Визначаємо ваги залежно від часу до resolution (Тільки моделі, без METAR!)
     if hours_to_resolution <= 12.0:

@@ -230,9 +230,9 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
-    # Спред вже перевірено в scan_all_edges() — не дублюємо
-
-    forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution)
+    from market_scanner import get_target_date
+    t_date = get_target_date(market.question, market.end_date, city)
+    forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=t_date)
     if not forecast:
         return None
 
@@ -414,9 +414,10 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                 if val_min is None: continue
                 
                 adj_threshold = _f_to_c(val_min) if unit == 'F' else val_min
-                # Перевірка: чи є це сусіднім бакетом (різниця не більше 1.5°C)
                 if 0 < abs(adj_threshold - threshold) <= 1.5:
-                    forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution)
+                    from market_scanner import get_target_date
+                    adj_t_date = get_target_date(market.question, market.end_date, city)
+                    forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=adj_t_date)
                     if not forecast: continue
                     
                     our_prob, adj_th_c, kind_label = estimate_market_probability(market, forecast)
