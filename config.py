@@ -19,7 +19,7 @@ MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
 MAX_ACTIVE_POSITIONS: int = 12  # ✅ v4 FIX: 10 → 12 (розширюємо слоти для запобігання блокуванню)
-RESERVED_FAST_SLOTS: int = 2            # Резервуємо 2 слоти для угод <= 6 годин до резолву
+RESERVED_FAST_SLOTS: int = 0            # Резервуємо 0 слоти для угод <= 6 годин до резолву 
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
 MAX_POSITIONS_PER_CITY: int = 3          # ✅ v4 FIX: 4 → 3 (зменшено корельований ризик)
 MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
