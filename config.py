@@ -18,7 +18,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.05          # Максимум 5% ($5) на ОДИН контракт
 MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
 BASE_POSITION_USD: float = 3.0          # Базовий розмір ставки (не використовується при compound)
-MAX_ACTIVE_POSITIONS: int = 12  # ✅ v4 FIX: 10 → 12 (розширюємо слоти для запобігання блокуванню)
+MAX_ACTIVE_POSITIONS: int = 8   # не 12, не 10 — а 8
 RESERVED_FAST_SLOTS: int = 0            # Резервуємо 0 слоти для угод <= 6 годин до резолву 
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
 MAX_POSITIONS_PER_CITY: int = 3          # ✅ v4 FIX: 4 → 3 (зменшено корельований ризик)
@@ -36,7 +36,7 @@ COLDMATH_MAX_SIZE_USD: float = 0.0
 # ── 🎣 СТРАТЕГІЯ "РЯТУВАЛЬНА СІТКА" (GRID YES) ───────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.15  # ✅ v4 FIX: 0.12 → 0.15 (дозволяє above/below ринки)
-EXTREME_TAIL_MIN_ASK_YES: float = 0.01  # ✅ v5 FIX: 0.05→0.01 (дозволяємо з 1¢, захист через VOL+EDGE)
+EXTREME_TAIL_MIN_ASK_YES: float = 0.001  # було 0.01
 EXTREME_TAIL_MAX_SIZE_USD: float = 3.0  # ✅ v4 FIX: $4 → $3 (зменшено ризик на GRID)
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.12 # ✅ v6: 0.20 → 0.12 (дозволяємо більше якісних GRID угод)
 

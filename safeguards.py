@@ -429,6 +429,10 @@ class SafeguardManager:
                     except Exception:
                         pass
             
+            if len(restored) > config.MAX_ACTIVE_POSITIONS:
+                sorted_items = sorted(restored.items(), key=lambda item: item[1].entry_time, reverse=True)
+                restored = dict(sorted_items[:config.MAX_ACTIVE_POSITIONS])
+            
             if restored:
                 logger.info(f"♻️  Відновлено {len(restored)} позицій після рестарту (з end_date та оригінальним entry_time)")
         except Exception as e:

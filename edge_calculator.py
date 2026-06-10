@@ -280,14 +280,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # ✅ v5 FIX: для дуже дешевих ринків (1-5¢) абсолютний edge 20% нереалістичний
     # Замість цього: або абсолютний edge >= 10%, або our_prob >= 3× ціни ринку
     # London 18°C: ask=0.018, our_prob=0.11 → ratio=6.1x → дуже вигідний R:R
-    if market_prob <= 0.05:
-        # Дешеві хвости: ratio-based edge (R:R критерій)
-        _grid_edge_ok = (our_prob >= market_prob * 3.0 and eff_edge >= 0.05)
-        _grid_min_prob = 0.05  # Мінімум 5% шанс для дуже дешевих
-    else:
-        # Стандартні GRID 5-15¢: абсолютний edge
-        _grid_edge_ok = (eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES)
-        _grid_min_prob = 0.15  # Мінімум 15% шанс
+    _grid_edge_ok = (eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES)
+    _grid_min_prob = 0.12
 
     is_grid_yes = (
         _dist_ok                        # Ціль не далі 1.5°C від прогнозу (або above/below)
