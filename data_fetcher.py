@@ -88,11 +88,11 @@ class WeatherForecast:
             mean = self.temp_low_c if is_low else self.temp_high_c
             prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
             
-            # ✅ v4 FIX: вагу емпірики знижено до 40% (з 55%)
-            # GFS 31 member — НЕ незалежні прогнози, вони корелюють.
-            # Емпірика дає хибну впевненість коли всі members > threshold.
-            # Параметрика з коректним sigma — надійніша.
-            prob = prob_empirical * 0.40 + prob_parametric * 0.60
+            # ✅ v9 FIX: вагу емпірики знижено до 20% (з 40%)
+            # GFS 31 member — НЕ незалежні прогнози, кореляція ~0.8-0.9.
+            # Реальний win rate 0% з 10+ trades показав що ми переоцінюємо ймовірності.
+            # Параметрика з коректним sigma — надійніша за емпіричний підрахунок.
+            prob = prob_empirical * 0.20 + prob_parametric * 0.80
             return prob
         
         # Fallback до одного значення, якщо ансамбль недоступний
@@ -152,13 +152,14 @@ class WeatherForecast:
             p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
             prob_parametric = max(0.0, p_high - p_low)
             
-            # ✅ v4 FIX: categorical discount 0.55 — корекція за кореляцію
-            # ensemble members і за реальну невизначеність прогнозу.
-            # Без дискаунту: our_prob=30-42% при реальному win rate 7%.
+            # ✅ v9 FIX: categorical discount 0.30 (був 0.55) — РІЗКЕ зниження!
+            # Факт: 0% win rate з 10+ trades при our_prob=15-29% → ми завищували в 3-5x.
+            # GFS ensemble members СИЛЬНО корелюють (одне сімейство моделей).
+            # Polymarket market makers вже використовують ті самі моделі + calibration.
             if prob_empirical == 0.0:
-                prob = prob_parametric * 0.35
+                prob = prob_parametric * 0.15  # ✅ v9: 0.35→0.15 (нуль members = дуже низький шанс)
             else:
-                prob = (prob_empirical * 0.35 + prob_parametric * 0.65) * 0.55
+                prob = (prob_empirical * 0.20 + prob_parametric * 0.80) * 0.30  # ✅ v9: 0.35/0.65*0.55 → 0.20/0.80*0.30
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення

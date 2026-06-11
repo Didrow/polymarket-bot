@@ -181,11 +181,11 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
             count_in = sum(1 for m in members if t_min_c <= m < t_max_c)
             prob_empirical = count_in / len(members)
             if prob_empirical == 0.0:
-                p = prob_parametric * 0.35
+                p = prob_parametric * 0.15  # ✅ v9: 0.35→0.15
             else:
-                p = (prob_empirical * 0.35 + prob_parametric * 0.65) * 0.55
+                p = (prob_empirical * 0.20 + prob_parametric * 0.80) * 0.30  # ✅ v9: 0.35/0.65*0.55 → 0.20/0.80*0.30
         else:
-            p = prob_parametric * 0.55
+            p = prob_parametric * 0.30  # ✅ v9: 0.55→0.30
 
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
@@ -256,76 +256,51 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Cap edge щоб запобігти хибним сигналам від METAR artifacts
     eff_edge = min(raw_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
-    # 🎣 СТРАТЕГІЯ 1: GRID YES (Ловимо дешеві хвости)
-    GRID_MIN_PRICE = getattr(config, 'EXTREME_TAIL_MIN_ASK_YES', 0.05)
+    # 🎯 СТРАТЕГІЯ: PEAK SNIPER (купуємо найвірогідніший бакет за 10-55¢)
+    GRID_MIN_PRICE = getattr(config, 'EXTREME_TAIL_MIN_ASK_YES', 0.10)
     
     # Фільтр відстані для categorical ринків.
-    # Використовуємо is not None для коректної обробки 0°C та від'ємних температур.
     _dist_ok = True
     if ("categorical" in kind_label or "range" in kind_label) and threshold_c is not None and fc_temp is not None:
-        # ✅ v4 FIX: зменшено distance filter з 2.5°C до 1.5°C
-        # Купівля бакетів на відстані 2.5°C мала мізерний шанс (~5%)
         _, _, _, unit = _parse_range_or_threshold(market.question)
-        max_dist = 2.0 if unit == 'F' else 1.5
+        # ✅ v9: зменшено до 1.0°C / 1.5°F — тільки піковий бакет навколо прогнозу!
+        max_dist = 1.5 if unit == 'F' else 1.0
         _dist_ok = abs(fc_temp - threshold_c) <= max_dist
         if not _dist_ok:
             logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >{max_dist}°C ({unit})")
-        # Не купуємо categorical YES, якщо прогноз НИЖЧЕ порогу
-        # Polymarket categorical бакет = [threshold-0.5, threshold+0.5)
-        # Якщо прогноз нижче бакета — майже гарантований програш
-        if _dist_ok and fc_temp < threshold_c - 0.8:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C нижче порогу {threshold_c:.0f}°C")
-            _dist_ok = False
     
-    # ✅ v5 FIX: для дуже дешевих ринків (1-5¢) абсолютний edge 20% нереалістичний
-    # Замість цього: або абсолютний edge >= 10%, або our_prob >= 3× ціни ринку
-    # London 18°C: ask=0.018, our_prob=0.11 → ratio=6.1x → дуже вигідний R:R
-    _grid_edge_ok = (eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES)
-    _grid_min_prob = 0.12
+    # PEAK SNIPER: купуємо ліквідні пікові бакети
+    _peak_edge_ok = (eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES)
+    _peak_min_prob = 0.08  # ✅ v9: мінімальна ймовірність 8%
 
-    is_grid_yes = (
-        _dist_ok                        # Ціль не далі 1.5°C від прогнозу (або above/below)
-        and market_prob >= GRID_MIN_PRICE
-        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES
-        and our_prob >= _grid_min_prob
-        and _grid_edge_ok
+    is_peak_yes = (
+        _dist_ok                        # Ціль близько до прогнозу (±1°C)
+        and market_prob >= GRID_MIN_PRICE  # НЕ дешевше 10¢!
+        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES  # Не дорожче 55¢
+        and our_prob >= _peak_min_prob
+        and _peak_edge_ok
     )
 
-    # 🎯 СТРАТЕГІЯ 2: SNIPER YES (Основний прогноз або діапазони)
+    # 🎯 SNIPER YES: основний прогноз above/below
     is_sniper_yes = (
         eff_edge >= config.MIN_EDGE_ENTRY 
         and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
-        and our_prob >= 0.25           # ✅ v4 FIX: мінімальна prob для SNIPER
+        and our_prob >= 0.20
     )
 
-    # 💎 СТРАТЕГІЯ 3: VALUE YES (Ринки 12-30¢ з помірним edge)
-    # Закриває "мертву зону" між GRID та SNIPER
-    is_value_yes = (
-        not is_grid_yes
-        and not is_sniper_yes
-        and eff_edge >= 0.20            # ✅ v4 FIX: 0.15 → 0.20 (суворіший фільтр)
-        and 0.12 < market_prob <= 0.35
-        and our_prob >= 0.25            # ✅ v4 FIX: 0.20 → 0.25
-        and confidence >= 0.85          # ✅ v4 FIX: 0.80 → 0.85 (тільки надійні прогнози)
-    )
-
-    if is_grid_yes:
-        size_usd = max(config.MIN_POSITION_USD, min(config.EXTREME_TAIL_MAX_SIZE_USD, 4.0))
-        reason = f"🎣 GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
+    if is_peak_yes:
+        size_usd = max(config.MIN_POSITION_USD, min(config.EXTREME_TAIL_MAX_SIZE_USD, config.MAX_POSITION_USD))
+        reason = f"🎯 PEAK YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     elif is_sniper_yes:
         size_usd = config.BASE_POSITION_USD
         reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
-    elif is_value_yes:
-        # Менший розмір для VALUE — менша впевненість
-        size_usd = max(config.MIN_POSITION_USD, config.BASE_POSITION_USD * 0.7)
-        reason = f"💎 VALUE YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
-        # ✅ v5 FIX: діагностичний лог для ринків з позитивним edge, що не пройшли фільтри
-        if eff_edge >= 0.10 and our_prob >= 0.10:
+        # Діагностичний лог
+        if eff_edge >= 0.03 and our_prob >= 0.05:
             logger.info(
                 f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
                 f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
-                f"grid={_dist_ok and market_prob >= GRID_MIN_PRICE and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES} | "
+                f"peak={_dist_ok and market_prob >= GRID_MIN_PRICE and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES} | "
                 f"sniper={market_prob > config.EXTREME_TAIL_MAX_ASK_YES and eff_edge >= config.MIN_EDGE_ENTRY} | "
                 f"dist_ok={_dist_ok}"
             )

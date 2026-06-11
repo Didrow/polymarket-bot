@@ -309,8 +309,8 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
 
     if config.ENABLE_COMPOUND:
         if config.USE_KELLY:
-            # КРИТИЧНО: cap prob на 0.80 для Kelly — завищені prob ведуть до oversizing
-            p = min(edge_result.estimated_prob, 0.80)
+            # КРИТИЧНО: cap prob на 0.55 для Kelly — завищені prob ведуть до oversizing
+            p = min(edge_result.estimated_prob, 0.55)
             q = 1.0 - p
             b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
             kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
@@ -321,7 +321,7 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
             fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT * confidence
             final = min(vol_size, fixed_pct_size)
     else:
-        p = min(edge_result.estimated_prob, 0.80)
+        p = min(edge_result.estimated_prob, 0.55)
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
