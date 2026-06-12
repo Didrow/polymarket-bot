@@ -35,6 +35,7 @@ class EdgeResult:
     is_tradeable: bool
     size_usd: float = 0.0
     threshold_c: float = 0.0
+    distance_c: float = 0.0
 
     @property
     def edge_pct(self) -> str:
@@ -212,8 +213,96 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
     return round(p, 4), threshold_c, f"{kind}|{unit_label}"
 
 
+def _calibrated_probability(
+    raw_prob: float,
+    kind: str,
+    hours: float,
+    distance_c: Optional[float],
+    unit: str,
+    confidence: float,
+) -> float:
+    if not getattr(config, "PROBABILITY_CALIBRATION_ENABLED", True):
+        return raw_prob
+
+    p = max(0.0, min(1.0, raw_prob))
+
+    if kind in {"above", "below"}:
+        p *= getattr(config, "PROB_THRESHOLD_CALIBRATION_SCALE", 0.85)
+    elif kind == "range":
+        p *= getattr(config, "PROB_RANGE_CALIBRATION_SCALE", 0.65)
+    else:
+        p *= getattr(config, "PROB_EXACT_CALIBRATION_SCALE", 0.65)
+
+    if distance_c is not None:
+        scale = getattr(config, "PROB_DISTANCE_SCALE_F", 2.25) if unit == "F" else getattr(config, "PROB_DISTANCE_SCALE_C", 1.25)
+        power = getattr(config, "PROB_DISTANCE_POWER", 0.65)
+        p *= 1.0 / (1.0 + (abs(distance_c) / scale) ** power)
+
+    if hours <= 6.0:
+        p *= 1.00
+    elif hours <= 18.0:
+        p *= 0.90
+    else:
+        p *= 0.80
+
+    confidence_weight = getattr(config, "PROB_CONFIDENCE_WEIGHT", 0.25)
+    p *= (1.0 - confidence_weight) + confidence_weight * confidence
+
+    return round(max(0.01, min(0.95, p)), 4)
+
+
+def _apply_probability_calibration(
+    raw_prob: float,
+    kind_label: str,
+    hours: float,
+    distance_c: Optional[float],
+    unit: str,
+    confidence: float,
+) -> float:
+    kind = kind_label.split("|")[0]
+    return _calibrated_probability(
+        raw_prob,
+        kind,
+        hours,
+        distance_c,
+        unit,
+        confidence,
+    )
+
+
+def _distance_filter_ok(threshold_c: Optional[float], fc_temp: Optional[float], unit: str) -> Tuple[bool, Optional[float]]:
+    if threshold_c is None or fc_temp is None:
+        return True, None
+    distance = abs(fc_temp - threshold_c)
+    max_dist = getattr(config, "SNIPER_GRID_DISTANCE_F", 3.5) if unit == "F" else getattr(config, "SNIPER_GRID_DISTANCE_C", 2.5)
+    return distance <= max_dist, distance
+
+
+def _grid_tradeable(
+    kind: str,
+    kind_label: str,
+    market_prob: float,
+    our_prob: float,
+    eff_edge: float,
+    dist_ok: bool,
+) -> bool:
+    if kind in {"above", "below"}:
+        return (
+            eff_edge >= getattr(config, "MIN_EDGE_ENTRY", 0.03)
+            and our_prob >= getattr(config, "MIN_PROB_ENTRY", 0.10)
+        )
+
+    return (
+        dist_ok
+        and market_prob >= getattr(config, "EXTREME_TAIL_MIN_ASK_YES", 0.03)
+        and market_prob <= getattr(config, "SNIPER_GRID_MAX_ASK", getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.75))
+        and our_prob >= getattr(config, "SNIPER_GRID_MIN_PROB", 0.10)
+        and eff_edge >= getattr(config, "SNIPER_GRID_MIN_EDGE", 0.03)
+    )
+
+
 # ══════════════════════════════════════════════════════════════════
-# ОБЧИСЛЕННЯ EDGE (з фільтром спреду та відстані)
+# ОБЧИСЛЕННЯ EDGE (з каліброваною ймовірністю та снайперською сіткою)
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -256,53 +345,44 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Cap edge щоб запобігти хибним сигналам від METAR artifacts
     eff_edge = min(raw_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
-    # 🎯 СТРАТЕГІЯ: PEAK SNIPER (купуємо найвірогідніший бакет за 10-55¢)
-    GRID_MIN_PRICE = getattr(config, 'EXTREME_TAIL_MIN_ASK_YES', 0.10)
-    
-    # Фільтр відстані для categorical ринків.
-    _dist_ok = True
-    if ("categorical" in kind_label or "range" in kind_label) and threshold_c is not None and fc_temp is not None:
-        _, _, _, unit = _parse_range_or_threshold(market.question)
-        # ✅ v9: зменшено до 1.0°C / 1.5°F — тільки піковий бакет навколо прогнозу!
-        max_dist = 1.5 if unit == 'F' else 1.0
-        _dist_ok = abs(fc_temp - threshold_c) <= max_dist
-        if not _dist_ok:
-            logger.debug(f"Пропускаємо categorical: прогноз={fc_temp:.1f}°C, ціль={threshold_c:.1f}°C, різниця >{max_dist}°C ({unit})")
-    
-    # PEAK SNIPER: купуємо ліквідні пікові бакети
-    _peak_edge_ok = (eff_edge >= config.EXTREME_TAIL_MIN_EDGE_YES)
-    _peak_min_prob = 0.08  # ✅ v9: мінімальна ймовірність 8%
+    _, _, _, unit = _parse_range_or_threshold(market.question)
+    dist_ok, distance_c = _distance_filter_ok(threshold_c, fc_temp, unit)
+    if not dist_ok:
+        logger.debug(
+            f"Пропускаємо поза сіткою: прогноз={fc_temp:.1f}°C, "
+            f"ціль={threshold_c:.1f}°C, різниця={distance_c:.1f}°C ({unit})"
+        )
 
-    is_peak_yes = (
-        _dist_ok                        # Ціль близько до прогнозу (±1°C)
-        and market_prob >= GRID_MIN_PRICE  # НЕ дешевше 10¢!
-        and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES  # Не дорожче 55¢
-        and our_prob >= _peak_min_prob
-        and _peak_edge_ok
+    our_prob = _apply_probability_calibration(
+        our_prob,
+        kind_label,
+        market.hours_to_resolution,
+        distance_c,
+        unit,
+        confidence,
     )
+    raw_edge = our_prob - market_prob
+    eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
 
-    # 🎯 SNIPER YES: основний прогноз above/below
-    is_sniper_yes = (
-        eff_edge >= config.MIN_EDGE_ENTRY 
-        and market_prob > config.EXTREME_TAIL_MAX_ASK_YES
-        and our_prob >= 0.20
-    )
+    tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok)
 
-    if is_peak_yes:
-        size_usd = max(config.MIN_POSITION_USD, min(config.EXTREME_TAIL_MAX_SIZE_USD, config.MAX_POSITION_USD))
-        reason = f"🎯 PEAK YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
-    elif is_sniper_yes:
+    if tradeable:
+        size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
+        if "categorical" in kind_label or "range" in kind_label:
+            size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
+        reason = (
+            f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
+            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | {src}"
+        )
+    elif eff_edge >= config.MIN_EDGE_ENTRY and market_prob > config.EXTREME_TAIL_MAX_ASK_YES and our_prob >= config.MIN_PROB_ENTRY:
         size_usd = config.BASE_POSITION_USD
-        reason = f"🎯 SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
+        reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
-        # Діагностичний лог
-        if eff_edge >= 0.03 and our_prob >= 0.05:
+        if eff_edge >= getattr(config, "SNIPER_GRID_MIN_EDGE", 0.03) and our_prob >= 0.05:
             logger.info(
                 f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
                 f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
-                f"peak={_dist_ok and market_prob >= GRID_MIN_PRICE and market_prob <= config.EXTREME_TAIL_MAX_ASK_YES} | "
-                f"sniper={market_prob > config.EXTREME_TAIL_MAX_ASK_YES and eff_edge >= config.MIN_EDGE_ENTRY} | "
-                f"dist_ok={_dist_ok}"
+                f"dist_ok={dist_ok} | kind={kind_label}"
             )
         return None
 
@@ -318,6 +398,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         is_tradeable=True,
         size_usd=round(size_usd, 2),
         threshold_c=threshold_c,
+        distance_c=distance_c or 0.0,
     )
 
 
@@ -345,8 +426,9 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
         # Тому для них дозволяємо spread до ask (тобто весь spread)
         spread = market.best_ask_yes - market.best_bid_yes
         if market.best_ask_yes <= 0.15:
-            # GRID-eligible: дозволяємо spread = ask (bid=0 нормально)
             max_spread = max(0.10, market.best_ask_yes)
+        elif market.best_ask_yes <= getattr(config, "SNIPER_GRID_MAX_ASK", 0.75):
+            max_spread = max(0.08, market.best_ask_yes * 0.25)
         else:
             max_spread = 0.05
         if spread > max_spread:
@@ -383,7 +465,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                 if val_min is None: continue
                 
                 adj_threshold = _f_to_c(val_min) if unit == 'F' else val_min
-                if 0 < abs(adj_threshold - threshold) <= 1.5:
+                if 0 < abs(adj_threshold - threshold) <= config.SNIPER_GRID_DISTANCE_C:
                     from market_scanner import get_target_date
                     adj_t_date = get_target_date(market.question, market.end_date, city)
                     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=adj_t_date)
@@ -392,7 +474,20 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     our_prob, adj_th_c, kind_label = estimate_market_probability(market, forecast)
                     confidence = _confidence_from_forecast(forecast)
                     market_prob = market.best_ask_yes
-                    eff_edge = (our_prob - market_prob) * confidence
+                    _, _, _, adj_unit = _parse_range_or_threshold(market.question)
+                    adj_is_low = 'lowest' in market.question.lower()
+                    adj_fc_temp = forecast.temp_low_c if adj_is_low else forecast.temp_high_c
+                    _, adj_distance_c = _distance_filter_ok(adj_th_c, adj_fc_temp, adj_unit)
+                    our_prob = _apply_probability_calibration(
+                        our_prob,
+                        kind_label,
+                        market.hours_to_resolution,
+                        adj_distance_c,
+                        adj_unit,
+                        confidence,
+                    )
+                    raw_edge = our_prob - market_prob
+                    eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
                     
                     if eff_edge >= config.ADJACENT_GRID_MIN_EDGE:
                         edge = EdgeResult(
@@ -407,12 +502,17 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                             is_tradeable=True,
                             size_usd=config.ADJACENT_GRID_SIZE_USD,
                             threshold_c=adj_th_c,
+                            distance_c=adj_distance_c or 0.0,
                         )
                         logger.info(f"✅ EDGE: {edge.summary}")
                         results.append(edge)
 
-    # Сортування: Grid угоди мають пріоритет за потенціалом R:R
-    results.sort(key=lambda r: r.edge, reverse=True)
+    # Сортування: спершу edge, потім ближчі до прогнозу grid-ринки.
+    def sort_key(r: EdgeResult):
+        grid_distance = abs(r.distance_c) if "GRID" in r.reason else 0.0
+        return (r.edge, -grid_distance)
+
+    results.sort(key=sort_key, reverse=True)
 
     logger.info(
         f"Edge scan: {len(results)} tradeable / {len(markets)} ринків "

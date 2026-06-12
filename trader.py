@@ -332,7 +332,7 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     if direction == "BUY_YES" and market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES:
         final = min(final, config.EXTREME_TAIL_MAX_SIZE_USD)
 
-    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * 0.08))
+    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * config.MAX_POSITION_PCT))
     return round(final, 2)
 
 

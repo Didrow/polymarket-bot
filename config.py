@@ -1,9 +1,11 @@
 """
-config.py — Polymarket Weather Bot (PEAK SNIPER EDITION v9)
+config.py — Polymarket Weather Bot (CALIBRATED SNIPER GRID v10)
 
-СТРАТЕГІЯ ЗМІНЕНА: замість купівлі дешевих хвостів (1-5¢) →
-купуємо ОДИН найвірогідніший бакет за 15-55¢ з edge ≥ 5%.
-Причина: GRID tail стратегія дала 0% win rate з 16 resolved trades.
+Conservative strategy:
+- Raw ensemble probabilities are intentionally discounted and calibrated.
+- BUY_YES only.
+- Trade a limited grid around the forecast peak, not unlimited cheap tails.
+- DRY-RUN validation gates must pass before LIVE trading is allowed.
 """
 
 from typing import List
@@ -17,43 +19,48 @@ CLOB_URL: str = "https://clob.polymarket.com"
 GAMMA_URL: str = "https://gamma-api.polymarket.com"
 CHAIN_ID: int = 137
 
-# ── КАПІТАЛ ТА РИЗИК-МЕНЕДЖМЕНТ ──────────────────────────────
+# ── CAPITAL AND RISK MANAGEMENT ───────────────────────────────
 INITIAL_CAPITAL: float = 100.0
-MAX_POSITION_PCT: float = 0.08          # ✅ v9: 5%→8% (менше угод, але більші ставки)
-MIN_POSITION_USD: float = 2.0           # Мінімальний розмір ставки
-BASE_POSITION_USD: float = 4.0          # ✅ v9: $3→$4 (ставки на пікових бакетах)
-MAX_ACTIVE_POSITIONS: int = 5           # ✅ v9: 8→5 (менше, але якісніше)
-RESERVED_FAST_SLOTS: int = 0            # Резервуємо 0 слоти для угод <= 6 годин до резолву
-FAST_SLOT_THRESHOLD_HOURS: float = 6.0  # Поріг для швидких слотів (METAR/Observed зона)
-MAX_POSITIONS_PER_CITY: int = 1         # ✅ v9: 3→1 (ОДИН бакет на місто на день!)
-MAX_DRAWDOWN_PCT: float = 0.70          # 70% просадки дозволено (для DRY-RUN)
-STOP_LOSS_PCT: float = 0.99             # Майже вимикаємо стоп-лоси для YES (чекаємо resolution)
-MAX_POSITION_USD: float = 8.0           # ✅ v9: $5→$8 (дозволяємо більші ставки на якісних)
+MAX_POSITION_PCT: float = 0.04
+MIN_POSITION_USD: float = 2.0
+BASE_POSITION_USD: float = 3.0
+MAX_ACTIVE_POSITIONS: int = 8
+RESERVED_FAST_SLOTS: int = 0
+FAST_SLOT_THRESHOLD_HOURS: float = 6.0
+MAX_POSITIONS_PER_CITY: int = 5
+MAX_DRAWDOWN_PCT: float = 0.35
+STOP_LOSS_PCT: float = 0.99
+MAX_POSITION_USD: float = 5.0
+MAX_DAILY_LOSS_PCT: float = 0.06
+MAX_DAILY_LOSS_USD: float = 8.0
+MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 
-# ── 🛑 СТРАТЕГІЯ "ПАРОВИЙ КАТОК" (NO) ВИМКНЕНА ───────────────
-ENABLE_COLDMATH_TAIL_NO: bool = False
-COLDMATH_MIN_ASK_NO: float = 0.95
-COLDMATH_MAX_ASK_NO: float = 0.99
-COLDMATH_MIN_EDGE_NO: float = 0.12
-COLDMATH_MAX_SIZE_USD: float = 0.0
-
-# ── 🎯 СТРАТЕГІЯ "PEAK SNIPER" (ЗАМІСТЬ GRID) ────────────────
-# ✅ v9: Повністю переосмислено — тепер купуємо ЛІКВІДНІ пікові бакети
+# ── CALIBRATED SNIPER GRID ─────────────────────────────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
-EXTREME_TAIL_MAX_ASK_YES: float = 0.55  # ✅ v9: 0.15→0.55 (купуємо бакети до 55¢!)
-EXTREME_TAIL_MIN_ASK_YES: float = 0.10  # ✅ v9: 0.001→0.10 (НЕ КУПУЄМО дешевше 10¢!)
-EXTREME_TAIL_MAX_SIZE_USD: float = 5.0  # ✅ v9: $3→$5 (більші ставки на якісних)
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.04 # ✅ v9: 0.12→0.04 (менший edge при вищій prob OK)
+EXTREME_TAIL_MAX_ASK_YES: float = 0.75
+EXTREME_TAIL_MIN_ASK_YES: float = 0.03
+EXTREME_TAIL_MAX_SIZE_USD: float = 3.0
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.03
 
-# ── 🎯 СТРАТЕГІЯ "СНАЙПЕРСЬКА СІТКА" (ADJACENT GRID) ────────
-ENABLE_ADJACENT_GRID: bool = False       # ✅ v9: ВИМКНЕНО (сітка = розмазування капіталу)
+ENABLE_ADJACENT_GRID: bool = True
+SNIPER_GRID_DISTANCE_C: float = 2.5
+SNIPER_GRID_DISTANCE_F: float = 3.5
+SNIPER_GRID_MIN_EDGE: float = 0.03
+SNIPER_GRID_MIN_PROB: float = 0.10
+SNIPER_GRID_MAX_ASK: float = 0.75
+SNIPER_GRID_SIZE_USD: float = 2.0
+SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5
+GRID_FORECAST_STEP_C: float = 0.1
+GRID_FORECAST_SPAN_C: float = 0.2
+
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.18
-ADJACENT_GRID_MAX_ASK: float = 0.20
+ADJACENT_GRID_MIN_EDGE: float = 0.03
+ADJACENT_GRID_MAX_ASK: float = 0.75
 
-# ── СТАНДАРТНИЙ EDGE (Для Peak YES угод) ─────────────────────
-MIN_EDGE_ENTRY: float = 0.05            # ✅ v9: 0.18→0.05 (менший edge потрібен при правильній prob)
-MIN_EDGE_HOLD: float = 0.02             # 2% — тримаємо позицію поки є хоч якийсь edge
+# ── STANDARD EDGE (for calibrated BUY_YES) ─────────────────────
+MIN_EDGE_ENTRY: float = 0.03
+MIN_EDGE_HOLD: float = 0.015
+MIN_PROB_ENTRY: float = 0.10
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
@@ -64,10 +71,20 @@ OSINT_SCAN_INTERVAL_SEC: int = 300
 MAX_VOL_NO_TRADE: float = 0.60
 TARGET_PORTFOLIO_VOL: float = 0.15
 
-# ── КОМПАУНДИНГ (Re-investing) ───────────────────────────────
-ENABLE_COMPOUND: bool = True            # Якщо True, розмір ставки = % від поточного капіталу
-COMPOUND_RISK_PCT: float = 0.05         # ✅ v9: 3%→5% від капіталу (менше угод → більші ставки)
-USE_KELLY: bool = True                  # Використовувати Quarter-Kelly замість фіксованого %
+# ── COMPOUNDING (re-investing) ────────────────────────────────
+ENABLE_COMPOUND: bool = True
+COMPOUND_RISK_PCT: float = 0.04
+USE_KELLY: bool = False
+KELLY_SCALE: float = 0.25
+KELLY_MAX_POSITION_USD: float = 5.0
+
+# ── DRY-RUN VALIDATION GATES BEFORE LIVE ───────────────────────
+VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
+VALIDATION_MIN_RESOLVED_TRADES: int = 30
+VALIDATION_MIN_DRY_RUN_HOURS: int = 168
+VALIDATION_MIN_WIN_RATE: float = 0.50
+VALIDATION_MIN_ROI: float = 0.00
+VALIDATION_MIN_EQUITY: float = 0.00
 
 # ── ТЕХНІЧНЕ ТА ШЛЯХИ ────────────────────────────────────────
 DATA_DIR: str = "data"
@@ -96,18 +113,25 @@ EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST
 MIN_DATA_POINTS_FALLBACK: int = 5
 WHALE_THRESHOLD_USD: float = 2000.0
 
-# ── ЙМОВІРНІСНІ CAPS (ДЖЕРЕЛО ІСТИНИ) ─────────────────────────
-# ✅ v9: РІЗКО ЗНИЖЕНІ — попередні дані показали систематичне завищення
-# prob_above_temp_c / prob_below_temp_c (відносно точні)
-PROB_CAP_ABOVE_SHORT: float = 0.75    # hours <= 6.0  (v9: 0.78→0.75)
-PROB_CAP_ABOVE_MID:   float = 0.68    # hours <= 18.0 (v9: 0.72→0.68)
-PROB_CAP_ABOVE_LONG:  float = 0.60    # hours > 18.0  (v9: 0.65→0.60)
+# ── PROBABILITY CAPS AND CALIBRATION ──────────────────────────
+PROBABILITY_CALIBRATION_ENABLED: bool = True
+PROB_THRESHOLD_CALIBRATION_SCALE: float = 0.85
+PROB_EXACT_CALIBRATION_SCALE: float = 0.65
+PROB_RANGE_CALIBRATION_SCALE: float = 0.65
+PROB_DISTANCE_SCALE_C: float = 1.25
+PROB_DISTANCE_SCALE_F: float = 2.25
+PROB_DISTANCE_POWER: float = 0.65
+PROB_CONFIDENCE_WEIGHT: float = 0.25
 
-# prob_exact_temp_c / range / categorical — ГОЛОВНА ПРОБЛЕМА
-# Реальний win rate 0% при our_prob=15-29% → ми завищуємо в 3-5 разів!
-PROB_CAP_EXACT_SHORT: float = 0.40    # ✅ v9: 0.62→0.40 (РІЗКЕ зниження!)
-PROB_CAP_EXACT_MID:   float = 0.32    # ✅ v9: 0.52→0.32
-PROB_CAP_EXACT_LONG:  float = 0.25    # ✅ v9: 0.42→0.25
+# prob_above_temp_c / prob_below_temp_c (relatively reliable)
+PROB_CAP_ABOVE_SHORT: float = 0.75
+PROB_CAP_ABOVE_MID:   float = 0.68
+PROB_CAP_ABOVE_LONG:  float = 0.60
 
-# Максимальний edge (запобігає фантомним edge > 35%)
-MAX_EDGE_CAP: float = 0.35            # ✅ v9: 0.45→0.35 (суворіший)
+# prob_exact_temp_c / range / categorical — main calibration target
+PROB_CAP_EXACT_SHORT: float = 0.40
+PROB_CAP_EXACT_MID:   float = 0.32
+PROB_CAP_EXACT_LONG:  float = 0.25
+
+# Maximum edge (prevents phantom edge > 35%)
+MAX_EDGE_CAP: float = 0.35

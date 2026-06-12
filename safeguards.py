@@ -212,12 +212,19 @@ class BotState:
     start_time: str = datetime.now(timezone.utc).isoformat()
     last_update: str = datetime.now(timezone.utc).isoformat()
     open_positions: Dict = None
-    closed_positions: Dict = None  # Сховище для збереження _recently_closed між перезапусками
+    closed_positions: Dict = None
+    last_daily_capital: float = 0.0
+    last_daily_reset: str = ""
 
     def __post_init__(self):
         if self.open_positions is None:
             self.open_positions = {}
         if self.closed_positions is None:
+            self.closed_positions = {}
+        if self.last_daily_capital <= 0:
+            self.last_daily_capital = self.current_capital
+        if not self.last_daily_reset:
+            self.last_daily_reset = datetime.now(timezone.utc).date().isoformat()
             self.closed_positions = {}
 
     @property
@@ -439,6 +446,52 @@ class SafeguardManager:
             logger.error(f"Помилка відновлення позицій: {e}")
         return restored
 
+    def _reset_daily_counters_if_needed(self):
+        today = datetime.now(timezone.utc).date().isoformat()
+        if self.state.last_daily_reset != today:
+            self.state.last_daily_capital = self.state.current_capital
+            self.state.last_daily_reset = today
+            self.save_state()
+
+    def check_daily_loss(self) -> bool:
+        self._reset_daily_counters_if_needed()
+        daily_loss = max(0.0, self.state.last_daily_capital - self.state.current_capital)
+        daily_loss_pct = daily_loss / self.state.last_daily_capital if self.state.last_daily_capital else 0.0
+        max_usd = getattr(config, "MAX_DAILY_LOSS_USD", 0.0)
+        max_pct = getattr(config, "MAX_DAILY_LOSS_PCT", 0.0)
+        if daily_loss >= max_usd or daily_loss_pct >= max_pct:
+            self._halt(f"Добовий збиток ${daily_loss:.2f} ({daily_loss_pct:.1%}) >= ліміт")
+            return False
+        return True
+
+    def check_validation_gate(self) -> bool:
+        if not getattr(config, "VALIDATION_REQUIRED_BEFORE_LIVE", True):
+            return True
+        if config.DRY_RUN:
+            return True
+        s = self.state
+        total_resolved = s.winning_trades + s.losing_trades
+        start_dt = datetime.fromisoformat(s.start_time)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        dry_run_hours = (datetime.now(timezone.utc) - start_dt).total_seconds() / 3600
+        failures = []
+        if total_resolved < getattr(config, "VALIDATION_MIN_RESOLVED_TRADES", 30):
+            failures.append(f"resolved={total_resolved}/{config.VALIDATION_MIN_RESOLVED_TRADES}")
+        if dry_run_hours < getattr(config, "VALIDATION_MIN_DRY_RUN_HOURS", 168):
+            failures.append(f"hours={dry_run_hours:.1f}/{config.VALIDATION_MIN_DRY_RUN_HOURS}")
+        if s.win_rate < getattr(config, "VALIDATION_MIN_WIN_RATE", 0.50):
+            failures.append(f"win_rate={s.win_rate:.1%}/{config.VALIDATION_MIN_WIN_RATE:.0%}")
+        if s.roi_pct < getattr(config, "VALIDATION_MIN_ROI", 0.00):
+            failures.append(f"roi={s.roi_pct:.1%}/{config.VALIDATION_MIN_ROI:.0%}")
+        if s.equity < getattr(config, "VALIDATION_MIN_EQUITY", 0.00):
+            failures.append(f"equity=${s.equity:.2f}/${config.VALIDATION_MIN_EQUITY:.2f}")
+        if failures:
+            logger.critical("LIVE blocked by validation gate: " + ", ".join(failures))
+            return False
+        logger.info("Validation gate passed; LIVE trading allowed")
+        return True
+
     def check_drawdown(self) -> bool:
         dd = self.state.drawdown_pct
         if dd >= config.MAX_DRAWDOWN_PCT:
@@ -464,6 +517,8 @@ class SafeguardManager:
     def can_trade(self) -> bool:
         if self.state.is_halted:
             logger.error(f"БОТ ЗУПИНЕНО: {self.state.halt_reason}")
+            return False
+        if not self.check_daily_loss():
             return False
         if not self.check_drawdown():
             return False

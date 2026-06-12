@@ -270,6 +270,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     _max_slow = config.MAX_ACTIVE_POSITIONS - getattr(config, 'RESERVED_FAST_SLOTS', 0)
 
     opened_this_cycle = 0
+    city_counts_this_cycle = {}
     logged_slow_slots_full = False
     for edge_result in tradeable:
         if opened_this_cycle >= 3:
@@ -297,13 +298,20 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         city = edge_result.market.detected_city
         if city and hasattr(config, 'MAX_POSITIONS_PER_CITY'):
             city_count = _trader.get_positions_count_by_city(city)
-            if city_count >= config.MAX_POSITIONS_PER_CITY:
-                logger.info(f"📊 Ліміт {config.MAX_POSITIONS_PER_CITY} позицій для {city} — пропускаємо")
+            city_count += city_counts_this_cycle.get(city, 0)
+            grid_limit = getattr(config, "SNIPER_GRID_MAX_MARKETS_PER_CITY", config.MAX_POSITIONS_PER_CITY)
+            is_grid = "GRID" in edge_result.reason
+            if city_count >= (grid_limit if is_grid else config.MAX_POSITIONS_PER_CITY):
+                logger.info(f"📊 Ліміт {'сітки' if is_grid else 'міста'} {grid_limit if is_grid else config.MAX_POSITIONS_PER_CITY} для {city} — пропускаємо")
                 continue
         if not safeguard.check_hourly_trade_limit():
             break
 
         size = getattr(edge_result, 'size_usd', edge_result.edge * current_capital * config.MAX_POSITION_PCT)
+        projected_exposure = portfolio.get("total_value", 0.0) + size
+        if projected_exposure > current_capital * getattr(config, "MAX_TOTAL_EXPOSURE_PCT", 0.35):
+            logger.info("Ліміт сумарної експозиції досягнуто — пропускаємо")
+            continue
         if not safeguard.pre_trade_check(size, current_capital):
             continue
 
@@ -311,6 +319,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
         if position:
             opened_this_cycle += 1
+            city_counts_this_cycle[city] = city_counts_this_cycle.get(city, 0) + 1
             active_questions.add(norm_q)
             logger.info(f"🎯 УГОДА: {edge_result.summary}")
             safeguard.record_trade_open(position.size_usd)
@@ -365,7 +374,7 @@ def main():
             logger.info(f"  Розмір:   {config.COMPOUND_RISK_PCT:.1%} від капіталу")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
     logger.info(f"  Edge min:  {config.MIN_EDGE_ENTRY:.0%}")
-    logger.info(f"  Спред max: 5 центів")
+    logger.info(f"  Спред max: dynamic grid/liquid")
     logger.info(f"  Правило:   тільки weather ринки < {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
     logger.info("")
@@ -376,6 +385,9 @@ def main():
         sys.exit(1)
 
     clob_client = init_clob_client()
+    if not config.DRY_RUN and clob_client is None:
+        logger.error("LIVE mode requires CLOB client; stopping instead of silently DRY-RUN")
+        sys.exit(1)
     safeguard = SafeguardManager(config)
     _safeguard = safeguard
     _HealthHandler.safeguard_manager = safeguard
@@ -412,6 +424,10 @@ def main():
         safeguard.save_positions(_trader._active_positions)
         safeguard.save_state()
         logger.info(f"💾 Стан збережено: {len(_trader._active_positions)} активних позицій")
+
+    if not config.DRY_RUN and not safeguard.check_validation_gate():
+        logger.error("LIVE trading blocked; bot will not place real orders")
+        sys.exit(1)
 
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
     logger.info("🚀 Бот запущено. Ctrl+C для зупинки.\n")
