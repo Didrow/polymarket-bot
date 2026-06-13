@@ -54,32 +54,57 @@ class EdgeResult:
 # ПАРСИНГ ДІАПАЗОНІВ ТА ПОРОГІВ (оновлено для підтримки range)
 # ══════════════════════════════════════════════════════════════════
 
+def _unit_from_question(question: str) -> str:
+    """Визначає одиницю температури з питання. США за замовчуванням — °F."""
+    q = question.lower()
+    explicit_units = re.findall(r'[-+]?\d+\.?\d*\s*°?\s*([cf])\b', q)
+    if explicit_units:
+        return 'F' if explicit_units[0] == 'f' else 'C'
+    if 'fahrenheit' in q:
+        return 'F'
+    if 'celsius' in q or 'centigrade' in q:
+        return 'C'
+
+    fahrenheit_cities = {"chicago", "dallas", "nyc", "new york", "san francisco",
+                         "miami", "los angeles", "seattle", "atlanta", "boston",
+                         "denver", "phoenix", "las vegas", "austin", "minneapolis",
+                         "portland", "houston", "nashville", "charlotte", "orlando"}
+    if any(city in q for city in fahrenheit_cities):
+        return 'F'
+    return 'C'
+
+
+def _f_delta_to_c(delta_f: float) -> float:
+    """Converts a Fahrenheit temperature difference to Celsius."""
+    return delta_f * 5.0 / 9.0
+
+
+def _strip_temperature_conversions(question: str) -> str:
+    """Прибирає конверсії типу 83°F=28.3°C, щоб вони не парсились як range."""
+    return re.sub(r'=\s*[-+]?\d+\.?\d*\s*°?\s*[cf]\b', '', question, flags=re.IGNORECASE)
+
+
 def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Optional[float], str]:
     """
     Парсить запитання на предмет діапазонів або одинарних порогів температур.
     Повертає: (kind, val_min, val_max, unit)
     """
-    q_lower = question.lower()
-    
-    # Визначаємо одиницю вимірювання (США за замовчуванням Фаренгейт)
-    unit = 'C'
-    if '°f' in q_lower or ' f ' in q_lower or 'fahrenheit' in q_lower or q_lower.endswith('f') or 'f?' in q_lower:
-        unit = 'F'
-    else:
-        fahrenheit_cities = {"chicago", "dallas", "nyc", "new york", "san francisco",
-                             "miami", "los angeles", "seattle", "atlanta", "boston",
-                             "denver", "phoenix", "las vegas", "austin", "minneapolis",
-                             "portland", "houston", "nashville", "charlotte", "orlando"}
-        if any(city in q_lower for city in fahrenheit_cities):
-            unit = 'F'
+    q_lower = _strip_temperature_conversions(question).lower()
+    unit = _unit_from_question(question)
 
-    # 1. Пошук діапазону температур "between X and Y" або "X-Y°F"
-    range_match = re.search(r'(?:between\s+)?(\d+\.?\d*)\s*[-–to\s+a-nd]+\s*(\d+\.?\d*)', q_lower)
+    # 1. Діапазони: "between 16 and 18°C", "16-18°C", "16°C to 18°C".
+    range_match = re.search(
+        r'(?:between\s+)?([-+]?\d+\.?\d*)\s*°?\s*[cf]\s*(?:-|–|to|and)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]',
+        q_lower,
+    ) or re.search(
+        r'(?:between\s+)?([-+]?\d+\.?\d*)\s*[-–]\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]\b',
+        q_lower,
+    )
     if range_match:
         try:
             val1 = float(range_match.group(1))
             val2 = float(range_match.group(2))
-            if val1 < 120 and val2 < 120 and val1 != val2:
+            if abs(val1) < 120 and abs(val2) < 120 and val1 != val2:
                 val_min = min(val1, val2)
                 val_max = max(val1, val2)
                 return "range", val_min, val_max, unit
@@ -93,12 +118,20 @@ def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Opti
     elif any(w in q_lower for w in ["or below", "or lower", "below", "under"]):
         kind = "below"
 
-    # Парсинг одинарного значення
-    m = re.search(r'(\d+\.?\d*)\s*°?\s*[FfCc]\b', q_lower)
+    # Парсинг одинарного значення з явною одиницею.
+    m = re.search(r'([-+]?\d+\.?\d*)\s*°\s*([FfCc])\b', q_lower)
+    if m:
+        return kind, float(m.group(1)), None, 'F' if m.group(2).lower() == 'f' else 'C'
+
+    m = re.search(r'([-+]?\d+\.?\d*)\s*([FfCc])\b', q_lower)
+    if m:
+        return kind, float(m.group(1)), None, 'F' if m.group(2).lower() == 'f' else 'C'
+
+    m = re.search(r'\bbe\s+([-+]?\d+\.?\d*)', q_lower)
     if m:
         return kind, float(m.group(1)), None, unit
 
-    m = re.search(r'be (\d+\.?\d*)', q_lower)
+    m = re.search(r'\b(?:above|below|exceed|over|under)\s+([-+]?\d+\.?\d*)', q_lower)
     if m:
         return kind, float(m.group(1)), None, unit
 
@@ -234,7 +267,7 @@ def _calibrated_probability(
         p *= getattr(config, "PROB_EXACT_CALIBRATION_SCALE", 0.65)
 
     if distance_c is not None:
-        scale = getattr(config, "PROB_DISTANCE_SCALE_F", 2.25) if unit == "F" else getattr(config, "PROB_DISTANCE_SCALE_C", 1.25)
+        scale = getattr(config, "PROB_DISTANCE_SCALE_C", 1.25)
         power = getattr(config, "PROB_DISTANCE_POWER", 0.65)
         p *= 1.0 / (1.0 + (abs(distance_c) / scale) ** power)
 
@@ -270,12 +303,28 @@ def _apply_probability_calibration(
     )
 
 
-def _distance_filter_ok(threshold_c: Optional[float], fc_temp: Optional[float], unit: str) -> Tuple[bool, Optional[float]]:
+def _distance_filter_ok(
+    kind: str,
+    threshold_c: Optional[float],
+    fc_temp: Optional[float],
+    unit: str,
+    range_max_c: Optional[float] = None,
+) -> Tuple[bool, Optional[float]]:
     if threshold_c is None or fc_temp is None:
         return True, None
+
+    max_dist = _f_delta_to_c(getattr(config, "SNIPER_GRID_DISTANCE_F", 5.0)) if unit == 'F' else getattr(config, "SNIPER_GRID_DISTANCE_C", 2.5)
+    if kind == "range" and range_max_c is not None:
+        if threshold_c <= fc_temp <= range_max_c:
+            return True, 0.0
+        distance = min(abs(fc_temp - threshold_c), abs(fc_temp - range_max_c))
+        return distance <= max_dist, distance
+
     distance = abs(fc_temp - threshold_c)
-    max_dist = getattr(config, "SNIPER_GRID_DISTANCE_F", 3.5) if unit == "F" else getattr(config, "SNIPER_GRID_DISTANCE_C", 2.5)
-    return distance <= max_dist, distance
+    if kind in {"categorical", "range"}:
+        return distance <= max_dist, distance
+
+    return True, distance
 
 
 def _valid_yes_price(value: float, field_name: str) -> bool:
@@ -301,18 +350,20 @@ def _grid_tradeable(
     eff_edge: float,
     dist_ok: bool,
 ) -> bool:
+    min_ask = getattr(config, "EXTREME_TAIL_MIN_ASK_YES", 0.03)
     if kind in {"above", "below"}:
         return (
-            eff_edge >= getattr(config, "MIN_EDGE_ENTRY", 0.03)
-            and our_prob >= getattr(config, "MIN_PROB_ENTRY", 0.10)
+            market_prob >= min_ask
+            and eff_edge >= getattr(config, "MIN_EDGE_ENTRY", 0.015)
+            and our_prob >= getattr(config, "MIN_PROB_ENTRY", 0.05)
         )
 
     return (
         dist_ok
-        and market_prob >= getattr(config, "EXTREME_TAIL_MIN_ASK_YES", 0.03)
+        and market_prob >= min_ask
         and market_prob <= getattr(config, "SNIPER_GRID_MAX_ASK", getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.75))
-        and our_prob >= getattr(config, "SNIPER_GRID_MIN_PROB", 0.10)
-        and eff_edge >= getattr(config, "SNIPER_GRID_MIN_EDGE", 0.03)
+        and our_prob >= getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)
+        and eff_edge >= getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
     )
 
 
@@ -372,8 +423,9 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Cap edge щоб запобігти хибним сигналам від METAR artifacts
     eff_edge = min(raw_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
-    _, _, _, unit = _parse_range_or_threshold(market.question)
-    dist_ok, distance_c = _distance_filter_ok(threshold_c, fc_temp, unit)
+    kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
+    range_max_c = _f_to_c(val_max) if kind == "range" and val_max is not None and unit == 'F' else val_max
+    dist_ok, distance_c = _distance_filter_ok(kind, threshold_c, fc_temp, unit, range_max_c)
     if not dist_ok:
         logger.debug(
             f"Пропускаємо поза сіткою: прогноз={fc_temp:.1f}°C, "
@@ -488,10 +540,14 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                 if market.best_ask_yes > config.ADJACENT_GRID_MAX_ASK: continue
                 
                 kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
-                if val_min is None: continue
-                
+                if val_min is None:
+                    continue
                 adj_threshold = _f_to_c(val_min) if unit == 'F' else val_min
-                if 0 < abs(adj_threshold - threshold) <= config.SNIPER_GRID_DISTANCE_C:
+                adj_range_max_c = _f_to_c(val_max) if kind == "range" and val_max is not None and unit == 'F' else val_max
+                if kind == "range" and val_max is not None:
+                    adj_threshold = _f_to_c((val_min + val_max) / 2) if unit == 'F' else (val_min + val_max) / 2
+                max_dist_adj = _f_delta_to_c(config.SNIPER_GRID_DISTANCE_F) if unit == 'F' else config.SNIPER_GRID_DISTANCE_C
+                if 0 < abs(adj_threshold - threshold) <= max_dist_adj:
                     from market_scanner import get_target_date
                     adj_t_date = get_target_date(market.question, market.end_date, city)
                     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=adj_t_date)
@@ -512,10 +568,11 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
 
                     if market_prob <= 0.001 or market_prob >= 0.99:
                         continue
-                    _, _, _, adj_unit = _parse_range_or_threshold(market.question)
+                    adj_kind, adj_val_min, adj_val_max, adj_unit = _parse_range_or_threshold(market.question)
                     adj_is_low = 'lowest' in market.question.lower()
                     adj_fc_temp = forecast.temp_low_c if adj_is_low else forecast.temp_high_c
-                    _, adj_distance_c = _distance_filter_ok(adj_th_c, adj_fc_temp, adj_unit)
+                    adj_range_max_c = _f_to_c(adj_val_max) if adj_kind == "range" and adj_val_max is not None and adj_unit == 'F' else adj_val_max
+                    adj_dist_ok, adj_distance_c = _distance_filter_ok(adj_kind, adj_th_c, adj_fc_temp, adj_unit, adj_range_max_c)
                     our_prob = _apply_probability_calibration(
                         our_prob,
                         kind_label,
@@ -524,12 +581,14 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                         adj_unit,
                         confidence,
                     )
+                    if not adj_dist_ok:
+                        continue
                     if our_prob < getattr(config, "ADJACENT_GRID_MIN_PROB", 0.05):
                         continue
                     raw_edge = our_prob - market_prob
                     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
                     
-                    if eff_edge >= config.ADJACENT_GRID_MIN_EDGE:
+                    if _grid_tradeable(adj_kind, kind_label, market_prob, our_prob, eff_edge, adj_dist_ok):
                         edge = EdgeResult(
                             market=market,
                             forecast=forecast,
@@ -538,7 +597,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                             edge=eff_edge,
                             edge_direction="BUY_YES",
                             confidence=confidence,
-                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%}",
+                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C",
                             is_tradeable=True,
                             size_usd=config.ADJACENT_GRID_SIZE_USD,
                             threshold_c=adj_th_c,
