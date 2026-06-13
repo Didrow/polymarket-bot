@@ -30,6 +30,9 @@ def reset_statistics_api() -> str:
         initial_capital=config.INITIAL_CAPITAL,
         current_capital=config.INITIAL_CAPITAL,
         peak_capital=config.INITIAL_CAPITAL,
+        peak_equity=config.INITIAL_CAPITAL,
+        last_daily_capital=config.INITIAL_CAPITAL,
+        last_daily_reset=datetime.now(timezone.utc).date().isoformat(),
         total_trades=active_positions_count, # The open positions count as opened trades
         winning_trades=0,
         losing_trades=0,

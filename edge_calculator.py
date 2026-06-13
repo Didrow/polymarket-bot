@@ -346,8 +346,19 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Використовуємо ASK для розрахунку реальної вартості входу
     _log_price_validation(market)
     market_prob = market.best_ask_yes
+
+    # Якщо ask підозріло малий (< 1¢) — пробуємо midpoint
+    if market_prob < 0.01:
+        midpoint = getattr(market, "midpoint_yes", 0.0)
+        if 0.01 <= midpoint <= 0.99:
+            logger.debug(f"💡 Ask={market_prob:.4f} < 1¢, fallback на midpoint={midpoint:.4f}")
+            market_prob = midpoint
+        else:
+            logger.debug(f"⏭️ SKIP: ask={market_prob:.4f} замалий, midpoint={midpoint:.4f} невалідний")
+            return None
+
     if market_prob <= 0.001 or market_prob >= 0.99:
-        return None 
+        return None
 
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
@@ -475,7 +486,6 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                 
                 if market.volume_usd < config.MIN_MARKET_VOLUME_USD: continue
                 if market.best_ask_yes > config.ADJACENT_GRID_MAX_ASK: continue
-                if market.best_ask_yes <= 0.001: continue
                 
                 kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
                 if val_min is None: continue
@@ -491,6 +501,15 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     confidence = _confidence_from_forecast(forecast)
                     _log_price_validation(market)
                     market_prob = market.best_ask_yes
+                    if market_prob < 0.01:
+                        midpoint = getattr(market, "midpoint_yes", 0.0)
+                        if 0.01 <= midpoint <= 0.99:
+                            logger.debug(f"💡 Adjacent Ask={market_prob:.4f} < 1¢, fallback на midpoint={midpoint:.4f}")
+                            market_prob = midpoint
+                        else:
+                            logger.debug(f"⏭️ SKIP Adjacent: ask={market_prob:.4f} замалий, midpoint={midpoint:.4f} невалідний")
+                            continue
+
                     if market_prob <= 0.001 or market_prob >= 0.99:
                         continue
                     _, _, _, adj_unit = _parse_range_or_threshold(market.question)
@@ -505,6 +524,8 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                         adj_unit,
                         confidence,
                     )
+                    if our_prob < getattr(config, "ADJACENT_GRID_MIN_PROB", 0.05):
+                        continue
                     raw_edge = our_prob - market_prob
                     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
                     

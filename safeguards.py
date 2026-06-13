@@ -222,7 +222,7 @@ class BotState:
         if self.closed_positions is None:
             self.closed_positions = {}
         if self.last_daily_capital <= 0:
-            self.last_daily_capital = self.current_capital
+            self.last_daily_capital = self.equity or self.current_capital
         if not self.last_daily_reset:
             self.last_daily_reset = datetime.now(timezone.utc).date().isoformat()
             self.closed_positions = {}
@@ -451,10 +451,20 @@ class SafeguardManager:
         if self.state.last_daily_reset != today:
             self.state.last_daily_capital = self.state.equity
             self.state.last_daily_reset = today
+            logger.info(f"🔄 Добова базова лінія оновлена: equity=${self.state.last_daily_capital:.2f}")
             self.save_state()
+
+    def reset_daily_baseline(self, reason: str = ""):
+        self.state.last_daily_capital = self.state.equity
+        self.state.last_daily_reset = datetime.now(timezone.utc).date().isoformat()
+        self.save_state()
+        if reason:
+            logger.info(f"🔄 Добова базова лінія скинута ({reason}): equity=${self.state.last_daily_capital:.2f}")
 
     def check_daily_loss(self) -> bool:
         self._reset_daily_counters_if_needed()
+        if self.state.last_daily_capital <= 0:
+            self.state.last_daily_capital = self.state.equity
         equity = float(self.state.equity)
         cash = float(self.state.current_capital)
         portfolio_value = float(getattr(self.state, "portfolio_value", 0.0))

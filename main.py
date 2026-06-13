@@ -66,6 +66,9 @@ class _HealthHandler(BaseHTTPRequestHandler):
                     manager.state.initial_capital = config.INITIAL_CAPITAL
                     manager.state.current_capital = config.INITIAL_CAPITAL
                     manager.state.peak_capital = config.INITIAL_CAPITAL
+                    manager.state.peak_equity = config.INITIAL_CAPITAL
+                    manager.state.last_daily_capital = config.INITIAL_CAPITAL
+                    manager.state.last_daily_reset = datetime.now(timezone.utc).date().isoformat()
                     manager.state.total_trades = active_positions_count
                     manager.state.winning_trades = 0
                     manager.state.losing_trades = 0
@@ -207,6 +210,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             reason=pos.status,
         )
 
+    portfolio = get_portfolio_summary()
+    safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
     current_capital = safeguard.state.current_capital
     if not safeguard.can_trade():
         return 0
@@ -226,8 +231,6 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     tradeable = [r for r in edge_results if r.is_tradeable]
     safeguard.check_high_edge_warning(tradeable)
 
-    portfolio = get_portfolio_summary()
-    safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
     if portfolio["active_positions"] > 0:
         logger.info(
             f"📂 Відкриті позиції: {portfolio['active_positions']} | "
@@ -424,6 +427,11 @@ def main():
         safeguard.save_positions(_trader._active_positions)
         safeguard.save_state()
         logger.info(f"💾 Стан збережено: {len(_trader._active_positions)} активних позицій")
+
+    portfolio = get_portfolio_summary()
+    safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
+    if removed:
+        safeguard.reset_daily_baseline("startup cleanup")
 
     if not config.DRY_RUN and not safeguard.check_validation_gate():
         logger.error("LIVE trading blocked; bot will not place real orders")
