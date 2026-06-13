@@ -278,6 +278,21 @@ def _distance_filter_ok(threshold_c: Optional[float], fc_temp: Optional[float], 
     return distance <= max_dist, distance
 
 
+def _valid_yes_price(value: float, field_name: str) -> bool:
+    return value is not None and math.isfinite(float(value)) and 0.0 <= float(value) <= 1.0
+
+
+def _log_price_validation(market: PolyMarket) -> None:
+    ask = market.best_ask_yes
+    bid = market.best_bid_yes
+    mid = market.midpoint_yes
+    if not (_valid_yes_price(ask, "ask") and _valid_yes_price(bid, "bid") and _valid_yes_price(mid, "mid")):
+        logger.debug(
+            f"⚠️ PRICE VALIDATION: {market.question[:60]} | "
+            f"ask={ask} bid={bid} mid={mid} cid={market.condition_id[:12]}"
+        )
+
+
 def _grid_tradeable(
     kind: str,
     kind_label: str,
@@ -329,6 +344,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
     
     # Використовуємо ASK для розрахунку реальної вартості входу
+    _log_price_validation(market)
     market_prob = market.best_ask_yes
     if market_prob <= 0.001 or market_prob >= 0.99:
         return None 
@@ -473,7 +489,10 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     
                     our_prob, adj_th_c, kind_label = estimate_market_probability(market, forecast)
                     confidence = _confidence_from_forecast(forecast)
+                    _log_price_validation(market)
                     market_prob = market.best_ask_yes
+                    if market_prob <= 0.001 or market_prob >= 0.99:
+                        continue
                     _, _, _, adj_unit = _parse_range_or_threshold(market.question)
                     adj_is_low = 'lowest' in market.question.lower()
                     adj_fc_temp = forecast.temp_low_c if adj_is_low else forecast.temp_high_c

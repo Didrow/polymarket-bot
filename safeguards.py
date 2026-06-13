@@ -449,18 +449,24 @@ class SafeguardManager:
     def _reset_daily_counters_if_needed(self):
         today = datetime.now(timezone.utc).date().isoformat()
         if self.state.last_daily_reset != today:
-            self.state.last_daily_capital = self.state.current_capital
+            self.state.last_daily_capital = self.state.equity
             self.state.last_daily_reset = today
             self.save_state()
 
     def check_daily_loss(self) -> bool:
         self._reset_daily_counters_if_needed()
-        daily_loss = max(0.0, self.state.last_daily_capital - self.state.current_capital)
+        equity = float(self.state.equity)
+        cash = float(self.state.current_capital)
+        portfolio_value = float(getattr(self.state, "portfolio_value", 0.0))
+        unrealized_pnl = float(getattr(self.state, "unrealized_pnl", 0.0))
+
+        daily_loss = max(0.0, self.state.last_daily_capital - equity)
         daily_loss_pct = daily_loss / self.state.last_daily_capital if self.state.last_daily_capital else 0.0
         max_usd = getattr(config, "MAX_DAILY_LOSS_USD", 0.0)
         max_pct = getattr(config, "MAX_DAILY_LOSS_PCT", 0.0)
+        logger.debug(f"Daily loss check: equity={equity:.2f} USD, cash={cash:.2f} USD, portfolio_value={portfolio_value:.2f} USD, unrealized_pnl={unrealized_pnl:.2f} USD, daily_loss={daily_loss:.2f} USD ({daily_loss_pct:.1%}), limits={max_usd:.2f}/{max_pct:.1%}")
         if daily_loss >= max_usd or daily_loss_pct >= max_pct:
-            self._halt(f"Добовий збиток ${daily_loss:.2f} ({daily_loss_pct:.1%}) >= ліміт")
+            self._halt(f"Добовий збиток за equity ${daily_loss:.2f} ({daily_loss_pct:.1%}) >= ліміт")
             return False
         return True
 
