@@ -45,8 +45,8 @@ EXTREME_TAIL_MIN_EDGE_YES: float = 0.03
 ENABLE_ADJACENT_GRID: bool = True
 SNIPER_GRID_DISTANCE_C: float = 3.5
 SNIPER_GRID_DISTANCE_F: float = 5.0
-SNIPER_GRID_MIN_EDGE: float = 0.01
-SNIPER_GRID_MIN_PROB: float = 0.03
+SNIPER_GRID_MIN_EDGE: float = 0.005
+SNIPER_GRID_MIN_PROB: float = 0.02
 SNIPER_GRID_MAX_ASK: float = 0.75
 SNIPER_GRID_MIN_ASK: float = 0.01
 SNIPER_GRID_SIZE_USD: float = 2.0
@@ -55,14 +55,14 @@ GRID_FORECAST_STEP_C: float = 0.1
 GRID_FORECAST_SPAN_C: float = 0.2
 
 ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.01
-ADJACENT_GRID_MIN_PROB: float = 0.03
+ADJACENT_GRID_MIN_EDGE: float = 0.005
+ADJACENT_GRID_MIN_PROB: float = 0.02
 ADJACENT_GRID_MAX_ASK: float = 0.75
 
 # ── STANDARD EDGE (for calibrated BUY_YES) ─────────────────────
-MIN_EDGE_ENTRY: float = 0.01
-MIN_EDGE_HOLD: float = 0.01
-MIN_PROB_ENTRY: float = 0.03
+MIN_EDGE_ENTRY: float = 0.005
+MIN_EDGE_HOLD: float = 0.005
+MIN_PROB_ENTRY: float = 0.02
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу

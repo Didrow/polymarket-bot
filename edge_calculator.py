@@ -349,14 +349,18 @@ def _grid_tradeable(
     our_prob: float,
     eff_edge: float,
     dist_ok: bool,
+    min_edge: Optional[float] = None,
+    min_prob: Optional[float] = None,
 ) -> bool:
     min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
+    grid_min_edge = min_edge if min_edge is not None else getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
+    grid_min_prob = min_prob if min_prob is not None else getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)
     return (
         dist_ok
         and market_prob >= min_ask
         and market_prob <= getattr(config, "SNIPER_GRID_MAX_ASK", getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.75))
-        and our_prob >= getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)
-        and eff_edge >= getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
+        and our_prob >= grid_min_prob
+        and eff_edge >= grid_min_edge
     )
 
 
@@ -575,12 +579,23 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     )
                     if not adj_dist_ok:
                         continue
-                    if our_prob < getattr(config, "ADJACENT_GRID_MIN_PROB", 0.05):
+                    if our_prob < getattr(config, "ADJACENT_GRID_MIN_PROB", getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)):
                         continue
                     raw_edge = our_prob - market_prob
                     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
                     
-                    if _grid_tradeable(adj_kind, kind_label, market_prob, our_prob, eff_edge, adj_dist_ok):
+                    if eff_edge < getattr(config, "ADJACENT_GRID_MIN_EDGE", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.01)):
+                        continue
+                    if _grid_tradeable(
+                        adj_kind,
+                        kind_label,
+                        market_prob,
+                        our_prob,
+                        eff_edge,
+                        adj_dist_ok,
+                        min_edge=getattr(config, "ADJACENT_GRID_MIN_EDGE", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.01)),
+                        min_prob=getattr(config, "ADJACENT_GRID_MIN_PROB", getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)),
+                    ):
                         edge = EdgeResult(
                             market=market,
                             forecast=forecast,
