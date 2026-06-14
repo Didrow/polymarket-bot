@@ -450,12 +450,11 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         size_usd = config.BASE_POSITION_USD
         reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
     else:
-        if eff_edge >= getattr(config, "SNIPER_GRID_MIN_EDGE", 0.03) and our_prob >= 0.05:
-            logger.info(
-                f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
-                f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
-                f"dist_ok={dist_ok} | kind={kind_label}"
-            )
+        logger.debug(
+            f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
+            f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
+            f"dist_ok={dist_ok} | kind={kind_label}"
+        )
         return None
 
     return EdgeResult(
