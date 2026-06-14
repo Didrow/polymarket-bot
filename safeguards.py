@@ -476,6 +476,9 @@ class SafeguardManager:
         max_pct = getattr(config, "MAX_DAILY_LOSS_PCT", 0.0)
         logger.debug(f"Daily loss check: equity={equity:.2f} USD, cash={cash:.2f} USD, portfolio_value={portfolio_value:.2f} USD, unrealized_pnl={unrealized_pnl:.2f} USD, daily_loss={daily_loss:.2f} USD ({daily_loss_pct:.1%}), limits={max_usd:.2f}/{max_pct:.1%}")
         if daily_loss >= max_usd or daily_loss_pct >= max_pct:
+            if config.DRY_RUN:
+                logger.warning(f"DRY-RUN daily-loss warning: equity ${daily_loss:.2f} ({daily_loss_pct:.1%}) >= ліміт; LIVE бот був би зупинений")
+                return True
             self._halt(f"Добовий збиток за equity ${daily_loss:.2f} ({daily_loss_pct:.1%}) >= ліміт")
             return False
         return True

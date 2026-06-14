@@ -31,8 +31,8 @@ MAX_POSITIONS_PER_CITY: int = 5
 MAX_DRAWDOWN_PCT: float = 0.35
 STOP_LOSS_PCT: float = 0.99
 MAX_POSITION_USD: float = 5.0
-MAX_DAILY_LOSS_PCT: float = 0.06
-MAX_DAILY_LOSS_USD: float = 8.0
+MAX_DAILY_LOSS_PCT: float = 0.20        # LIVE grid buffer: не зупиняти при нормальних unrealized grid swings
+MAX_DAILY_LOSS_USD: float = 20.0
 MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 
 # ── CALIBRATED SNIPER GRID ─────────────────────────────────────
