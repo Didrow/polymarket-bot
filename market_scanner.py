@@ -61,15 +61,33 @@ class PolyMarket:
     raw: Dict = field(default_factory=dict)
 
 
-def _parse_dt(s: str) -> Optional[datetime]:
-    if not s:
+def _parse_dt(s: Any) -> Optional[datetime]:
+    if s is None:
         return None
+    if isinstance(s, (int, float)):
+        try:
+            # Polymarket іноді повертає ms, рідше seconds.
+            value = float(s)
+            if value > 10_000_000_000:
+                value /= 1000.0
+            return datetime.fromtimestamp(value, tz=timezone.utc)
+        except Exception:
+            return None
+
+    text = str(s).strip()
+    if not text:
+        return None
+
+    # timestamp as string: 1781443200000
+    if text.isdigit():
+        return _parse_dt(int(text))
+
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except Exception:
         pass
     try:
-        return datetime.strptime(s[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return datetime.strptime(text[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except Exception:
         return None
 
@@ -108,7 +126,11 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
 
         now = datetime.now(timezone.utc)
         hours_left = (end_date - now).total_seconds() / 3600
-        if hours_left <= 0 or hours_left > hours_limit:
+        if hours_left <= 0:
+            logger.debug(f"Skip expired market: {raw.get('question', '')[:100]} | end={end_date.isoformat()}")
+            return None
+        if hours_left > hours_limit:
+            logger.debug(f"Skip far-end market: {raw.get('question', '')[:100]} | end={end_date.isoformat()} | hours={hours_left:.1f}")
             return None
 
         volume = 0.0
