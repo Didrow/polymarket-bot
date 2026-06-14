@@ -262,21 +262,21 @@ def _calibrated_probability(
     if kind in {"above", "below"}:
         p *= getattr(config, "PROB_THRESHOLD_CALIBRATION_SCALE", 0.85)
     elif kind == "range":
-        p *= getattr(config, "PROB_RANGE_CALIBRATION_SCALE", 0.65)
+        p *= getattr(config, "PROB_RANGE_CALIBRATION_SCALE", 0.85)
     else:
-        p *= getattr(config, "PROB_EXACT_CALIBRATION_SCALE", 0.65)
+        p *= getattr(config, "PROB_EXACT_CALIBRATION_SCALE", 0.85)
 
     if distance_c is not None:
-        scale = getattr(config, "PROB_DISTANCE_SCALE_C", 1.25)
-        power = getattr(config, "PROB_DISTANCE_POWER", 0.65)
+        scale = getattr(config, "PROB_DISTANCE_SCALE_C", 2.0)
+        power = getattr(config, "PROB_DISTANCE_POWER", 0.5)
         p *= 1.0 / (1.0 + (abs(distance_c) / scale) ** power)
 
-    if hours <= 6.0:
+    if hours <= 12.0:
         p *= 1.00
-    elif hours <= 18.0:
-        p *= 0.90
+    elif hours <= 24.0:
+        p *= 0.95
     else:
-        p *= 0.80
+        p *= 0.90
 
     confidence_weight = getattr(config, "PROB_CONFIDENCE_WEIGHT", 0.25)
     p *= (1.0 - confidence_weight) + confidence_weight * confidence
@@ -350,14 +350,7 @@ def _grid_tradeable(
     eff_edge: float,
     dist_ok: bool,
 ) -> bool:
-    min_ask = getattr(config, "EXTREME_TAIL_MIN_ASK_YES", 0.03)
-    if kind in {"above", "below"}:
-        return (
-            market_prob >= min_ask
-            and eff_edge >= getattr(config, "MIN_EDGE_ENTRY", 0.015)
-            and our_prob >= getattr(config, "MIN_PROB_ENTRY", 0.05)
-        )
-
+    min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
     return (
         dist_ok
         and market_prob >= min_ask
