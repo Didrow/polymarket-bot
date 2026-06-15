@@ -342,6 +342,20 @@ def _log_price_validation(market: PolyMarket) -> None:
         )
 
 
+def _is_extreme_tail_yes_market(market_prob: float) -> bool:
+    return (
+        getattr(config, "ENABLE_EXTREME_TAIL_YES", True)
+        and market_prob >= getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
+        and market_prob <= getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.15)
+    )
+
+
+def _grid_min_edge_for_market(market_prob: float) -> float:
+    if _is_extreme_tail_yes_market(market_prob):
+        return getattr(config, "EXTREME_TAIL_MIN_EDGE_YES", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015))
+    return getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
+
+
 def _grid_tradeable(
     kind: str,
     kind_label: str,
@@ -352,12 +366,11 @@ def _grid_tradeable(
     min_edge: Optional[float] = None,
     min_prob: Optional[float] = None,
 ) -> bool:
-    min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
-    grid_min_edge = min_edge if min_edge is not None else getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
+    grid_min_edge = min_edge if min_edge is not None else _grid_min_edge_for_market(market_prob)
     grid_min_prob = min_prob if min_prob is not None else getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)
     return (
         dist_ok
-        and market_prob >= min_ask
+        and market_prob >= getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
         and market_prob <= getattr(config, "SNIPER_GRID_MAX_ASK", getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.75))
         and our_prob >= grid_min_prob
         and eff_edge >= grid_min_edge
@@ -440,7 +453,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     raw_edge = our_prob - market_prob
     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
 
-    tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok)
+    grid_min_edge = _grid_min_edge_for_market(market_prob)
+    tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok, min_edge=grid_min_edge)
 
     if tradeable:
         size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
@@ -457,7 +471,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         logger.info(
             f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
             f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
-            f"dist_ok={dist_ok} | kind={kind_label}"
+            f"min_edge={grid_min_edge:.1%} | dist_ok={dist_ok} | kind={kind_label}"
         )
         return None
 
