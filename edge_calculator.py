@@ -549,7 +549,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=adj_t_date)
                     if not forecast: continue
                     
-                    our_prob, adj_th_c, kind_label = estimate_market_probability(market, forecast)
+                    our_prob, adj_th_c, adj_kind_label = estimate_market_probability(market, forecast)
                     confidence = _confidence_from_forecast(forecast)
                     _log_price_validation(market)
                     market_prob = market.best_ask_yes
@@ -571,7 +571,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     adj_dist_ok, adj_distance_c = _distance_filter_ok(adj_kind, adj_th_c, adj_fc_temp, adj_unit, adj_range_max_c)
                     our_prob = _apply_probability_calibration(
                         our_prob,
-                        kind_label,
+                        adj_kind_label,
                         market.hours_to_resolution,
                         adj_distance_c,
                         adj_unit,
@@ -588,7 +588,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                         continue
                     if _grid_tradeable(
                         adj_kind,
-                        kind_label,
+                        adj_kind_label,
                         market_prob,
                         our_prob,
                         eff_edge,
@@ -604,7 +604,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                             edge=eff_edge,
                             edge_direction="BUY_YES",
                             confidence=confidence,
-                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C",
+                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {adj_kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C",
                             is_tradeable=True,
                             size_usd=config.ADJACENT_GRID_SIZE_USD,
                             threshold_c=adj_th_c,
