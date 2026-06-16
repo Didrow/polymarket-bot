@@ -31,9 +31,9 @@ class EdgeResult:
     edge: float
     edge_direction: str      # Тепер завжди "BUY_YES"
     confidence: float
-    time_decay_factor: float = 1.0
     reason: str
     is_tradeable: bool
+    time_decay_factor: float = 1.0
     size_usd: float = 0.0
     threshold_c: float = 0.0
     distance_c: float = 0.0
