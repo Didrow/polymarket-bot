@@ -31,6 +31,7 @@ class EdgeResult:
     edge: float
     edge_direction: str      # Тепер завжди "BUY_YES"
     confidence: float
+    time_decay_factor: float = 1.0
     reason: str
     is_tradeable: bool
     size_usd: float = 0.0
@@ -166,6 +167,14 @@ def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
     return 0.75
 
 
+def _time_decay_for_hours(hours: float) -> float:
+    if hours <= 12.0:
+        return getattr(config, "PROB_TIME_DECAY_SHORT", 1.00)
+    if hours <= 24.0:
+        return getattr(config, "PROB_TIME_DECAY_MID", 0.95)
+    return getattr(config, "PROB_TIME_DECAY_LONG", 0.90)
+
+
 # ══════════════════════════════════════════════════════════════════
 # РОЗРАХУНОК ЙМОВІРНОСТІ (з підтримкою діапазонів)
 # ══════════════════════════════════════════════════════════════════
@@ -271,12 +280,7 @@ def _calibrated_probability(
         power = getattr(config, "PROB_DISTANCE_POWER", 0.5)
         p *= 1.0 / (1.0 + (abs(distance_c) / scale) ** power)
 
-    if hours <= 12.0:
-        p *= 1.00
-    elif hours <= 24.0:
-        p *= 0.95
-    else:
-        p *= 0.90
+    p *= _time_decay_for_hours(hours)
 
     confidence_weight = getattr(config, "PROB_CONFIDENCE_WEIGHT", 0.25)
     p *= (1.0 - confidence_weight) + confidence_weight * confidence
@@ -402,6 +406,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         return None
 
     confidence = _confidence_from_forecast(forecast)
+    time_decay = _time_decay_for_hours(market.hours_to_resolution)
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
     
     # Використовуємо ASK для розрахунку реальної вартості входу
@@ -462,11 +467,11 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
         reason = (
             f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
-            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | {src}"
+            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
         )
     elif eff_edge >= config.MIN_EDGE_ENTRY and market_prob > config.EXTREME_TAIL_MAX_ASK_YES and our_prob >= config.MIN_PROB_ENTRY:
         size_usd = config.BASE_POSITION_USD
-        reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | {src}"
+        reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | decay={time_decay:.2f} | {src}"
     else:
         logger.info(
             f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
@@ -483,6 +488,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         edge=eff_edge,
         edge_direction=direction,
         confidence=confidence,
+        time_decay_factor=time_decay,
         reason=reason,
         is_tradeable=True,
         size_usd=round(size_usd, 2),
@@ -565,6 +571,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     
                     our_prob, adj_th_c, adj_kind_label = estimate_market_probability(market, forecast)
                     confidence = _confidence_from_forecast(forecast)
+                    time_decay = _time_decay_for_hours(market.hours_to_resolution)
                     _log_price_validation(market)
                     market_prob = market.best_ask_yes
                     if market_prob < 0.01:
@@ -618,11 +625,12 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                             edge=eff_edge,
                             edge_direction="BUY_YES",
                             confidence=confidence,
-                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {adj_kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C",
+                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {adj_kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C | decay={time_decay:.2f}",
                             is_tradeable=True,
                             size_usd=config.ADJACENT_GRID_SIZE_USD,
                             threshold_c=adj_th_c,
                             distance_c=adj_distance_c or 0.0,
+                            time_decay_factor=time_decay,
                         )
                         logger.info(f"✅ EDGE: {edge.summary}")
                         results.append(edge)

@@ -333,6 +333,8 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
         final = min(final, config.EXTREME_TAIL_MAX_SIZE_USD)
 
     final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * config.MAX_POSITION_PCT))
+    if edge_result.size_usd > 0:
+        final = min(final, edge_result.size_usd)
     return round(final, 2)
 
 

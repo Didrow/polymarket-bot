@@ -200,7 +200,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             "pnl_usd": pos.pnl_usd,
             "status": "WIN" if pos.pnl_usd > 0 else "LOSS",
             "strategy": "UNKNOWN",
-            "dry_run": config.DRY_RUN
+            "dry_run": config.DRY_RUN,
+            "time_decay_factor": 0.0
         })
         notifier.notify_trade_close(
             direction=pos.direction,
@@ -276,7 +277,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     city_counts_this_cycle = {}
     logged_slow_slots_full = False
     for edge_result in tradeable:
-        if opened_this_cycle >= 3:
+        if opened_this_cycle >= config.MAX_OPEN_PER_CYCLE:
             break
 
         # Визначаємо тип угоди та застосовуємо відповідний ліміт
@@ -346,7 +347,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 "pnl_usd": 0.0,
                 "status": _strategy,
                 "strategy": _strategy,
-                "dry_run": config.DRY_RUN
+                "dry_run": config.DRY_RUN,
+                "time_decay_factor": edge_result.time_decay_factor
             })
             
             notifier.notify_trade_open(
@@ -376,7 +378,8 @@ def main():
         else:
             logger.info(f"  Розмір:   {config.COMPOUND_RISK_PCT:.1%} від капіталу")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
-    logger.info(f"  Edge min:  {config.MIN_EDGE_ENTRY:.0%}")
+    logger.info(f"  Edge min:  {config.MIN_EDGE_ENTRY:.0%} / tail {config.EXTREME_TAIL_MIN_EDGE_YES:.1%}")
+    logger.info(f"  Stake:     ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
     logger.info(f"  Спред max: dynamic grid/liquid")
     logger.info(f"  Правило:   тільки weather ринки < {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
@@ -422,7 +425,8 @@ def main():
                 "pnl_usd": pos.pnl_usd,
                 "status": "WIN" if pos.pnl_usd > 0 else "LOSS",
                 "strategy": "STARTUP_CLEANUP",
-                "dry_run": config.DRY_RUN
+                "dry_run": config.DRY_RUN,
+                "time_decay_factor": 0.0
             })
         safeguard.save_positions(_trader._active_positions)
         safeguard.save_state()

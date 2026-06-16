@@ -21,48 +21,49 @@ CHAIN_ID: int = 137
 
 # ── CAPITAL AND RISK MANAGEMENT ───────────────────────────────
 INITIAL_CAPITAL: float = 100.0
-MAX_POSITION_PCT: float = 0.04
-MIN_POSITION_USD: float = 2.0
-BASE_POSITION_USD: float = 3.0
-MAX_ACTIVE_POSITIONS: int = 8
+MAX_POSITION_PCT: float = 0.03
+MIN_POSITION_USD: float = 1.0
+BASE_POSITION_USD: float = 1.5
+MAX_ACTIVE_POSITIONS: int = 5
+MAX_OPEN_PER_CYCLE: int = 2
 RESERVED_FAST_SLOTS: int = 0
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0
-MAX_POSITIONS_PER_CITY: int = 5
+MAX_POSITIONS_PER_CITY: int = 4
 MAX_DRAWDOWN_PCT: float = 0.35
 STOP_LOSS_PCT: float = 0.99
-MAX_POSITION_USD: float = 5.0
+MAX_POSITION_USD: float = 3.0
 MAX_DAILY_LOSS_PCT: float = 0.20        # LIVE grid buffer: не зупиняти при нормальних unrealized grid swings
 MAX_DAILY_LOSS_USD: float = 20.0
-MAX_TOTAL_EXPOSURE_PCT: float = 0.35
+MAX_TOTAL_EXPOSURE_PCT: float = 0.25
 
 # ── CALIBRATED SNIPER GRID ─────────────────────────────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.15
 EXTREME_TAIL_MIN_ASK_YES: float = 0.01
-EXTREME_TAIL_MAX_SIZE_USD: float = 3.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.03
+EXTREME_TAIL_MAX_SIZE_USD: float = 1.5
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.055
 
 ENABLE_ADJACENT_GRID: bool = True
 SNIPER_GRID_DISTANCE_C: float = 3.5
 SNIPER_GRID_DISTANCE_F: float = 5.0
-SNIPER_GRID_MIN_EDGE: float = 0.005
-SNIPER_GRID_MIN_PROB: float = 0.02
+SNIPER_GRID_MIN_EDGE: float = 0.03
+SNIPER_GRID_MIN_PROB: float = 0.03
 SNIPER_GRID_MAX_ASK: float = 0.75
 SNIPER_GRID_MIN_ASK: float = 0.01
-SNIPER_GRID_SIZE_USD: float = 2.0
-SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5
+SNIPER_GRID_SIZE_USD: float = 1.5
+SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 4
 GRID_FORECAST_STEP_C: float = 0.1
 GRID_FORECAST_SPAN_C: float = 0.2
 
-ADJACENT_GRID_SIZE_USD: float = 2.0
-ADJACENT_GRID_MIN_EDGE: float = 0.005
-ADJACENT_GRID_MIN_PROB: float = 0.02
+ADJACENT_GRID_SIZE_USD: float = 1.5
+ADJACENT_GRID_MIN_EDGE: float = 0.03
+ADJACENT_GRID_MIN_PROB: float = 0.03
 ADJACENT_GRID_MAX_ASK: float = 0.75
 
 # ── STANDARD EDGE (for calibrated BUY_YES) ─────────────────────
-MIN_EDGE_ENTRY: float = 0.005
-MIN_EDGE_HOLD: float = 0.005
-MIN_PROB_ENTRY: float = 0.02
+MIN_EDGE_ENTRY: float = 0.03
+MIN_EDGE_HOLD: float = 0.02
+MIN_PROB_ENTRY: float = 0.03
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
@@ -71,19 +72,19 @@ MIN_MARKET_VOLUME_USD: float = 500.0
 SCAN_INTERVAL_SEC: int = 600            # Сканування кожні 10 хвилин
 OSINT_SCAN_INTERVAL_SEC: int = 300
 MAX_VOL_NO_TRADE: float = 0.60
-TARGET_PORTFOLIO_VOL: float = 0.15
+TARGET_PORTFOLIO_VOL: float = 0.10
 
 # ── COMPOUNDING (re-investing) ────────────────────────────────
 ENABLE_COMPOUND: bool = True
-COMPOUND_RISK_PCT: float = 0.04
+COMPOUND_RISK_PCT: float = 0.02
 USE_KELLY: bool = False
 KELLY_SCALE: float = 0.25
 KELLY_MAX_POSITION_USD: float = 5.0
 
 # ── DRY-RUN VALIDATION GATES BEFORE LIVE ───────────────────────
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
-VALIDATION_MIN_RESOLVED_TRADES: int = 30
-VALIDATION_MIN_DRY_RUN_HOURS: int = 168
+VALIDATION_MIN_RESOLVED_TRADES: int = 50
+VALIDATION_MIN_DRY_RUN_HOURS: int = 240
 VALIDATION_MIN_WIN_RATE: float = 0.50
 VALIDATION_MIN_ROI: float = 0.00
 VALIDATION_MIN_EQUITY: float = 0.00
@@ -124,6 +125,9 @@ PROB_DISTANCE_SCALE_C: float = 3.0
 PROB_DISTANCE_SCALE_F: float = 4.5
 PROB_DISTANCE_POWER: float = 0.3
 PROB_CONFIDENCE_WEIGHT: float = 0.25
+PROB_TIME_DECAY_SHORT: float = 1.00
+PROB_TIME_DECAY_MID: float = 0.95
+PROB_TIME_DECAY_LONG: float = 0.90
 
 # prob_above_temp_c / prob_below_temp_c (relatively reliable)
 PROB_CAP_ABOVE_SHORT: float = 0.75
