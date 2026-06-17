@@ -152,14 +152,14 @@ class WeatherForecast:
             p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
             prob_parametric = max(0.0, p_high - p_low)
             
-            # ✅ v9 FIX: categorical discount 0.30 (був 0.55) — РІЗКЕ зниження!
-            # Факт: 0% win rate з 10+ trades при our_prob=15-29% → ми завищували в 3-5x.
-            # GFS ensemble members СИЛЬНО корелюють (одне сімейство моделей).
-            # Polymarket market makers вже використовують ті самі моделі + calibration.
+            # v11: розблоковано forecast ladder grid — знижено over-calibration
+            # Було 0.30 (знижка 70%) → 0.55 (знижка 45%).
+            # GFS ensemble members корелюють, але 0.30 було занадто агресивним:
+            # our_prob=0.04 для бакета 24°C при прогнозі 23.5°C → сітка не працювала.
             if prob_empirical == 0.0:
-                prob = prob_parametric * 0.15  # ✅ v9: 0.35→0.15 (нуль members = дуже низький шанс)
+                prob = prob_parametric * 0.30  # v11: 0.15→0.30
             else:
-                prob = (prob_empirical * 0.20 + prob_parametric * 0.80) * 0.30  # ✅ v9: 0.35/0.65*0.55 → 0.20/0.80*0.30
+                prob = (prob_empirical * 0.30 + prob_parametric * 0.70) * 0.55  # v11: 0.20/0.80*0.30 → 0.30/0.70*0.55
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення

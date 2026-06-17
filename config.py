@@ -36,28 +36,28 @@ MAX_DAILY_LOSS_PCT: float = 0.20        # LIVE grid buffer: не зупинят�
 MAX_DAILY_LOSS_USD: float = 20.0
 MAX_TOTAL_EXPOSURE_PCT: float = 0.25
 
-# ── CALIBRATED SNIPER GRID ─────────────────────────────────────
+# ── CALIBRATED SNIPER GRID (v11: FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.15
 EXTREME_TAIL_MIN_ASK_YES: float = 0.01
 EXTREME_TAIL_MAX_SIZE_USD: float = 1.5
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.04
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.02  # v11: 0.04→0.02 (розблокувати дешеві сусідні бакети)
 
 ENABLE_ADJACENT_GRID: bool = True
 SNIPER_GRID_DISTANCE_C: float = 4.0
 SNIPER_GRID_DISTANCE_F: float = 6.0
-SNIPER_GRID_MIN_EDGE: float = 0.03
-SNIPER_GRID_MIN_PROB: float = 0.03
+SNIPER_GRID_MIN_EDGE: float = 0.02  # v11: 0.03→0.02
+SNIPER_GRID_MIN_PROB: float = 0.02  # v11: 0.03→0.02
 SNIPER_GRID_MAX_ASK: float = 0.75
 SNIPER_GRID_MIN_ASK: float = 0.01
 SNIPER_GRID_SIZE_USD: float = 1.5
-SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 4
+SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5  # v11: 4→5 (сітка 16/17/18/19/20)
 GRID_FORECAST_STEP_C: float = 0.1
 GRID_FORECAST_SPAN_C: float = 0.2
 
 ADJACENT_GRID_SIZE_USD: float = 1.5
-ADJACENT_GRID_MIN_EDGE: float = 0.03
-ADJACENT_GRID_MIN_PROB: float = 0.03
+ADJACENT_GRID_MIN_EDGE: float = 0.02  # v11: 0.03→0.02
+ADJACENT_GRID_MIN_PROB: float = 0.02  # v11: 0.03→0.02
 ADJACENT_GRID_MAX_ASK: float = 0.75
 
 # ── STANDARD EDGE (for calibrated BUY_YES) ─────────────────────
@@ -69,7 +69,7 @@ MIN_PROB_ENTRY: float = 0.03
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
 MIN_RESOLUTION_HOURS: float = 0.5       # Мінімум годин до резолву (0.5 = 30хв для DRY-RUN, у бойовому 1.5)
 MIN_MARKET_VOLUME_USD: float = 500.0
-SCAN_INTERVAL_SEC: int = 600            # Сканування кожні 10 хвилин
+SCAN_INTERVAL_SEC: int = 300            # v11: 600→300 (частіше сканувати для сітки)
 OSINT_SCAN_INTERVAL_SEC: int = 300
 MAX_VOL_NO_TRADE: float = 0.60
 TARGET_PORTFOLIO_VOL: float = 0.10
@@ -135,9 +135,10 @@ PROB_CAP_ABOVE_MID:   float = 0.68
 PROB_CAP_ABOVE_LONG:  float = 0.60
 
 # prob_exact_temp_c / range / categorical — main calibration target
-PROB_CAP_EXACT_SHORT: float = 0.40
-PROB_CAP_EXACT_MID:   float = 0.32
-PROB_CAP_EXACT_LONG:  float = 0.25
+# v11: піднято caps щоб розблокувати сітку бакетів поблизу прогнозу
+PROB_CAP_EXACT_SHORT: float = 0.50  # v11: 0.40→0.50
+PROB_CAP_EXACT_MID:   float = 0.38  # v11: 0.32→0.38
+PROB_CAP_EXACT_LONG:  float = 0.30  # v11: 0.25→0.30
 
 # Maximum edge (prevents phantom edge > 35%)
 MAX_EDGE_CAP: float = 0.35

@@ -488,7 +488,7 @@ def main():
 
         if _running:
             sleep_time = config.SCAN_INTERVAL_SEC
-            # Розумний адаптивний сон: враховує найближчий resolution та порожні цикли
+            # v11: Розумний адаптивний сон: враховує найближчий resolution та порожні цикли
             if empty_cycles >= 3:
                 # Якщо є позиції — орієнтуємось на найближчий end_date
                 if _trader._active_positions:
@@ -497,13 +497,13 @@ def main():
                         nearest = min(end_dates)
                         hours_to_nearest = (nearest - datetime.now(timezone.utc)).total_seconds() / 3600
                         if hours_to_nearest > 2.0:
-                            sleep_time = min(900, int(hours_to_nearest * 300))
+                            sleep_time = min(300, int(hours_to_nearest * 300))  # v11: 900→300
                         else:
-                            sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                            sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)  # v11: 1.5→1.0
                     else:
-                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)  # v11: 1.5→1.0
                 else:
-                    sleep_time = int(config.SCAN_INTERVAL_SEC * 1.5)
+                    sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)  # v11: 1.5→1.0
                 logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s...\n")
             else:
                 logger.info(f"💤 Сплю {sleep_time}s...\n")

@@ -219,16 +219,17 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
         else:
             _max_r = config.PROB_CAP_EXACT_LONG
 
-        # Застосовуємо такий самий дискаунт як і для prob_exact_temp_c
+        # v11: розблоковано forecast ladder grid — знижено over-calibration
+        # Було 0.30 (знижка 70%) → 0.55 (знижка 45%), що дає реалістичні our_prob для сусідніх бакетів
         if members and len(members) >= 5:
             count_in = sum(1 for m in members if t_min_c <= m < t_max_c)
             prob_empirical = count_in / len(members)
             if prob_empirical == 0.0:
-                p = prob_parametric * 0.15  # ✅ v9: 0.35→0.15
+                p = prob_parametric * 0.30  # v11: 0.15→0.30
             else:
-                p = (prob_empirical * 0.20 + prob_parametric * 0.80) * 0.30  # ✅ v9: 0.35/0.65*0.55 → 0.20/0.80*0.30
+                p = (prob_empirical * 0.30 + prob_parametric * 0.70) * 0.55  # v11: 0.20/0.80*0.30 → 0.30/0.70*0.55
         else:
-            p = prob_parametric * 0.30  # ✅ v9: 0.55→0.30
+            p = prob_parametric * 0.55  # v11: 0.30→0.55
 
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
