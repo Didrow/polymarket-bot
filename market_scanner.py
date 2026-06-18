@@ -357,9 +357,9 @@ def fetch_weather_markets(force_refresh: bool = False) -> List[PolyMarket]:
     if total == 0:
         logger.warning("Знайдено 0 ринків. Нові daily-temperature з’являються ~00:00 UTC")
     else:
-        logger.info(f"✅ Знайдено {total} weather-ринків (coldmath-ready):")
-        for pm in all_markets[:12]:
-            logger.info(f"  [{pm.detected_city or '?'}] {pm.question[:65]} | {pm.hours_to_resolution:.1f}h | ASK={pm.best_ask_yes:.3f} | vol=${pm.volume_usd:,.0f}")
+        logger.info(f"✅ Знайдено {total} weather-ринків (coldmath-ready)")
+        for pm in all_markets[:5]:  # v12: 12→5 (менше логів)
+            logger.debug(f"  [{pm.detected_city or '?'}] {pm.question[:65]} | {pm.hours_to_resolution:.1f}h | ASK={pm.best_ask_yes:.3f} | vol=${pm.volume_usd:,.0f}")
 
     _market_cache[cache_key] = (time.time(), all_markets)
     return all_markets

@@ -1,13 +1,15 @@
 """
-safeguards.py — Polymarket Weather Bot 2026 (v3 — PostgreSQL ONLY)
+safeguards.py — Polymarket Weather Bot 2026 (v12 — SQLite fallback)
 Захисні механізми: circuit breakers, drawdown monitor, аварійна зупинка.
-JSONBin повністю видалено. PostgreSQL = primary, local file = fallback.
+PostgreSQL = primary, SQLite = automatic fallback (безкоштовно, без терміну дії).
 """
 
 import logging
 import json
 import os
 import time as _time
+import sqlite3
+import threading
 from datetime import datetime, timezone
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
@@ -15,6 +17,88 @@ from dataclasses import dataclass, asdict
 import config
 
 logger = logging.getLogger(__name__)
+
+# ─────────────────────────────────────────────
+# SQLite fallback (безкоштовно, без терміну дії)
+# ─────────────────────────────────────────────
+_SQLITE_PATH = os.path.join(config.DATA_DIR, "bot_trades.db")
+_sqlite_lock = threading.Lock()
+
+
+def _get_sqlite_conn() -> Optional[sqlite3.Connection]:
+    """Повертає SQLite з'єднання для fallback логування угод."""
+    try:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        conn = sqlite3.connect(_SQLITE_PATH, timeout=5)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS trade_log ("
+            "    id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "    timestamp TEXT DEFAULT (datetime('now')),"
+            "    cycle INTEGER,"
+            "    action TEXT,"
+            "    direction TEXT,"
+            "    market_question TEXT,"
+            "    city TEXT,"
+            "    forecast_c REAL,"
+            "    threshold_c REAL,"
+            "    our_prob REAL,"
+            "    market_prob REAL,"
+            "    edge REAL,"
+            "    edge_at_entry REAL,"
+            "    size_usd REAL,"
+            "    entry_price REAL,"
+            "    pnl_usd REAL,"
+            "    status TEXT,"
+            "    strategy TEXT DEFAULT 'UNKNOWN',"
+            "    dry_run INTEGER DEFAULT 1,"
+            "    time_decay_factor REAL)"
+        )
+        conn.commit()
+        return conn
+    except Exception as e:
+        logger.debug(f"SQLite init error: {e}")
+        return None
+
+
+def _log_trade_to_sqlite(trade_data: dict) -> bool:
+    """Fallback: запис угоди в локальний SQLite файл."""
+    try:
+        with _sqlite_lock:
+            conn = _get_sqlite_conn()
+            if not conn:
+                return False
+            conn.execute(
+                "INSERT INTO trade_log (cycle, action, direction, market_question, city, "
+                "forecast_c, threshold_c, our_prob, market_prob, edge, edge_at_entry, "
+                "size_usd, entry_price, pnl_usd, status, strategy, dry_run, time_decay_factor) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trade_data.get("cycle"),
+                    trade_data.get("action"),
+                    trade_data.get("direction"),
+                    trade_data.get("market_question"),
+                    trade_data.get("city"),
+                    trade_data.get("forecast_c"),
+                    trade_data.get("threshold_c"),
+                    trade_data.get("our_prob"),
+                    trade_data.get("market_prob"),
+                    trade_data.get("edge"),
+                    trade_data.get("edge_at_entry", trade_data.get("edge", 0.0)),
+                    trade_data.get("size_usd"),
+                    trade_data.get("entry_price"),
+                    trade_data.get("pnl_usd"),
+                    trade_data.get("status"),
+                    trade_data.get("strategy", "UNKNOWN"),
+                    1 if trade_data.get("dry_run", True) else 0,
+                    trade_data.get("time_decay_factor"),
+                )
+            )
+            conn.commit()
+            conn.close()
+            return True
+    except Exception as e:
+        logger.debug(f"SQLite log error: {e}")
+        return False
 
 # ─────────────────────────────────────────────
 # PostgreSQL persistence (для Render free tier)
@@ -115,47 +199,48 @@ def reset_pg_reconnect_counter():
 
 
 def log_trade_to_pg(trade_data: dict) -> bool:
+    """Логування угоди: PostgreSQL → SQLite fallback → file."""
     conn = _get_pg_conn()
-    if not conn:
-        return False
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO trade_log (cycle, action, direction, market_question, city, "
-            "forecast_c, threshold_c, our_prob, market_prob, edge, size_usd, entry_price, "
-            "pnl_usd, status, strategy, dry_run, edge_at_entry, time_decay_factor) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                trade_data.get("cycle"),
-                trade_data.get("action"),
-                trade_data.get("direction"),
-                trade_data.get("market_question"),
-                trade_data.get("city"),
-                trade_data.get("forecast_c"),
-                trade_data.get("threshold_c"),
-                trade_data.get("our_prob"),
-                trade_data.get("market_prob"),
-                trade_data.get("edge"),
-                trade_data.get("size_usd"),
-                trade_data.get("entry_price"),
-                trade_data.get("pnl_usd"),
-                trade_data.get("status"),
-                trade_data.get("strategy", "UNKNOWN"),
-                trade_data.get("dry_run", True),
-                trade_data.get("edge_at_entry", trade_data.get("edge", 0.0)),
-                trade_data.get("time_decay_factor")
-            )
-        )
-        conn.commit()
-        cur.close()
-        return True
-    except Exception as e:
-        logger.debug(f"PostgreSQL log_trade error: {e}")
+    if conn:
         try:
-            conn.rollback()
-        except Exception:
-            pass
-        return False
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO trade_log (cycle, action, direction, market_question, city, "
+                "forecast_c, threshold_c, our_prob, market_prob, edge, size_usd, entry_price, "
+                "pnl_usd, status, strategy, dry_run, edge_at_entry, time_decay_factor) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    trade_data.get("cycle"),
+                    trade_data.get("action"),
+                    trade_data.get("direction"),
+                    trade_data.get("market_question"),
+                    trade_data.get("city"),
+                    trade_data.get("forecast_c"),
+                    trade_data.get("threshold_c"),
+                    trade_data.get("our_prob"),
+                    trade_data.get("market_prob"),
+                    trade_data.get("edge"),
+                    trade_data.get("size_usd"),
+                    trade_data.get("entry_price"),
+                    trade_data.get("pnl_usd"),
+                    trade_data.get("status"),
+                    trade_data.get("strategy", "UNKNOWN"),
+                    trade_data.get("dry_run", True),
+                    trade_data.get("edge_at_entry", trade_data.get("edge", 0.0)),
+                    trade_data.get("time_decay_factor")
+                )
+            )
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            logger.debug(f"PostgreSQL log_trade error: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    # v12: SQLite fallback — безкоштовно, без терміну дії
+    return _log_trade_to_sqlite(trade_data)
 
 
 def _pg_save(data: dict) -> bool:
