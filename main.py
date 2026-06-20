@@ -53,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 _running = True
 _safeguard = None
+_initialized = False
 
 class _HealthHandler(BaseHTTPRequestHandler):
     safeguard_manager = None
@@ -118,7 +119,10 @@ def _start_health_server():
     logger.info(f"🌐 Health check сервер запущено на порту {port}")
 
 def _save_state_and_exit():
-    global _safeguard
+    global _safeguard, _initialized
+    if not _initialized:
+        logger.warning("⚠️ Бот ще не ініціалізовано — НЕ зберігаємо порожній стан у PostgreSQL!")
+        return
     logger.info("💾 Зберігаємо стан перед виходом...")
     if _safeguard is not None:
         _safeguard.save_positions(_trader._active_positions)
@@ -131,7 +135,6 @@ def _signal_handler(sig, frame):
     global _running
     logger.info(f"⏹ Отримано сигнал {sig}, завершуємо роботу...")
     _running = False
-    sys.exit(0)
 
 signal.signal(signal.SIGINT, _signal_handler)
 signal.signal(signal.SIGTERM, _signal_handler)
@@ -442,6 +445,7 @@ def main():
         sys.exit(1)
 
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
+    _initialized = True
     logger.info("🚀 Бот запущено. Ctrl+C для зупинки.\n")
 
     cycle_count = 0
