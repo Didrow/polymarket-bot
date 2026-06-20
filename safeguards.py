@@ -1,7 +1,7 @@
 """
-safeguards.py — Polymarket Weather Bot 2026 (v12 — SQLite fallback)
+safeguards.py — Polymarket Weather Bot 2026 (v13 — Neon PostgreSQL)
 Захисні механізми: circuit breakers, drawdown monitor, аварійна зупинка.
-PostgreSQL = primary, SQLite = automatic fallback (безкоштовно, без терміну дії).
+PostgreSQL = primary (Neon serverless via psycopg2), SQLite = automatic fallback.
 """
 
 import logging
@@ -101,43 +101,56 @@ def _log_trade_to_sqlite(trade_data: dict) -> bool:
         return False
 
 # ─────────────────────────────────────────────
-# PostgreSQL persistence (для Render free tier)
+# PostgreSQL persistence (Neon / Render / будь-який)
+# psycopg2: стандартний драйвер, працює з Neon connection string як є
 # ─────────────────────────────────────────────
 _DATABASE_URL: Optional[str] = os.environ.get("DATABASE_URL")
-_pg_conn = None
+_pg_pool = None
 _pg_reconnect_attempts = 0
 _PG_MAX_RECONNECT = 3
 
 
 def _get_pg_conn():
-    global _pg_conn, _pg_reconnect_attempts
+    global _pg_pool, _pg_reconnect_attempts
     if not _DATABASE_URL:
         return None
-    if _pg_conn is not None:
+
+    try:
+        import psycopg2
+        from psycopg2 import pool
+    except ImportError:
+        logger.debug("psycopg2 не встановлено, спроба pg8000")
+        return _get_pg_conn_pg8000()
+
+    if _pg_pool is not None:
         try:
-            cur = _pg_conn.cursor()
+            conn = _pg_pool.getconn()
+            cur = conn.cursor()
             cur.execute("SELECT 1")
             cur.close()
-            return _pg_conn
+            conn.commit()
+            return conn
         except Exception:
-            _pg_conn = None
-    # Обмежуємо кількість спроб переконнекту за цикл
+            try:
+                _pg_pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            _pg_pool = None
+
     if _pg_reconnect_attempts >= _PG_MAX_RECONNECT:
         return None
+
     try:
-        import pg8000
-        from urllib.parse import urlparse
-        parsed = urlparse(_DATABASE_URL)
-        _pg_conn = pg8000.connect(
-            host=parsed.hostname,
-            port=parsed.port or 5432,
-            user=parsed.username,
-            password=parsed.password,
-            database=parsed.path.lstrip("/"),
-            timeout=10,
+        conn_url = _DATABASE_URL
+        if "sslmode=" not in conn_url:
+            conn_url += "?sslmode=require"
+
+        _pg_pool = pool.SimpleConnectionPool(
+            1, 5, dsn=conn_url
         )
-        _pg_conn.autocommit = False
-        cur = _pg_conn.cursor()
+        conn = _pg_pool.getconn()
+        conn.autocommit = False
+        cur = conn.cursor()
         cur.execute(
             "CREATE TABLE IF NOT EXISTS bot_state ("
             "  id INTEGER PRIMARY KEY,"
@@ -168,7 +181,6 @@ def _get_pg_conn():
             "    time_decay_factor REAL"
             ")"
         )
-        # Автоматична міграція для існуючих таблиць
         try:
             cur.execute("ALTER TABLE trade_log ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'UNKNOWN'")
         except Exception as migration_err:
@@ -181,14 +193,104 @@ def _get_pg_conn():
             cur.execute("ALTER TABLE trade_log ADD COLUMN IF NOT EXISTS time_decay_factor REAL")
         except Exception as migration_err:
             logger.debug(f"Migration column 'time_decay_factor' info/skipped: {migration_err}")
-        _pg_conn.commit()
+        conn.commit()
         cur.close()
         _pg_reconnect_attempts = 0
-        logger.info("🐘 PostgreSQL: таблиці bot_state та trade_log перевірено/створено")
-        return _pg_conn
+        logger.info("🐘 PostgreSQL (psycopg2+Neon): таблиці bot_state та trade_log перевірено/створено")
+        return conn
     except Exception as e:
         _pg_reconnect_attempts += 1
         logger.warning(f"PostgreSQL недоступний (спроба {_pg_reconnect_attempts}): {e}")
+        logger.info("Спроба fallback через pg8000...")
+        return _get_pg_conn_pg8000()
+
+
+def _pg_release_conn(conn):
+    """Повертає з'єднання в пул (psycopg2)."""
+    global _pg_pool
+    if _pg_pool is not None:
+        try:
+            _pg_pool.putconn(conn)
+        except Exception:
+            pass
+    else:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _get_pg_conn_pg8000():
+    """Fallback: підключення через pg8000 (якщо psycopg2 недоступний)."""
+    global _pg_reconnect_attempts
+    try:
+        import ssl
+        import pg8000
+        from urllib.parse import urlparse
+        parsed = urlparse(_DATABASE_URL)
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        conn = pg8000.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            database=parsed.path.lstrip("/"),
+            timeout=15,
+            ssl_context=ssl_context,
+        )
+        conn.autocommit = False
+        cur = conn.cursor()
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS bot_state ("
+            "  id INTEGER PRIMARY KEY,"
+            "  state_json TEXT NOT NULL,"
+            "  updated_at TIMESTAMP DEFAULT NOW()"
+            ")"
+        )
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS trade_log ("
+            "    id SERIAL PRIMARY KEY,"
+            "    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),"
+            "    cycle INTEGER,"
+            "    action TEXT,"
+            "    direction TEXT,"
+            "    market_question TEXT,"
+            "    city TEXT,"
+            "    forecast_c REAL,"
+            "    threshold_c REAL,"
+            "    our_prob REAL,"
+            "    market_prob REAL,"
+            "    edge REAL,"
+            "    size_usd REAL,"
+            "    entry_price REAL,"
+            "    pnl_usd REAL,"
+            "    status TEXT,"
+            "    strategy TEXT DEFAULT 'UNKNOWN',"
+            "    dry_run BOOLEAN DEFAULT TRUE,"
+            "    time_decay_factor REAL"
+            ")"
+        )
+        try:
+            cur.execute("ALTER TABLE trade_log ADD COLUMN IF NOT EXISTS strategy TEXT DEFAULT 'UNKNOWN'")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE trade_log ADD COLUMN IF NOT EXISTS edge_at_entry REAL")
+        except Exception:
+            pass
+        try:
+            cur.execute("ALTER TABLE trade_log ADD COLUMN IF NOT EXISTS time_decay_factor REAL")
+        except Exception:
+            pass
+        conn.commit()
+        cur.close()
+        logger.info("🐘 PostgreSQL (pg8000 fallback): таблиці перевірено/створено")
+        return conn
+    except Exception as e:
+        _pg_reconnect_attempts += 1
+        logger.warning(f"pg8000 fallback також недоступний: {e}")
         return None
 
 
@@ -232,6 +334,7 @@ def log_trade_to_pg(trade_data: dict) -> bool:
             )
             conn.commit()
             cur.close()
+            _pg_release_conn(conn)
             return True
         except Exception as e:
             logger.debug(f"PostgreSQL log_trade error: {e}")
@@ -239,7 +342,7 @@ def log_trade_to_pg(trade_data: dict) -> bool:
                 conn.rollback()
             except Exception:
                 pass
-    # v12: SQLite fallback — безкоштовно, без терміну дії
+            _pg_release_conn(conn)
     return _log_trade_to_sqlite(trade_data)
 
 
@@ -257,6 +360,7 @@ def _pg_save(data: dict) -> bool:
         )
         conn.commit()
         cur.close()
+        _pg_release_conn(conn)
         return True
     except Exception as e:
         logger.debug(f"PostgreSQL save error: {e}")
@@ -264,6 +368,7 @@ def _pg_save(data: dict) -> bool:
             conn.rollback()
         except Exception:
             pass
+        _pg_release_conn(conn)
         return False
 
 
@@ -276,10 +381,12 @@ def _pg_load() -> Optional[dict]:
         cur.execute("SELECT state_json FROM bot_state WHERE id = 1")
         row = cur.fetchone()
         cur.close()
+        _pg_release_conn(conn)
         if row:
             return json.loads(row[0])
     except Exception as e:
         logger.debug(f"PostgreSQL load error: {e}")
+        _pg_release_conn(conn)
     return None
 
 

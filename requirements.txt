@@ -14,5 +14,8 @@ requests>=2.31.0
 web3>=6.11.0
 eth-account>=0.10.0
 
-# PostgreSQL persistence (Render free tier)
+# PostgreSQL persistence (Neon / Render)
+# psycopg2-binary: основний драйвер (швидший, standard для Neon)
+psycopg2-binary>=2.9.9
+# pg8000: fallback (якщо psycopg2 не збереться на платформі)
 pg8000>=1.31.0
