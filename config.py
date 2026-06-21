@@ -34,7 +34,7 @@ STOP_LOSS_PCT: float = 0.13
 MAX_POSITION_USD: float = 3.0
 MAX_DAILY_LOSS_PCT: float = 0.20        # LIVE grid buffer: не зупиняти при нормальних unrealized grid swings
 MAX_DAILY_LOSS_USD: float = 20.0
-MAX_TOTAL_EXPOSURE_PCT: float = 0.25
+MAX_TOTAL_EXPOSURE_PCT: float = 0.50
 
 # ── CALIBRATED SNIPER GRID (v11: FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True

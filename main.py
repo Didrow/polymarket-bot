@@ -20,7 +20,7 @@ load_dotenv()
 import config
 import security
 import notifier
-from safeguards import SafeguardManager
+from safeguards import SafeguardManager, reset_pg_reconnect_counter
 from market_scanner import fetch_weather_markets
 from edge_calculator import scan_all_edges
 from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions, cleanup_stale_positions, startup_cleanup
@@ -458,6 +458,7 @@ def main():
             cap = safeguard.state.current_capital
             pnl = safeguard.state.total_pnl
             pnl_sign = "+" if pnl >= 0 else ""
+            reset_pg_reconnect_counter()
             logger.info(
                 f"─── Цикл #{cycle_count} | {datetime.now().strftime('%H:%M:%S')} | "
                 f"💰 Капітал: ${cap:.2f} | PnL: {pnl_sign}${pnl:.2f} ───"

@@ -346,6 +346,10 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         logger.info(f"📋 Уже в активних позиціях: {market.question[:60]}")
         return None
 
+    if len(_active_positions) >= config.MAX_ACTIVE_POSITIONS:
+        logger.info(f"📋 Абсолютний ліміт {config.MAX_ACTIVE_POSITIONS} позицій досягнуто — пропускаємо {market.question[:60]}")
+        return None
+
     if clean_cid in _recently_closed:
         closed_at = _recently_closed[clean_cid]
         if isinstance(closed_at, datetime):

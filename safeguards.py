@@ -474,7 +474,11 @@ class SafeguardManager:
             try:
                 valid_keys = BotState.__dataclass_fields__
                 state = BotState(**{k: v for k, v in pg_data.items() if k in valid_keys})
-                logger.info("🐘 Стан відновлено з PostgreSQL")
+                if state.current_capital >= config.INITIAL_CAPITAL or state.total_pnl != 0.0 or state.total_trades > 0:
+                    logger.info(f"🐘 Стан відновлено з PostgreSQL (cap=${state.current_capital:.2f}, PnL=${state.total_pnl:+.2f}, trades={state.total_trades})")
+                else:
+                    logger.warning(f"🐘 PostgreSQL стан виглядає як скидання (cap=${state.current_capital:.2f}) — перевіряємо локальний файл")
+                    state = None
             except Exception as e:
                 logger.warning(f"PostgreSQL parse error: {e}")
 
@@ -484,8 +488,12 @@ class SafeguardManager:
                 with open(STATE_FILE) as f:
                     data = json.load(f)
                     valid_keys = BotState.__dataclass_fields__
-                    state = BotState(**{k: v for k, v in data.items() if k in valid_keys})
-                    logger.info("💾 Стан відновлено з локального файлу")
+                    file_state = BotState(**{k: v for k, v in data.items() if k in valid_keys})
+                    if file_state.current_capital >= config.INITIAL_CAPITAL or file_state.total_pnl != 0.0 or file_state.total_trades > 0:
+                        state = file_state
+                        logger.info(f"💾 Стан відновлено з локального файлу (cap=${state.current_capital:.2f})")
+                    else:
+                        logger.warning(f"💾 Локальний стан також скинутий (cap=${file_state.current_capital:.2f}) — ігноруємо")
             except Exception as e:
                 logger.warning(f"Локальний стан пошкоджений: {e}")
 
