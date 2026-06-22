@@ -88,11 +88,10 @@ class WeatherForecast:
             mean = self.temp_low_c if is_low else self.temp_high_c
             prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
             
-            # ✅ v9 FIX: вагу емпірики знижено до 20% (з 40%)
-            # GFS 31 member — НЕ незалежні прогнози, кореляція ~0.8-0.9.
-            # Реальний win rate 0% з 10+ trades показав що ми переоцінюємо ймовірності.
-            # Параметрика з коректним sigma — надійніша за емпіричний підрахунок.
-            prob = prob_empirical * 0.20 + prob_parametric * 0.80
+            # v13: збільшено вагу емпірики до 30% (з 20%)
+            # GFS 31 member корелюють, але 0.20 було занадто консервативно.
+            # Реалістичний баланс: 0.30 емпірика + 0.70 параметрика.
+            prob = prob_empirical * 0.30 + prob_parametric * 0.70
             return prob
         
         # Fallback до одного значення, якщо ансамбль недоступний
@@ -152,14 +151,14 @@ class WeatherForecast:
             p_low  = 0.5 * (1 + math.erf(((threshold_c - half_width) - mean) / (sigma * math.sqrt(2))))
             prob_parametric = max(0.0, p_high - p_low)
             
-            # v11: розблоковано forecast ladder grid — знижено over-calibration
-            # Було 0.30 (знижка 70%) → 0.55 (знижка 45%).
-            # GFS ensemble members корелюють, але 0.30 було занадто агресивним:
-            # our_prob=0.04 для бакета 24°C при прогнозі 23.5°C → сітка не працювала.
+            # v13: реалістичні ймовірності для forecast ladder grid
+            # Було 0.30/0.70*0.55 (discount 45%) — our_prob=11% для бакета при прогнозі.
+            # Тепер 0.40/0.60*0.75 (discount 25%) — our_prob=22-30% для центрального бакета.
+            # Це дозволяє сітці 16.8/16.9/17.0/17.1/17.2 мати реалістичні edge.
             if prob_empirical == 0.0:
-                prob = prob_parametric * 0.30  # v11: 0.15→0.30
+                prob = prob_parametric * 0.50  # v13: 0.30→0.50 (нульова емпірика — не означає 0% шанс)
             else:
-                prob = (prob_empirical * 0.30 + prob_parametric * 0.70) * 0.55  # v11: 0.20/0.80*0.30 → 0.30/0.70*0.55
+                prob = (prob_empirical * 0.40 + prob_parametric * 0.60) * 0.75  # v13: 0.30/0.70*0.55 → 0.40/0.60*0.75
             return max(0.01, min(max_cap, round(prob, 4)))
 
         sigma = self._get_sigma(hours) * 1.5  # Більш консервативний для одного значення

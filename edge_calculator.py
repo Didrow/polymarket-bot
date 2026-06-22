@@ -1,12 +1,13 @@
 """
-edge_calculator.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
+edge_calculator.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v13)
 
-Адаптовано під стратегію "fridius2" + ColdMath:
-- Повністю вимкнено пошук угод BUY_NO.
-- Агресивний пошук дешевих BUY_YES (до 12 центів) через Ансамблеві ймовірності.
-- Купівля сусідніх температур для створення "Рибальської сітки" навколо прогнозу.
-- Адаптивна фільтрація за спредом (max spread 5 центів) для уникнення неліквідних ринків.
-- Фільтр відстані для categorical ринків (max 3°C від прогнозу) з коректною обробкою 0°C та мінусових температур.
+Стратегія neobrother-style forecast ladder grid:
+- BUY_YES only, focus on buckets NEAR the forecast peak (8-60¢)
+- Grid of 3-5 adjacent temperature buckets (±1°C from forecast)
+- Realistic probabilities via reduced over-calibration (v13)
+- Quarter-Kelly position sizing for optimal bankroll growth
+- Adaptive spread filter for liquid markets
+- Distance filter for categorical markets (max 2.5°C from forecast)
 """
 
 import math
@@ -219,17 +220,18 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
         else:
             _max_r = config.PROB_CAP_EXACT_LONG
 
-        # v11: розблоковано forecast ladder grid — знижено over-calibration
-        # Було 0.30 (знижка 70%) → 0.55 (знижка 45%), що дає реалістичні our_prob для сусідніх бакетів
+        # v13: реалістичні ймовірності для range бакетів (сітка ±1°C)
+        # Було 0.30/0.70*0.55 (discount 45%) — our_prob занадто малий.
+        # Тепер 0.40/0.60*0.75 (discount 25%) — our_prob реалістичний для сітки.
         if members and len(members) >= 5:
             count_in = sum(1 for m in members if t_min_c <= m < t_max_c)
             prob_empirical = count_in / len(members)
             if prob_empirical == 0.0:
-                p = prob_parametric * 0.30  # v11: 0.15→0.30
+                p = prob_parametric * 0.50  # v13: 0.30→0.50
             else:
-                p = (prob_empirical * 0.30 + prob_parametric * 0.70) * 0.55  # v11: 0.20/0.80*0.30 → 0.30/0.70*0.55
+                p = (prob_empirical * 0.40 + prob_parametric * 0.60) * 0.75  # v13: 0.30/0.70*0.55 → 0.40/0.60*0.75
         else:
-            p = prob_parametric * 0.55  # v11: 0.30→0.55
+            p = prob_parametric * 0.75  # v13: 0.55→0.75
 
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
@@ -350,8 +352,8 @@ def _log_price_validation(market: PolyMarket) -> None:
 def _is_extreme_tail_yes_market(market_prob: float) -> bool:
     return (
         getattr(config, "ENABLE_EXTREME_TAIL_YES", True)
-        and market_prob >= getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
-        and market_prob <= getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.15)
+        and market_prob >= getattr(config, "SNIPER_GRID_MIN_ASK", 0.08)
+        and market_prob <= getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.55)
     )
 
 
@@ -463,9 +465,20 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok, min_edge=grid_min_edge)
 
     if tradeable:
-        size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
-        if "categorical" in kind_label or "range" in kind_label:
-            size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
+        # ── v13: Kelly position sizing ──
+        if getattr(config, "USE_KELLY", False) and our_prob > 0 and market_prob > 0:
+            kelly_fraction = (our_prob - market_prob) / (1 - market_prob)
+            kelly_fraction = max(0, min(kelly_fraction, 1.0))
+            kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
+            size_usd = round(kelly_fraction * kelly_scale * config.INITIAL_CAPITAL, 2)
+            size_usd = max(config.MIN_POSITION_USD, min(size_usd, getattr(config, "KELLY_MAX_POSITION_USD", config.MAX_POSITION_USD)))
+            # Для пікових бакетів (ближче до прогнозу) — більший розмір
+            if distance_c is not None and distance_c < 1.0:
+                size_usd = min(size_usd * 1.3, config.MAX_POSITION_USD)
+        else:
+            size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
+            if "categorical" in kind_label or "range" in kind_label:
+                size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
         reason = (
             f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
             f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
@@ -615,9 +628,18 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                         our_prob,
                         eff_edge,
                         adj_dist_ok,
-                        min_edge=getattr(config, "ADJACENT_GRID_MIN_EDGE", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.01)),
-                        min_prob=getattr(config, "ADJACENT_GRID_MIN_PROB", getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)),
+                        min_edge=getattr(config, "ADJACENT_GRID_MIN_EDGE", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.03)),
+                        min_prob=getattr(config, "ADJACENT_GRID_MIN_PROB", getattr(config, "SNIPER_GRID_MIN_PROB", 0.06)),
                     ):
+                        # ── v13: Kelly sizing for adjacent grid buckets ──
+                        if getattr(config, "USE_KELLY", False) and our_prob > 0 and market_prob > 0:
+                            kelly_fraction = (our_prob - market_prob) / (1 - market_prob)
+                            kelly_fraction = max(0, min(kelly_fraction, 1.0))
+                            kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
+                            adj_size_usd = round(kelly_fraction * kelly_scale * config.INITIAL_CAPITAL * 0.70, 2)
+                            adj_size_usd = max(config.MIN_POSITION_USD, min(adj_size_usd, getattr(config, "KELLY_MAX_POSITION_USD", config.MAX_POSITION_USD)))
+                        else:
+                            adj_size_usd = config.ADJACENT_GRID_SIZE_USD
                         edge = EdgeResult(
                             market=market,
                             forecast=forecast,
@@ -628,7 +650,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                             confidence=confidence,
                             reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {adj_kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C | decay={time_decay:.2f}",
                             is_tradeable=True,
-                            size_usd=config.ADJACENT_GRID_SIZE_USD,
+                            size_usd=adj_size_usd,
                             threshold_c=adj_th_c,
                             distance_c=adj_distance_c or 0.0,
                             time_decay_factor=time_decay,

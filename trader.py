@@ -309,19 +309,20 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
 
     if config.ENABLE_COMPOUND:
         if config.USE_KELLY:
-            # КРИТИЧНО: cap prob на 0.55 для Kelly — завищені prob ведуть до oversizing
-            p = min(edge_result.estimated_prob, 0.55)
+            kelly_prob_cap = getattr(config, "KELLY_PROB_CAP", 0.60)
+            p = min(edge_result.estimated_prob, kelly_prob_cap)
             q = 1.0 - p
             b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
             kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-            # Чверть-Kelly — стандарт для алготрейдингу
-            kelly_size = current_capital * kelly_raw * 0.25 * confidence
+            kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
+            kelly_size = current_capital * kelly_raw * kelly_scale * confidence
             final = min(vol_size, kelly_size)
         else:
             fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT * confidence
             final = min(vol_size, fixed_pct_size)
     else:
-        p = min(edge_result.estimated_prob, 0.55)
+        kelly_prob_cap = getattr(config, "KELLY_PROB_CAP", 0.60)
+        p = min(edge_result.estimated_prob, kelly_prob_cap)
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
@@ -461,13 +462,12 @@ def cleanup_stale_positions() -> List[Position]:
     for cid, pos in list(_active_positions.items()):
         is_weather = pos.market_type in ("temperature", "rain", "snow")
 
-        # Дозволяємо ринкам висіти до 48 годин після закінчення
         market_ended = (
-            (pos.end_date and now > pos.end_date + timedelta(hours=48))
+            (pos.end_date and now > pos.end_date + timedelta(hours=30))
         )
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
-        should_cleanup = market_ended or (not is_weather and age_hours > 48)
+        should_cleanup = market_ended or (not is_weather and age_hours > 36)
         if should_cleanup:
             logger.info(f"🧹 Прибираємо застарілий ринок: {pos.question[:50]}")
             resolved = check_market_resolved(cid, position=pos)
@@ -478,7 +478,7 @@ def cleanup_stale_positions() -> List[Position]:
                 _recently_closed[cid] = now
                 removed.append(pos)
             else:
-                if config.DRY_RUN and age_hours > 48:
+                if config.DRY_RUN and age_hours > 36:
                     pos.status = "EXPIRED"
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
@@ -529,7 +529,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             _recently_closed[cid] = now
             continue
 
-        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=48):
+        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=30):
             resolved_yes = None
             try:
                 r = requests.get(
@@ -554,9 +554,9 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 if config.DRY_RUN:
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
-            logger.warning(
-                f"⏰ Force-close >48h after end_date: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
-            )
+                logger.warning(
+                    f"⏰ Force-close >30h after end_date: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
+                )
             closed.append(pos)
             del _active_positions[cid]
             _recently_closed[cid] = now

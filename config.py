@@ -1,10 +1,11 @@
 """
-config.py — Polymarket Weather Bot (CALIBRATED SNIPER GRID v10)
+config.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v13)
 
-Conservative strategy:
-- Raw ensemble probabilities are intentionally discounted and calibrated.
-- BUY_YES only.
-- Trade a limited grid around the forecast peak, not unlimited cheap tails.
+Strategy: neobrother-style forecast ladder grid
+- BUY_YES only, focus on buckets NEAR the forecast peak (10-50¢)
+- Grid of 3-5 adjacent temperature buckets (±1°C from forecast)
+- Realistic probabilities via reduced over-calibration
+- Quarter-Kelly position sizing for optimal bankroll growth
 - DRY-RUN validation gates must pass before LIVE trading is allowed.
 """
 
@@ -21,49 +22,49 @@ CHAIN_ID: int = 137
 
 # ── CAPITAL AND RISK MANAGEMENT ───────────────────────────────
 INITIAL_CAPITAL: float = 100.0
-MAX_POSITION_PCT: float = 0.03
+MAX_POSITION_PCT: float = 0.04          # v13: 0.03→0.04 (Kelly потребує більше місця)
 MIN_POSITION_USD: float = 1.0
 BASE_POSITION_USD: float = 1.5
-MAX_ACTIVE_POSITIONS: int = 12       # v12: 8→12 (більше одночасних угод)
-MAX_OPEN_PER_CYCLE: int = 4          # v12: 3→4
-RESERVED_FAST_SLOTS: int = 1         # v12: 2→1 (більше slow слотів)
+MAX_ACTIVE_POSITIONS: int = 10          # v13: 12→10 (менше угод, якісніші)
+MAX_OPEN_PER_CYCLE: int = 4
+RESERVED_FAST_SLOTS: int = 1
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0
-MAX_POSITIONS_PER_CITY: int = 5      # v12: 4→5 (сітка до 5 бакетів)
+MAX_POSITIONS_PER_CITY: int = 5         # сітка до 5 бакетів на місто
 MAX_DRAWDOWN_PCT: float = 0.35
-STOP_LOSS_PCT: float = 0.13
-MAX_POSITION_USD: float = 3.0
-MAX_DAILY_LOSS_PCT: float = 0.20        # LIVE grid buffer: не зупиняти при нормальних unrealized grid swings
+STOP_LOSS_PCT: float = 0.15             # v13: 0.13→0.15 (дати сітці дихати)
+MAX_POSITION_USD: float = 4.0           # v13: 3.0→4.0 (Kelly на пікових бакетах)
+MAX_DAILY_LOSS_PCT: float = 0.20
 MAX_DAILY_LOSS_USD: float = 20.0
-MAX_TOTAL_EXPOSURE_PCT: float = 0.50
+MAX_TOTAL_EXPOSURE_PCT: float = 0.55    # v13: 0.50→0.55 (сітка потребує більше експозиції)
 
-# ── CALIBRATED SNIPER GRID (v11: FORECAST LADDER) ──────────────
+# ── CALIBRATED SNIPER GRID (v13: PROFITABLE FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
-EXTREME_TAIL_MAX_ASK_YES: float = 0.25
-EXTREME_TAIL_MIN_ASK_YES: float = 0.05
-EXTREME_TAIL_MAX_SIZE_USD: float = 1.5
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.02  # v11: 0.04→0.02 (розблокувати дешеві сусідні бакети)
+EXTREME_TAIL_MAX_ASK_YES: float = 0.55     # v13: 0.25→0.55 (дозволити бакети 15-55¢ поблизу прогнозу)
+EXTREME_TAIL_MIN_ASK_YES: float = 0.08     # v13: 0.05→0.08 (відсіяти мертві хвости <8¢)
+EXTREME_TAIL_MAX_SIZE_USD: float = 2.0     # v13: 1.5→2.0 (більше на якісні бакети)
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.04    # v13: 0.02→0.04 (реальний edge, не лотерея)
 
 ENABLE_ADJACENT_GRID: bool = True
-SNIPER_GRID_DISTANCE_C: float = 4.0
-SNIPER_GRID_DISTANCE_F: float = 6.0
-SNIPER_GRID_MIN_EDGE: float = 0.02  # v11: 0.03→0.02
-SNIPER_GRID_MIN_PROB: float = 0.05  # v11: 0.03→0.02
-SNIPER_GRID_MAX_ASK: float = 0.75
-SNIPER_GRID_MIN_ASK: float = 0.05
-SNIPER_GRID_SIZE_USD: float = 1.5
-SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5  # v11: 4→5 (сітка 16/17/18/19/20)
-GRID_FORECAST_STEP_C: float = 0.1
-GRID_FORECAST_SPAN_C: float = 0.2
+SNIPER_GRID_DISTANCE_C: float = 2.5        # v13: 4.0→2.5 (сітка ±1°C, не ±2°C)
+SNIPER_GRID_DISTANCE_F: float = 4.5        # v13: 6.0→4.5
+SNIPER_GRID_MIN_EDGE: float = 0.04         # v13: 0.02→0.04
+SNIPER_GRID_MIN_PROB: float = 0.08         # v13: 0.05→0.08 (реалістичний мінімум)
+SNIPER_GRID_MAX_ASK: float = 0.60          # v13: 0.75→0.60 (не купувати дорогі >60¢)
+SNIPER_GRID_MIN_ASK: float = 0.08          # v13: 0.05→0.08
+SNIPER_GRID_SIZE_USD: float = 2.0          # v13: 1.5→2.0
+SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5  # сітка 5 бакетів: -2,-1,0,+1,+2
+GRID_FORECAST_STEP_C: float = 1.0          # v13: 0.1→1.0 (крок сітки 1°C)
+GRID_FORECAST_SPAN_C: float = 2.0          # v13: 0.2→2.0 (половина сітки ±2°C)
 
-ADJACENT_GRID_SIZE_USD: float = 1.5
-ADJACENT_GRID_MIN_EDGE: float = 0.02  # v11: 0.03→0.02
-ADJACENT_GRID_MIN_PROB: float = 0.05  # v11: 0.03→0.02
-ADJACENT_GRID_MAX_ASK: float = 0.75
+ADJACENT_GRID_SIZE_USD: float = 1.5        # хвости сітки — менші ставки
+ADJACENT_GRID_MIN_EDGE: float = 0.03       # v13: 0.02→0.03
+ADJACENT_GRID_MIN_PROB: float = 0.06       # v13: 0.05→0.06
+ADJACENT_GRID_MAX_ASK: float = 0.60
 
 # ── STANDARD EDGE (for calibrated BUY_YES) ─────────────────────
-MIN_EDGE_ENTRY: float = 0.03
+MIN_EDGE_ENTRY: float = 0.05               # v13: 0.03→0.05 (реальний edge)
 MIN_EDGE_HOLD: float = 0.02
-MIN_PROB_ENTRY: float = 0.03
+MIN_PROB_ENTRY: float = 0.05               # v13: 0.03→0.05
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
@@ -76,10 +77,11 @@ TARGET_PORTFOLIO_VOL: float = 0.10
 
 # ── COMPOUNDING (re-investing) ────────────────────────────────
 ENABLE_COMPOUND: bool = True
-COMPOUND_RISK_PCT: float = 0.02
-USE_KELLY: bool = False
-KELLY_SCALE: float = 0.25
-KELLY_MAX_POSITION_USD: float = 5.0
+COMPOUND_RISK_PCT: float = 0.03            # v13: 0.02→0.03
+USE_KELLY: bool = True                     # v13: False→True (Quarter-Kelly для оптимального розміру)
+KELLY_SCALE: float = 0.25                  # Quarter-Kelly
+KELLY_MAX_POSITION_USD: float = 5.0        # v13: 5.0 (залишаємо)
+KELLY_PROB_CAP: float = 0.60               # v13: новий параметр, кап ймовірності для Kelly
 
 # ── DRY-RUN VALIDATION GATES BEFORE LIVE ───────────────────────
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
@@ -130,15 +132,16 @@ PROB_TIME_DECAY_MID: float = 0.95
 PROB_TIME_DECAY_LONG: float = 0.90
 
 # prob_above_temp_c / prob_below_temp_c (relatively reliable)
-PROB_CAP_ABOVE_SHORT: float = 0.75
-PROB_CAP_ABOVE_MID:   float = 0.68
-PROB_CAP_ABOVE_LONG:  float = 0.60
+PROB_CAP_ABOVE_SHORT: float = 0.80         # v13: 0.75→0.80
+PROB_CAP_ABOVE_MID:   float = 0.72         # v13: 0.68→0.72
+PROB_CAP_ABOVE_LONG:  float = 0.65         # v13: 0.60→0.65
 
 # prob_exact_temp_c / range / categorical — main calibration target
-# v11: піднято caps щоб розблокувати сітку бакетів поблизу прогнозу
-PROB_CAP_EXACT_SHORT: float = 0.50  # v11: 0.40→0.50
-PROB_CAP_EXACT_MID:   float = 0.38  # v11: 0.32→0.38
-PROB_CAP_EXACT_LONG:  float = 0.30  # v11: 0.25→0.30
+# v13: піднято caps щоб сітка бакетів поблизу прогнозу мала реалістичні our_prob
+# Бакет 17°C при прогнозі 17.0°C: реальна ймовірність ~25-35%, не 11%
+PROB_CAP_EXACT_SHORT: float = 0.60         # v13: 0.50→0.60
+PROB_CAP_EXACT_MID:   float = 0.48         # v13: 0.38→0.48
+PROB_CAP_EXACT_LONG:  float = 0.38         # v13: 0.30→0.38
 
 # Maximum edge (prevents phantom edge > 35%)
 MAX_EDGE_CAP: float = 0.35
