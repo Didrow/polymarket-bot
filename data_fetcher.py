@@ -60,9 +60,8 @@ class WeatherForecast:
         bias = consensus_mean - gfs_mean
         return [m + bias for m in members]
 
-    def _get_sigma(self, hours: float = 24.0) -> float:
-        """Динамічний sigma залежно від міста та горизонту прогнозу."""
-        base = {
+    def _get_base_sigma(self) -> float:
+        return {
             "Lucknow": 0.9, "Miami": 0.9, "Singapore": 0.8, "Dubai": 0.8,
             "Cape Town": 1.1, "Sao Paulo": 1.0, "Sydney": 1.2,
             "Buenos Aires": 1.2, "London": 1.3, "Paris": 1.3,
@@ -70,9 +69,16 @@ class WeatherForecast:
             "Seoul": 1.5, "NYC": 1.5, "Seattle": 1.2, "Los Angeles": 1.0,
             "Dallas": 1.6, "Chicago": 1.7,
         }.get(self.city, 1.2)
-        # Невизначеність зростає з горизонтом прогнозу
-        hour_factor = 1.0 + 0.015 * max(0, hours - 6)
-        return base * min(hour_factor, 1.5)
+
+    def _get_sigma(self, hours: float = 24.0) -> float:
+        base = self._get_base_sigma()
+        try:
+            from sigma_calibrator import get_adaptive_sigma
+            source = "+".join(self.sources_used) if self.sources_used else "SINGLE"
+            return get_adaptive_sigma(self.city, source, base, hours)
+        except Exception:
+            hour_factor = 1.0 + 0.015 * max(0, hours - 6)
+            return base * min(hour_factor, 1.5)
 
     def raw_prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         members = self._get_adjusted_members(is_low)

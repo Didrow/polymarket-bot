@@ -45,12 +45,18 @@ class Position:
     pnl_pct: float = 0.0
     status: str = "OPEN"
     end_date: Optional[datetime] = None
+    peak_price: float = 0.0
+    trailing_stop_activated: bool = False
+    forecast_at_entry_c: float = 0.0
+    threshold_at_entry_c: float = 0.0
 
     def update_pnl(self, current_price: float):
         self.current_price = current_price
         if self.entry_price > 0 and self.shares > 0:
             self.pnl_usd = round(self.shares * current_price - self.size_usd, 4)
             self.pnl_pct = self.pnl_usd / self.size_usd
+        if current_price > self.peak_price:
+            self.peak_price = current_price
 
     def resolve(self, resolved_yes: bool):
         if self.direction == "BUY_YES":
@@ -386,6 +392,9 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         city=market.detected_city,
         market_type=market.market_type,
         end_date=market.end_date,
+        peak_price=price,
+        forecast_at_entry_c=getattr(edge_result.forecast, "temp_high_c", 0.0) if edge_result.forecast else 0.0,
+        threshold_at_entry_c=edge_result.threshold_c,
     )
 
     if pos.end_date:
@@ -473,6 +482,7 @@ def cleanup_stale_positions() -> List[Position]:
             resolved = check_market_resolved(cid, position=pos)
             if resolved is not None:
                 pos.resolve(resolved)
+                _try_record_sigma(pos)
                 logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'} (при cleanup): {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
                 del _active_positions[cid]
                 _recently_closed[cid] = now
@@ -487,6 +497,104 @@ def cleanup_stale_positions() -> List[Position]:
                     _recently_closed[cid] = now
                     removed.append(pos)
     return removed
+
+
+def _check_forecast_shift_close(pos: "Position") -> bool:
+    if pos.forecast_at_entry_c == 0.0 or pos.threshold_at_entry_c == 0.0:
+        return False
+    if pos.city not in getattr(config, "CITY_WHITELIST", []):
+        return False
+    try:
+        from data_fetcher import get_best_forecast
+        from market_scanner import get_target_date
+        t_date = get_target_date(pos.question, pos.end_date, pos.city)
+        hours_left = max(1.0, (pos.end_date - datetime.now(timezone.utc)).total_seconds() / 3600) if pos.end_date else 12.0
+        fc = get_best_forecast(pos.city, hours_to_resolution=hours_left, target_date=t_date)
+        if not fc:
+            return False
+        is_low = 'lowest' in pos.question.lower()
+        current_fc = fc.temp_low_c if is_low else fc.temp_high_c
+        shift = abs(current_fc - pos.forecast_at_entry_c)
+        if shift >= getattr(config, "FORECAST_SHIFT_CLOSE_C", 2.0):
+            dist_to_bucket = abs(current_fc - pos.threshold_at_entry_c)
+            original_dist = abs(pos.forecast_at_entry_c - pos.threshold_at_entry_c)
+            if dist_to_bucket > original_dist * 1.3:
+                logger.info(
+                    f"🌡️ Forecast-shift: {pos.city} forecast {pos.forecast_at_entry_c:.1f}→{current_fc:.1f}°C "
+                    f"(shift={shift:.1f}°C) — bucket {pos.threshold_at_entry_c:.0f}°C moving away"
+                )
+                return True
+    except Exception as e:
+        logger.debug(f"Forecast-shift check error: {e}")
+    return False
+
+
+def _check_trailing_stop(pos: "Position") -> bool:
+    if not getattr(config, "TRAILING_STOP_ENABLED", True):
+        return False
+    if pos.trailing_stop_activated:
+        if pos.current_price < pos.entry_price:
+            logger.info(
+                f"🛑 Trailing stop HIT: {pos.question[:50]} | "
+                f"price={pos.current_price:.4f} < entry={pos.entry_price:.4f}"
+            )
+            return True
+        return False
+    gain_pct = (pos.current_price - pos.entry_price) / pos.entry_price if pos.entry_price > 0 else 0
+    threshold = getattr(config, "TRAILING_STOP_ACTIVATION_PCT", 0.20)
+    if gain_pct >= threshold:
+        pos.trailing_stop_activated = True
+        logger.info(
+            f"🔒 Trailing stop ACTIVATED: {pos.question[:50]} | "
+            f"gain={gain_pct:.0%} >= {threshold:.0%} | stop → entry={pos.entry_price:.4f}"
+        )
+    return False
+
+
+def _check_dynamic_take_profit(pos: "Position") -> bool:
+    if not getattr(config, "DYNAMIC_TAKE_PROFIT_ENABLED", True):
+        return False
+    age_hours = (datetime.now(timezone.utc) - pos.entry_time).total_seconds() / 3600
+    tp_price = 1.0
+    if age_hours >= getattr(config, "DTP_HOLD_HOURS_LONG", 48):
+        tp_price = getattr(config, "DTP_PRICE_LONG", 0.75)
+    elif age_hours >= getattr(config, "DTP_HOLD_HOURS_MID", 24):
+        tp_price = getattr(config, "DTP_PRICE_MID", 0.85)
+    else:
+        return False
+    if pos.current_price >= tp_price:
+        logger.info(
+            f"💰 Dynamic TP: {pos.question[:50]} | price={pos.current_price:.4f} >= "
+            f"tp={tp_price:.2f} | age={age_hours:.0f}h"
+        )
+        return True
+    return False
+
+
+def _record_sigma_on_resolution(pos: "Position", resolved_yes: bool, actual_temp_c: float = 0.0):
+    try:
+        if pos.forecast_at_entry_c != 0.0 and actual_temp_c != 0.0:
+            from sigma_calibrator import record_forecast_error
+            source = "CONSENSUS"
+            record_forecast_error(pos.city, source, pos.forecast_at_entry_c, actual_temp_c)
+    except Exception as e:
+        logger.debug(f"Sigma record error: {e}")
+
+
+def _try_record_sigma(pos: "Position"):
+    if pos.forecast_at_entry_c == 0.0:
+        return
+    try:
+        from data_fetcher import fetch_historical_extreme
+        from market_scanner import get_target_date
+        t_date = get_target_date(pos.question, pos.end_date, pos.city)
+        extremes = fetch_historical_extreme(pos.city, t_date)
+        if extremes:
+            is_low = 'lowest' in pos.question.lower()
+            actual = extremes[0] if is_low else extremes[1]
+            _record_sigma_on_resolution(pos, True, actual)
+    except Exception as e:
+        logger.debug(f"Sigma record attempt error: {e}")
 
 
 def check_and_close_positions(clob_client) -> List[Position]:
@@ -523,6 +631,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
 
         if resolved is not None:
             pos.resolve(resolved)
+            _try_record_sigma(pos)
             logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'}: {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
             closed.append(pos)
             del _active_positions[cid]
@@ -549,6 +658,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 pass
             if resolved_yes is not None:
                 pos.resolve(resolved_yes)
+                _try_record_sigma(pos)
             else:
                 pos.status = "EXPIRED"
                 if config.DRY_RUN:
@@ -579,9 +689,32 @@ def check_and_close_positions(clob_client) -> List[Position]:
 
         if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.15:
             logger.info(f"🔴 Stop-loss: {pos.question[:50]}")
+            pos.status = "STOP_LOSS"
             closed.append(pos)
             del _active_positions[cid]
             _recently_closed[cid] = now
+            continue
+
+        if _check_trailing_stop(pos):
+            pos.status = "TRAILING_STOP"
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
+
+        if _check_dynamic_take_profit(pos):
+            pos.status = "TAKE_PROFIT"
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
+
+        if _check_forecast_shift_close(pos):
+            pos.status = "FORECAST_SHIFT"
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
 
     return closed
 

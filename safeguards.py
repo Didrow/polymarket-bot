@@ -552,10 +552,14 @@ class SafeguardManager:
                     "size_usd":      pos.size_usd,
                     "shares":        pos.shares,
                     "entry_time":    entry_time_str,
-                    "end_date":      end_date_str,      # ← НОВЕ: зберігаємо end_date
+                    "end_date":      end_date_str,
                     "edge_at_entry": pos.edge_at_entry,
                     "city":          pos.city,
                     "market_type":   pos.market_type,
+                    "peak_price":    getattr(pos, "peak_price", pos.entry_price),
+                    "trailing_stop_activated": getattr(pos, "trailing_stop_activated", False),
+                    "forecast_at_entry_c": getattr(pos, "forecast_at_entry_c", 0.0),
+                    "threshold_at_entry_c": getattr(pos, "threshold_at_entry_c", 0.0),
                 }
             self.state.open_positions = serialized
 
@@ -626,6 +630,10 @@ class SafeguardManager:
                         city=d.get("city", ""),
                         market_type=d.get("market_type", "temperature"),
                         end_date=end_date,
+                        peak_price=float(d.get("peak_price", d.get("entry_price", 0))),
+                        trailing_stop_activated=bool(d.get("trailing_stop_activated", False)),
+                        forecast_at_entry_c=float(d.get("forecast_at_entry_c", 0.0)),
+                        threshold_at_entry_c=float(d.get("threshold_at_entry_c", 0.0)),
                     )
                     restored[norm_cid] = pos
 

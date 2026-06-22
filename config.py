@@ -1,11 +1,12 @@
 """
-config.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v13)
+config.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v14 — alteregoeth)
 
-Strategy: neobrother-style forecast ladder grid
+Strategy: neobrother-style forecast ladder grid + alteregoeth features
 - BUY_YES only, focus on buckets NEAR the forecast peak (10-50¢)
 - Grid of 3-5 adjacent temperature buckets (±1°C from forecast)
 - Realistic probabilities via reduced over-calibration
 - Quarter-Kelly position sizing for optimal bankroll growth
+- v14: self-calibrating sigma, trailing stop, forecast-shift close, dynamic TP
 - DRY-RUN validation gates must pass before LIVE trading is allowed.
 """
 
@@ -145,3 +146,25 @@ PROB_CAP_EXACT_LONG:  float = 0.38         # v13: 0.30→0.38
 
 # Maximum edge (prevents phantom edge > 35%)
 MAX_EDGE_CAP: float = 0.35
+
+# ── v14: ALTEREGOETH FEATURES ──────────────────────────────────
+# Self-calibrating sigma (sigma_calibrator.py)
+SIGMA_CAL_ENABLED: bool = True
+SIGMA_CAL_MIN_SAMPLES: int = 5
+SIGMA_CAL_MAX_SAMPLES: int = 50
+SIGMA_CAL_BLEND_WEIGHT: float = 0.6
+
+# Trailing stop (breakeven after +20% gain)
+TRAILING_STOP_ENABLED: bool = True
+TRAILING_STOP_ACTIVATION_PCT: float = 0.20
+
+# Forecast-shift close (close if forecast moved 2+°C away from bucket)
+FORECAST_SHIFT_CLOSE_ENABLED: bool = True
+FORECAST_SHIFT_CLOSE_C: float = 2.0
+
+# Dynamic take-profit (sell based on hold duration)
+DYNAMIC_TAKE_PROFIT_ENABLED: bool = True
+DTP_HOLD_HOURS_MID: int = 24
+DTP_HOLD_HOURS_LONG: int = 48
+DTP_PRICE_MID: float = 0.85
+DTP_PRICE_LONG: float = 0.75
