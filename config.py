@@ -26,17 +26,17 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.04          # v13: 0.03→0.04 (Kelly потребує більше місця)
 MIN_POSITION_USD: float = 1.0
 BASE_POSITION_USD: float = 1.5
-MAX_ACTIVE_POSITIONS: int = 6           # v14.1: 10→6 (концентрація капіталу на кращих угодах)
-MAX_OPEN_PER_CYCLE: int = 3             # v14.1: 4→3
+MAX_ACTIVE_POSITIONS: int = 12          # повернуто з оригіналу
+MAX_OPEN_PER_CYCLE: int = 4
 RESERVED_FAST_SLOTS: int = 1
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0
-MAX_POSITIONS_PER_CITY: int = 3         # v14.1: 5→3 (менше бакетів на місто)
+MAX_POSITIONS_PER_CITY: int = 5         # сітка до 5 бакетів на місто
 MAX_DRAWDOWN_PCT: float = 0.35
-STOP_LOSS_PCT: float = 0.15             # v13: 0.13→0.15 (дати сітці дихати)
+STOP_LOSS_PCT: float = 0.13             # повернуто з оригіналу
 MAX_POSITION_USD: float = 4.0           # v13: 3.0→4.0 (Kelly на пікових бакетах)
 MAX_DAILY_LOSS_PCT: float = 0.20
 MAX_DAILY_LOSS_USD: float = 20.0
-MAX_TOTAL_EXPOSURE_PCT: float = 0.40    # v14.1: 0.55→0.40 (менше ризику)
+MAX_TOTAL_EXPOSURE_PCT: float = 0.55    # повернуто з оригіналу
 
 # ── CALIBRATED SNIPER GRID (v13: PROFITABLE FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
