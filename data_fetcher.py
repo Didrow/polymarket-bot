@@ -61,14 +61,15 @@ class WeatherForecast:
         return [m + bias for m in members]
 
     def _get_base_sigma(self) -> float:
+        # v14.1: зменшено на ~20% (модель завищувала prob threshold events)
         return {
-            "Lucknow": 0.9, "Miami": 0.9, "Singapore": 0.8, "Dubai": 0.8,
-            "Cape Town": 1.1, "Sao Paulo": 1.0, "Sydney": 1.2,
-            "Buenos Aires": 1.2, "London": 1.3, "Paris": 1.3,
-            "Tokyo": 1.3, "Berlin": 1.4, "Busan": 1.4, "Munich": 1.5,
-            "Seoul": 1.5, "NYC": 1.5, "Seattle": 1.2, "Los Angeles": 1.0,
-            "Dallas": 1.6, "Chicago": 1.7,
-        }.get(self.city, 1.2)
+            "Lucknow": 0.7, "Miami": 0.7, "Singapore": 0.6, "Dubai": 0.6,
+            "Cape Town": 0.9, "Sao Paulo": 0.8, "Sydney": 1.0,
+            "Buenos Aires": 1.0, "London": 1.0, "Paris": 1.0,
+            "Tokyo": 1.0, "Berlin": 1.1, "Busan": 1.1, "Munich": 1.2,
+            "Seoul": 1.2, "NYC": 1.2, "Seattle": 1.0, "Los Angeles": 0.8,
+            "Dallas": 1.3, "Chicago": 1.4,
+        }.get(self.city, 1.0)
 
     def _get_sigma(self, hours: float = 24.0) -> float:
         base = self._get_base_sigma()

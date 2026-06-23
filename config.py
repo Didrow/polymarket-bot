@@ -26,17 +26,17 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.04          # v13: 0.03→0.04 (Kelly потребує більше місця)
 MIN_POSITION_USD: float = 1.0
 BASE_POSITION_USD: float = 1.5
-MAX_ACTIVE_POSITIONS: int = 10          # v13: 12→10 (менше угод, якісніші)
-MAX_OPEN_PER_CYCLE: int = 4
+MAX_ACTIVE_POSITIONS: int = 6           # v14.1: 10→6 (концентрація капіталу на кращих угодах)
+MAX_OPEN_PER_CYCLE: int = 3             # v14.1: 4→3
 RESERVED_FAST_SLOTS: int = 1
 FAST_SLOT_THRESHOLD_HOURS: float = 6.0
-MAX_POSITIONS_PER_CITY: int = 5         # сітка до 5 бакетів на місто
+MAX_POSITIONS_PER_CITY: int = 3         # v14.1: 5→3 (менше бакетів на місто)
 MAX_DRAWDOWN_PCT: float = 0.35
 STOP_LOSS_PCT: float = 0.15             # v13: 0.13→0.15 (дати сітці дихати)
 MAX_POSITION_USD: float = 4.0           # v13: 3.0→4.0 (Kelly на пікових бакетах)
 MAX_DAILY_LOSS_PCT: float = 0.20
 MAX_DAILY_LOSS_USD: float = 20.0
-MAX_TOTAL_EXPOSURE_PCT: float = 0.55    # v13: 0.50→0.55 (сітка потребує більше експозиції)
+MAX_TOTAL_EXPOSURE_PCT: float = 0.40    # v14.1: 0.55→0.40 (менше ризику)
 
 # ── CALIBRATED SNIPER GRID (v13: PROFITABLE FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
@@ -148,6 +148,10 @@ PROB_CAP_EXACT_LONG:  float = 0.38         # v13: 0.30→0.38
 MAX_EDGE_CAP: float = 0.35
 
 # ── v14: ALTEREGOETH FEATURES ──────────────────────────────────
+# v14.1: Market-price anchoring (боротьба з 0% win rate)
+MARKET_ANCHOR_WEIGHT: float = 0.30         # 30% ваги ринку, 70% нашої моделі
+MARKET_ANCHOR_THRESHOLD: float = 0.20      # застосовувати для ринків <20¢
+
 # Self-calibrating sigma (sigma_calibrator.py)
 SIGMA_CAL_ENABLED: bool = True
 SIGMA_CAL_MIN_SAMPLES: int = 5

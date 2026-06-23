@@ -687,8 +687,8 @@ def check_and_close_positions(clob_client) -> List[Position]:
         else:
             logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
 
-        if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.15:
-            logger.info(f"🔴 Stop-loss: {pos.question[:50]}")
+        if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.03:
+            logger.info(f"🔴 Stop-loss: {pos.question[:50]} | entry={pos.entry_price:.4f} cur={pos.current_price:.4f} pnl={pos.pnl_pct:.0%}")
             pos.status = "STOP_LOSS"
             closed.append(pos)
             del _active_positions[cid]
