@@ -1,13 +1,13 @@
 """
-edge_calculator.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v13)
+edge_calculator.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v15)
 
-Стратегія neobrother-style forecast ladder grid:
-- BUY_YES only, focus on buckets NEAR the forecast peak (8-60¢)
-- Grid of 3-5 adjacent temperature buckets (±1°C from forecast)
-- Realistic probabilities via reduced over-calibration (v13)
+Стратегія neobrother-style sniper PEAK grid:
+- BUY_YES only, focus on PEAK buckets NEAR the forecast (25-58¢)
+- Peak bucket (dist<0.8°C) gets largest size; wings (dist<1.6°C) get smaller
+- Single calibration only: prob_exact blend already calibrates inside estimate_market_probability
 - Quarter-Kelly position sizing for optimal bankroll growth
 - Adaptive spread filter for liquid markets
-- Distance filter for categorical markets (max 2.5°C from forecast)
+- Distance filter for categorical markets (max 1.5°C from forecast)
 """
 
 import math
@@ -450,22 +450,20 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             f"ціль={threshold_c:.1f}°C, різниця={distance_c:.1f}°C ({unit})"
         )
 
-    our_prob = _apply_probability_calibration(
-        our_prob,
-        kind_label,
-        market.hours_to_resolution,
-        distance_c,
-        unit,
-        confidence,
-    )
+    # v15: ОДНА калібровка. our_prob вже відкалібровано всередині
+    # estimate_market_probability() через prob_exact/prob_above blend + prob caps.
+    # Подвійне множення на distance/confidence/decay роздавлювало Cape Town 17°C: 43%→23%.
+    # Застосовуємо лише time_decay (фізичний горизонт прогнозу) — без distance множника.
 
-    # v14.1: Market-price anchoring — ринок зазвичай точніший за модель
-    # Якщо ринок каже <15¢ (10% шанс), а ми кажемо 27% — ми майже напевно помиляємось
-    # Blend: 70% our_prob + 30% market_prob для дешевих ринків (<20¢)
-    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.30)
+    # v14.1/v15: Market-price anchoring ВИМКНЕНО через config (MARKET_ANCHOR_WEIGHT=0.0).
+    # Ця фіча тягнула our_prob до ринкової ціни на дешевих хвостах і вбивала edge на піках.
+    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.0)
     market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.20)
-    if market_prob < market_anchor_threshold:
+    if market_anchor_weight > 0.0 and market_prob < market_anchor_threshold:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
+
+    # v15: легкий time_decay без дистанційного роздавлювання (вже враховано в prob_exact blend)
+    our_prob = our_prob * _time_decay_for_hours(market.hours_to_resolution)
 
     raw_edge = our_prob - market_prob
     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
@@ -474,22 +472,32 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok, min_edge=grid_min_edge)
 
     if tradeable:
-        # ── v13: Kelly position sizing ──
+        # v15: peak/wing диференціація за distance_c
+        peak_dist = getattr(config, "PEAK_DISTANCE_C", 0.8)
+        wing_dist = getattr(config, "WING_DISTANCE_C", 1.6)
+        is_peak = (distance_c is not None and distance_c < peak_dist)
+        is_wing = (distance_c is not None and peak_dist <= distance_c < wing_dist)
+
+        # ── v15: Kelly position sizing with peak/wing multiplier ──
         if getattr(config, "USE_KELLY", False) and our_prob > 0 and market_prob > 0:
             kelly_fraction = (our_prob - market_prob) / (1 - market_prob)
             kelly_fraction = max(0, min(kelly_fraction, 1.0))
             kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
-            size_usd = round(kelly_fraction * kelly_scale * config.INITIAL_CAPITAL, 2)
+            size_usd = kelly_fraction * kelly_scale * config.INITIAL_CAPITAL
+            if is_peak:
+                size_usd *= 1.4   # пік — найвищий шанс, більша позиція
+            elif is_wing:
+                size_usd *= 0.6   # крило — менший шанс, менша позиція
             size_usd = max(config.MIN_POSITION_USD, min(size_usd, getattr(config, "KELLY_MAX_POSITION_USD", config.MAX_POSITION_USD)))
-            # Для пікових бакетів (ближче до прогнозу) — більший розмір
-            if distance_c is not None and distance_c < 1.0:
-                size_usd = min(size_usd * 1.3, config.MAX_POSITION_USD)
         else:
             size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
             if "categorical" in kind_label or "range" in kind_label:
                 size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
+            if is_wing:
+                size_usd = min(size_usd, config.ADJACENT_GRID_SIZE_USD)
+        bucket_role = "PEAK" if is_peak else ("WING" if is_wing else "MID")
         reason = (
-            f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
+            f"SNIPER GRID YES [{bucket_role}] @ {market_prob:.3f} | {kind_label} | "
             f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
         )
     elif eff_edge >= config.MIN_EDGE_ENTRY and market_prob > config.EXTREME_TAIL_MAX_ASK_YES and our_prob >= config.MIN_PROB_ENTRY:
