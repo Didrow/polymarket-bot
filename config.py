@@ -14,7 +14,7 @@ from typing import List
 import os
 
 DRY_RUN: bool = True                    # 🧪 Тестовий режим (реальна торгівля — False)
-LOG_LEVEL: str = "INFO"
+LOG_LEVEL: str = "DEBUG"
 LOG_FILE: str = "logs/bot.log"
 
 CLOB_URL: str = "https://clob.polymarket.com"

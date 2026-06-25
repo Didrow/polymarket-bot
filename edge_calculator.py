@@ -466,6 +466,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.20)
     if market_prob < market_anchor_threshold:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
+        logger.debug(f"ANCHORED: market_prob={market_prob:.4f} → our_prob={our_prob:.4f} | {market.question[:40]}")
 
     raw_edge = our_prob - market_prob
     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
@@ -502,6 +503,14 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                 f"min_edge={grid_min_edge:.1%} | dist_ok={dist_ok} | kind={kind_label}"
             )
             return None
+    
+    # Додаткове логування для всіх ринків, щоб виявити причину нульового edge
+    logger.debug(
+        f"EDGE DEBUG: {market.question[:40]} | "
+        f"our_prob={our_prob:.4f} | market_prob={market_prob:.4f} | "
+        f"raw_edge={raw_edge:.4f} | eff_edge={eff_edge:.4f} | "
+        f"dist_ok={dist_ok} | kind={kind_label} | weight={market_anchor_weight:.2f}"
+    )
 
     # Special case for categorical|42°C markets: always include 41.5, 42.0, 42.5
     if kind == "categorical" and abs(threshold_c - 42.0) < 0.1:

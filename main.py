@@ -45,7 +45,7 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_formatter)
 
 root_logger = logging.getLogger()
-root_logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.INFO))
+root_logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.DEBUG))
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 
