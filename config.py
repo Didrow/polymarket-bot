@@ -41,17 +41,17 @@ MAX_TOTAL_EXPOSURE_PCT: float = 0.55    # повернуто з оригінал
 # ── CALIBRATED SNIPER GRID (v13: PROFITABLE FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
 EXTREME_TAIL_MAX_ASK_YES: float = 0.80 # v13: 0.55→0.80 (розширено діапазон хвостів для захоплення більшої кількості ринків)
-EXTREME_TAIL_MIN_ASK_YES: float = 0.01 # v13: 0.08→0.01 (знижено для захоплення всіх хвостових ринків)
+EXTREME_TAIL_MIN_ASK_YES: float = 0.005 # v14.2: 0.01→0.005 (синхронізовано з SNIPER_GRID_MIN_ASK)
 EXTREME_TAIL_MAX_SIZE_USD: float = 2.0     # v13: 1.5→2.0 (більше на якісні бакети)
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.01 # v13: 0.04→0.01 (знижено для виявлення слабких edge у хвостових ринках)
 
 ENABLE_ADJACENT_GRID: bool = True
-SNIPER_GRID_DISTANCE_C: float = 3.0 # v14: 1.5→3.0 (розширено сітку до ±1.5°C для захоплення більшого діапазону)
-SNIPER_GRID_DISTANCE_F: float = 2.7 # v14: 4.5→2.7 (сітка ±1.5°F, не ±2.5°F)
+SNIPER_GRID_DISTANCE_C: float = 4.0 # v14.2: 3.0→4.0 (розширено сітку до ±2°C для захоплення хвостових бакетів)
+SNIPER_GRID_DISTANCE_F: float = 3.6 # v14.2: 2.7→3.6 (сітка ±2°F, сумірно з C)
 SNIPER_GRID_MIN_EDGE: float = 0.01 # v14: 0.03→0.01 (знижено для виявлення слабких, але реальних edge-сигналів)
 SNIPER_GRID_MIN_PROB: float = 0.08 # v14: 0.08 (збережено)
 SNIPER_GRID_MAX_ASK: float = 0.85 # v14: 0.60→0.85 (розширено верхню межу для захоплення ринків з високою ймовірністю)
-SNIPER_GRID_MIN_ASK: float = 0.01 # v14: 0.08→0.01 (знижено для виявлення слабких ринків)
+SNIPER_GRID_MIN_ASK: float = 0.005 # v14.2: 0.01→0.005 (дозволити ринки з ask ≥ 0.5¢ для хвостових бакетів)
 SNIPER_GRID_SIZE_USD: float = 2.0 # v14: 2.0 (збережено)
 SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5 # v14: 5 (збережено)
 GRID_FORECAST_STEP_C: float = 0.5 # v14: 1.0→0.5 (крок сітки 0.5°C, не 1.0°C)

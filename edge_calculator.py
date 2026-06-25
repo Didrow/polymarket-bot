@@ -46,8 +46,8 @@ class EdgeResult:
     @property
     def summary(self) -> str:
         return (
-            f"{self.edge_direction} | edge={self.edge_pct} | "
-            f"our_prob={self.estimated_prob:.2f} | market={self.market_prob:.2f} | "
+            f"{self.edge_direction} | edge={self.edge:.1%} | "
+            f"our_prob={self.estimated_prob:.0%} | market={self.market_prob:.0%} | "
             f"{self.reason}"
         )
 
@@ -352,8 +352,8 @@ def _log_price_validation(market: PolyMarket) -> None:
 def _is_extreme_tail_yes_market(market_prob: float) -> bool:
     return (
         getattr(config, "ENABLE_EXTREME_TAIL_YES", True)
-        and market_prob >= getattr(config, "SNIPER_GRID_MIN_ASK", 0.08)
-        and market_prob <= getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.55)
+        and market_prob >= getattr(config, "EXTREME_TAIL_MIN_ASK_YES", 0.005)
+        and market_prob <= getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.80)
     )
 
 
@@ -419,7 +419,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # Якщо ask підозріло малий (< 1¢) — пробуємо midpoint
     if market_prob < 0.01:
         midpoint = getattr(market, "midpoint_yes", 0.0)
-        if 0.01 <= midpoint <= 0.99:
+        grid_min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.005)
+        if grid_min_ask <= midpoint <= 0.99:
             logger.debug(f"💡 Ask={market_prob:.4f} < 1¢, fallback на midpoint={midpoint:.4f}")
             market_prob = midpoint
         else:
@@ -475,52 +476,38 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok, min_edge=grid_min_edge)
 
     if tradeable:
-        # ── v13: Kelly position sizing ──
-        if getattr(config, "USE_KELLY", False) and our_prob > 0 and market_prob > 0:
-            kelly_fraction = (our_prob - market_prob) / (1 - market_prob)
-            kelly_fraction = max(0, min(kelly_fraction, 1.0))
-            kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
-            size_usd = round(kelly_fraction * kelly_scale * config.INITIAL_CAPITAL, 2)
-            size_usd = max(config.MIN_POSITION_USD, min(size_usd, getattr(config, "KELLY_MAX_POSITION_USD", config.MAX_POSITION_USD)))
-            # Для пікових бакетів (ближче до прогнозу) — більший розмір
-            if distance_c is not None and distance_c < 0.75:
-                size_usd = min(size_usd * 1.3, config.MAX_POSITION_USD)
-            else:
-                size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
-            if "categorical" in kind_label or "range" in kind_label:
-                size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
-            reason = (
-                f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
-                f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
-            )
-        elif eff_edge >= config.MIN_EDGE_ENTRY and market_prob > config.EXTREME_TAIL_MAX_ASK_YES and our_prob >= config.MIN_PROB_ENTRY:
-            size_usd = config.BASE_POSITION_USD
-            reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | decay={time_decay:.2f} | {src}"
-        else:
-            logger.debug(
-                f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
-                f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
-                f"min_edge={grid_min_edge:.1%} | dist_ok={dist_ok} | kind={kind_label}"
-            )
-            return None
+        # ── Size розраховується в trader.py (decide_position_size) з актуальним capital ──
+        size_usd = 0.0
+        reason = (
+            f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
+            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
+        )
     
     # Додаткове логування для всіх ринків, щоб виявити причину нульового edge
     logger.debug(
-        f"EDGE DEBUG: {market.question[:40]} | "
-        f"our_prob={our_prob:.4f} | market_prob={market_prob:.4f} | "
-        f"raw_edge={raw_edge:.4f} | eff_edge={eff_edge:.4f} | "
-        f"dist_ok={dist_ok} | kind={kind_label} | weight={market_anchor_weight:.2f}"
+        f"EDGE: {market.question[:40]} | "
+        f"our={our_prob:.0%} | mkt={market_prob:.0%} | "
+        f"edge={eff_edge:.1%} | dist={distance_c:.1f}°C | "
+        f"decay={time_decay:.2f} | {kind_label} | {src}"
     )
 
-    # Special case for categorical|42°C markets: always include 41.5, 42.0, 42.5
-    if kind == "categorical" and abs(threshold_c - 42.0) < 0.1:
-        # Create additional adjacent grid positions for 41.5, 42.0, 42.5
-        # We'll handle this in the adjacent grid pass below
-        # This ensures we always trade these specific markets
-        # But we still need to set a reason for this market
-        reason = f"CATEGORICAL|42°C SPECIAL | our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
+    if tradeable:
+        return EdgeResult(
+            market=market,
+            forecast=forecast,
+            estimated_prob=our_prob,
+            market_prob=market_prob,
+            edge=eff_edge,
+            edge_direction=direction,
+            confidence=confidence,
+            time_decay_factor=time_decay,
+            reason=reason,
+            is_tradeable=True,
+            size_usd=size_usd,
+            threshold_c=threshold_c,
+            distance_c=distance_c or 0.0,
+        )
 
-    reason = "SKIP"  # Initialize reason for all non-tradeable cases
     return EdgeResult(
         market=market,
         forecast=forecast,
@@ -530,7 +517,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         edge_direction=direction,
         confidence=confidence,
         time_decay_factor=time_decay,
-        reason=reason,
+        reason="SKIP",
         is_tradeable=False,
         size_usd=0.0,
         threshold_c=threshold_c,
@@ -617,7 +604,8 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                     market_prob = market.best_ask_yes
                     if market_prob < 0.01:
                         midpoint = getattr(market, "midpoint_yes", 0.0)
-                        if 0.01 <= midpoint <= 0.99:
+                        grid_min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.005)
+                        if grid_min_ask <= midpoint <= 0.99:
                             logger.debug(f"💡 Adjacent Ask={market_prob:.4f} < 1¢, fallback на midpoint={midpoint:.4f}")
                             market_prob = midpoint
                         else:
