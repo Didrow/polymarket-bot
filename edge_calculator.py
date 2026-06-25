@@ -508,7 +508,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         # Create additional adjacent grid positions for 41.5, 42.0, 42.5
         # We'll handle this in the adjacent grid pass below
         # This ensures we always trade these specific markets
-        pass
+        # But we still need to set a reason for this market
+        reason = f"CATEGORICAL|42°C SPECIAL | our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
 
     return EdgeResult(
         market=market,
