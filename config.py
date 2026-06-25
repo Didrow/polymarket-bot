@@ -48,7 +48,7 @@ EXTREME_TAIL_MIN_EDGE_YES: float = 0.04    # v13: 0.02→0.04 (реальний 
 ENABLE_ADJACENT_GRID: bool = True
 SNIPER_GRID_DISTANCE_C: float = 1.5 # v14: 2.5→1.5 (сітка ±0.75°C, не ±1.25°C)
 SNIPER_GRID_DISTANCE_F: float = 2.7 # v14: 4.5→2.7 (сітка ±1.5°F, не ±2.5°F)
-SNIPER_GRID_MIN_EDGE: float = 0.04 # v14: 0.04 (збережено)
+SNIPER_GRID_MIN_EDGE: float = 0.03 # v14: 0.04→0.03 (lowered to capture more tradeable opportunities)
 SNIPER_GRID_MIN_PROB: float = 0.08 # v14: 0.08 (збережено)
 SNIPER_GRID_MAX_ASK: float = 0.60 # v14: 0.60 (збережено)
 SNIPER_GRID_MIN_ASK: float = 0.08 # v14: 0.08 (збережено)
@@ -140,17 +140,17 @@ PROB_CAP_ABOVE_LONG:  float = 0.65         # v13: 0.60→0.65
 # prob_exact_temp_c / range / categorical — main calibration target
 # v13: піднято caps щоб сітка бакетів поблизу прогнозу мала реалістичні our_prob
 # Бакет 17°C при прогнозі 17.0°C: реальна ймовірність ~25-35%, не 11%
-PROB_CAP_EXACT_SHORT: float = 0.60         # v13: 0.50→0.60
-PROB_CAP_EXACT_MID:   float = 0.48         # v13: 0.38→0.48
-PROB_CAP_EXACT_LONG:  float = 0.38         # v13: 0.30→0.38
+PROB_CAP_EXACT_SHORT: float = 0.70 # v14: 0.60→0.70 (increased for better calibration)
+PROB_CAP_EXACT_MID: float = 0.58 # v14: 0.48→0.58 (increased for better calibration)
+PROB_CAP_EXACT_LONG: float = 0.48 # v14: 0.38→0.48 (increased for better calibration)
 
 # Maximum edge (prevents phantom edge > 35%)
 MAX_EDGE_CAP: float = 0.35
 
 # ── v14: ALTEREGOETH FEATURES ──────────────────────────────────
 # v14.1: Market-price anchoring (боротьба з 0% win rate)
-MARKET_ANCHOR_WEIGHT: float = 0.30         # 30% ваги ринку, 70% нашої моделі
-MARKET_ANCHOR_THRESHOLD: float = 0.20      # застосовувати для ринків <20¢
+MARKET_ANCHOR_WEIGHT: float = 0.10 # v14.1: 30%→10% ваги ринку, 90% нашої моделі — зменшено для збереження слабких сигналів
+MARKET_ANCHOR_THRESHOLD: float = 0.20 # застосовувати для ринків <20¢
 
 # Self-calibrating sigma (sigma_calibrator.py)
 SIGMA_CAL_ENABLED: bool = True

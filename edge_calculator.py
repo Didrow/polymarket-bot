@@ -461,8 +461,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     # v14.1: Market-price anchoring — ринок зазвичай точніший за модель
     # Якщо ринок каже <15¢ (10% шанс), а ми кажемо 27% — ми майже напевно помиляємось
-    # Blend: 70% our_prob + 30% market_prob для дешевих ринків (<20¢)
-    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.30)
+    # Blend: 90% our_prob + 10% market_prob для дешевих ринків (<20¢) — зменшено з 0.30 до 0.10
+    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.10)
     market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.20)
     if market_prob < market_anchor_threshold:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
