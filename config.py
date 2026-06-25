@@ -40,37 +40,37 @@ MAX_TOTAL_EXPOSURE_PCT: float = 0.55    # повернуто з оригінал
 
 # ── CALIBRATED SNIPER GRID (v13: PROFITABLE FORECAST LADDER) ──────────────
 ENABLE_EXTREME_TAIL_YES: bool = True
-EXTREME_TAIL_MAX_ASK_YES: float = 0.55     # v13: 0.25→0.55 (дозволити бакети 15-55¢ поблизу прогнозу)
-EXTREME_TAIL_MIN_ASK_YES: float = 0.08     # v13: 0.05→0.08 (відсіяти мертві хвости <8¢)
+EXTREME_TAIL_MAX_ASK_YES: float = 0.80 # v13: 0.55→0.80 (розширено діапазон хвостів для захоплення більшої кількості ринків)
+EXTREME_TAIL_MIN_ASK_YES: float = 0.01 # v13: 0.08→0.01 (знижено для захоплення всіх хвостових ринків)
 EXTREME_TAIL_MAX_SIZE_USD: float = 2.0     # v13: 1.5→2.0 (більше на якісні бакети)
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.04    # v13: 0.02→0.04 (реальний edge, не лотерея)
+EXTREME_TAIL_MIN_EDGE_YES: float = 0.01 # v13: 0.04→0.01 (знижено для виявлення слабких edge у хвостових ринках)
 
 ENABLE_ADJACENT_GRID: bool = True
-SNIPER_GRID_DISTANCE_C: float = 1.5 # v14: 2.5→1.5 (сітка ±0.75°C, не ±1.25°C)
+SNIPER_GRID_DISTANCE_C: float = 3.0 # v14: 1.5→3.0 (розширено сітку до ±1.5°C для захоплення більшого діапазону)
 SNIPER_GRID_DISTANCE_F: float = 2.7 # v14: 4.5→2.7 (сітка ±1.5°F, не ±2.5°F)
-SNIPER_GRID_MIN_EDGE: float = 0.03 # v14: 0.04→0.03 (lowered to capture more tradeable opportunities)
+SNIPER_GRID_MIN_EDGE: float = 0.01 # v14: 0.03→0.01 (знижено для виявлення слабких, але реальних edge-сигналів)
 SNIPER_GRID_MIN_PROB: float = 0.08 # v14: 0.08 (збережено)
-SNIPER_GRID_MAX_ASK: float = 0.60 # v14: 0.60 (збережено)
-SNIPER_GRID_MIN_ASK: float = 0.08 # v14: 0.08 (збережено)
+SNIPER_GRID_MAX_ASK: float = 0.85 # v14: 0.60→0.85 (розширено верхню межу для захоплення ринків з високою ймовірністю)
+SNIPER_GRID_MIN_ASK: float = 0.01 # v14: 0.08→0.01 (знижено для виявлення слабких ринків)
 SNIPER_GRID_SIZE_USD: float = 2.0 # v14: 2.0 (збережено)
 SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5 # v14: 5 (збережено)
 GRID_FORECAST_STEP_C: float = 0.5 # v14: 1.0→0.5 (крок сітки 0.5°C, не 1.0°C)
 GRID_FORECAST_SPAN_C: float = 1.5 # v14: 2.0→1.5 (половина сітки ±0.75°C, не ±1.0°C)
 
 ADJACENT_GRID_SIZE_USD: float = 1.5        # хвости сітки — менші ставки
-ADJACENT_GRID_MIN_EDGE: float = 0.03       # v13: 0.02→0.03
+ADJACENT_GRID_MIN_EDGE: float = 0.01 # v13: 0.03→0.01 (знижено для виявлення слабких edge у сусідніх бакетах)
 ADJACENT_GRID_MIN_PROB: float = 0.06       # v13: 0.05→0.06
-ADJACENT_GRID_MAX_ASK: float = 0.60
+ADJACENT_GRID_MAX_ASK: float = 0.85 # v14: 0.60→0.85 (розширено верхню межу для сусідніх бакетів)
 
 # ── STANDARD EDGE (for calibrated BUY_YES) ─────────────────────
-MIN_EDGE_ENTRY: float = 0.05               # v13: 0.03→0.05 (реальний edge)
+MIN_EDGE_ENTRY: float = 0.02 # v13: 0.05→0.02 (знижено для виявлення слабких, але стійких сигналів)
 MIN_EDGE_HOLD: float = 0.02
 MIN_PROB_ENTRY: float = 0.05               # v13: 0.03→0.05
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 48          # Зменшено для більшої точності прогнозу
 MIN_RESOLUTION_HOURS: float = 0.5       # Мінімум годин до резолву (0.5 = 30хв для DRY-RUN, у бойовому 1.5)
-MIN_MARKET_VOLUME_USD: float = 500.0
+MIN_MARKET_VOLUME_USD: float = 250.0 # v14: 500→250 (знижено для виявлення менш об’ємних, але перспективних ринків)
 SCAN_INTERVAL_SEC: int = 300            # v11: 600→300 (частіше сканувати для сітки)
 OSINT_SCAN_INTERVAL_SEC: int = 300
 MAX_VOL_NO_TRADE: float = 0.60
@@ -145,7 +145,7 @@ PROB_CAP_EXACT_MID: float = 0.58 # v14: 0.48→0.58 (increased for better calibr
 PROB_CAP_EXACT_LONG: float = 0.48 # v14: 0.38→0.48 (increased for better calibration)
 
 # Maximum edge (prevents phantom edge > 35%)
-MAX_EDGE_CAP: float = 0.35
+MAX_EDGE_CAP: float = 0.60 # v14: 0.35→0.60 (підвищено для дозволу більших edge при виявленні реальних сигналів)
 
 # ── v14: ALTEREGOETH FEATURES ──────────────────────────────────
 # v14.1: Market-price anchoring (боротьба з 0% win rate)
