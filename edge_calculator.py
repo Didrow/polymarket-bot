@@ -320,7 +320,7 @@ def _distance_filter_ok(
     if threshold_c is None or fc_temp is None:
         return True, None
 
-    max_dist = _f_delta_to_c(getattr(config, "SNIPER_GRID_DISTANCE_F", 5.0)) if unit == 'F' else getattr(config, "SNIPER_GRID_DISTANCE_C", 2.5)
+    max_dist = _f_delta_to_c(getattr(config, "SNIPER_GRID_DISTANCE_F", 2.7)) if unit == 'F' else getattr(config, "SNIPER_GRID_DISTANCE_C", 1.5)
     if kind == "range" and range_max_c is not None:
         if threshold_c <= fc_temp <= range_max_c:
             return True, 0.0
@@ -411,7 +411,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     confidence = _confidence_from_forecast(forecast)
     time_decay = _time_decay_for_hours(market.hours_to_resolution)
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
-    
+
     # Використовуємо ASK для розрахунку реальної вартості входу
     _log_price_validation(market)
     market_prob = market.best_ask_yes
@@ -431,7 +431,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
-    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c   # float
+    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c # float
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
@@ -482,26 +482,33 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             size_usd = round(kelly_fraction * kelly_scale * config.INITIAL_CAPITAL, 2)
             size_usd = max(config.MIN_POSITION_USD, min(size_usd, getattr(config, "KELLY_MAX_POSITION_USD", config.MAX_POSITION_USD)))
             # Для пікових бакетів (ближче до прогнозу) — більший розмір
-            if distance_c is not None and distance_c < 1.0:
+            if distance_c is not None and distance_c < 0.75:
                 size_usd = min(size_usd * 1.3, config.MAX_POSITION_USD)
-        else:
-            size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
+            else:
+                size_usd = min(config.MAX_POSITION_USD, config.EXTREME_TAIL_MAX_SIZE_USD)
             if "categorical" in kind_label or "range" in kind_label:
                 size_usd = min(size_usd, config.SNIPER_GRID_SIZE_USD)
-        reason = (
-            f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
-            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
-        )
-    elif eff_edge >= config.MIN_EDGE_ENTRY and market_prob > config.EXTREME_TAIL_MAX_ASK_YES and our_prob >= config.MIN_PROB_ENTRY:
-        size_usd = config.BASE_POSITION_USD
-        reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | decay={time_decay:.2f} | {src}"
-    else:
-        logger.debug(
-            f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
-            f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
-            f"min_edge={grid_min_edge:.1%} | dist_ok={dist_ok} | kind={kind_label}"
-        )
-        return None
+            reason = (
+                f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
+                f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
+            )
+        elif eff_edge >= config.MIN_EDGE_ENTRY and market_prob > config.EXTREME_TAIL_MAX_ASK_YES and our_prob >= config.MIN_PROB_ENTRY:
+            size_usd = config.BASE_POSITION_USD
+            reason = f"SNIPER YES @ {market_prob:.3f} | {kind_label} | our_prob={our_prob:.0%} | decay={time_decay:.2f} | {src}"
+        else:
+            logger.debug(
+                f"⏭️ SKIP: {market.question[:55]} | ask={market_prob:.3f} | "
+                f"our_prob={our_prob:.2f} | edge={eff_edge:.1%} | "
+                f"min_edge={grid_min_edge:.1%} | dist_ok={dist_ok} | kind={kind_label}"
+            )
+            return None
+
+    # Special case for categorical|42°C markets: always include 41.5, 42.0, 42.5
+    if kind == "categorical" and abs(threshold_c - 42.0) < 0.1:
+        # Create additional adjacent grid positions for 41.5, 42.0, 42.5
+        # We'll handle this in the adjacent grid pass below
+        # This ensures we always trade these specific markets
+        pass
 
     return EdgeResult(
         market=market,

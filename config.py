@@ -46,16 +46,16 @@ EXTREME_TAIL_MAX_SIZE_USD: float = 2.0     # v13: 1.5→2.0 (більше на �
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.04    # v13: 0.02→0.04 (реальний edge, не лотерея)
 
 ENABLE_ADJACENT_GRID: bool = True
-SNIPER_GRID_DISTANCE_C: float = 2.5        # v13: 4.0→2.5 (сітка ±1°C, не ±2°C)
-SNIPER_GRID_DISTANCE_F: float = 4.5        # v13: 6.0→4.5
-SNIPER_GRID_MIN_EDGE: float = 0.04         # v13: 0.02→0.04
-SNIPER_GRID_MIN_PROB: float = 0.08         # v13: 0.05→0.08 (реалістичний мінімум)
-SNIPER_GRID_MAX_ASK: float = 0.60          # v13: 0.75→0.60 (не купувати дорогі >60¢)
-SNIPER_GRID_MIN_ASK: float = 0.08          # v13: 0.05→0.08
-SNIPER_GRID_SIZE_USD: float = 2.0          # v13: 1.5→2.0
-SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5  # сітка 5 бакетів: -2,-1,0,+1,+2
-GRID_FORECAST_STEP_C: float = 1.0          # v13: 0.1→1.0 (крок сітки 1°C)
-GRID_FORECAST_SPAN_C: float = 2.0          # v13: 0.2→2.0 (половина сітки ±2°C)
+SNIPER_GRID_DISTANCE_C: float = 1.5 # v14: 2.5→1.5 (сітка ±0.75°C, не ±1.25°C)
+SNIPER_GRID_DISTANCE_F: float = 2.7 # v14: 4.5→2.7 (сітка ±1.5°F, не ±2.5°F)
+SNIPER_GRID_MIN_EDGE: float = 0.04 # v14: 0.04 (збережено)
+SNIPER_GRID_MIN_PROB: float = 0.08 # v14: 0.08 (збережено)
+SNIPER_GRID_MAX_ASK: float = 0.60 # v14: 0.60 (збережено)
+SNIPER_GRID_MIN_ASK: float = 0.08 # v14: 0.08 (збережено)
+SNIPER_GRID_SIZE_USD: float = 2.0 # v14: 2.0 (збережено)
+SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 5 # v14: 5 (збережено)
+GRID_FORECAST_STEP_C: float = 0.5 # v14: 1.0→0.5 (крок сітки 0.5°C, не 1.0°C)
+GRID_FORECAST_SPAN_C: float = 1.5 # v14: 2.0→1.5 (половина сітки ±0.75°C, не ±1.0°C)
 
 ADJACENT_GRID_SIZE_USD: float = 1.5        # хвости сітки — менші ставки
 ADJACENT_GRID_MIN_EDGE: float = 0.03       # v13: 0.02→0.03
