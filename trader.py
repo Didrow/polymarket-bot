@@ -148,7 +148,7 @@ def _get_market_from_gamma(condition_id: str) -> Optional[Dict]:
 
 
 _resolution_cache: Dict[str, tuple] = {}  # {cid: (timestamp, result)}
-_RESOLUTION_CACHE_TTL = 300  # v15: 3600→300 (5 хв замість 1 год — кеш None не блокує resolution)
+_RESOLUTION_CACHE_TTL = 3600  # 1 година
 
 def check_market_resolved(condition_id: str, position: Optional["Position"] = None) -> Optional[bool]:
     """
@@ -161,13 +161,12 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
         if time.time() - _rc_ts < _RESOLUTION_CACHE_TTL:
             return _rc_val
 
-    # DRY-RUN fast path: чекаємо лише 4 години після end_date (архівний API готовий через 2-3 год)
-    # v15: було end_date+26 годин → тепер end_date+4 години. Це розблокує resolution.
+    # DRY-RUN fast path: чекаємо повного завершення доби (02:00 UTC наступного дня)
     if config.DRY_RUN and position and position.end_date:
         from market_scanner import get_target_date
         now = datetime.now(timezone.utc)
         target_date = get_target_date(position.question, position.end_date, position.city)
-        day_completed = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc) + timedelta(hours=4)
+        day_completed = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc) + timedelta(days=1, hours=2)
         if now > day_completed:
             from data_fetcher import fetch_historical_extreme
             market_date = target_date
@@ -473,7 +472,7 @@ def cleanup_stale_positions() -> List[Position]:
         is_weather = pos.market_type in ("temperature", "rain", "snow")
 
         market_ended = (
-            (pos.end_date and now > pos.end_date + timedelta(hours=18))
+            (pos.end_date and now > pos.end_date + timedelta(hours=30))
         )
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
@@ -489,7 +488,7 @@ def cleanup_stale_positions() -> List[Position]:
                 _recently_closed[cid] = now
                 removed.append(pos)
             else:
-                if config.DRY_RUN and age_hours > 24:
+                if config.DRY_RUN and age_hours > 36:
                     pos.status = "EXPIRED"
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
@@ -598,62 +597,6 @@ def _try_record_sigma(pos: "Position"):
         logger.debug(f"Sigma record attempt error: {e}")
 
 
-def _try_direct_historical_resolution(pos: "Position") -> Optional[bool]:
-    """
-    v15 Safety Net: прямий виклик fetch_historical_extreme для resolution.
-    Використовується коли check_market_resolved повернув None але end_date минув >18h.
-    Це гарантує що жодна позиція не зависає >24 годин.
-    """
-    try:
-        from data_fetcher import fetch_historical_extreme
-        from market_scanner import get_target_date
-        from edge_calculator import _parse_range_or_threshold
-
-        if not pos.end_date or not pos.city:
-            return None
-
-        target_date = get_target_date(pos.question, pos.end_date, pos.city)
-        extremes = fetch_historical_extreme(pos.city, target_date)
-        if extremes is None:
-            return None
-
-        obs_low, obs_high = extremes
-        is_low = 'lowest' in pos.question.lower()
-        tc = obs_low if is_low else obs_high
-
-        kind, val_min, val_max, unit = _parse_range_or_threshold(pos.question)
-        resolved_yes = None
-
-        if kind == "range" and val_min is not None and val_max is not None:
-            if unit == 'F':
-                tc_f = tc * 9/5 + 32
-                resolved_yes = (val_min - 0.5) <= tc_f < (val_max + 0.5)
-            else:
-                resolved_yes = (val_min - 0.5) <= tc < (val_max + 0.5)
-        elif val_min is not None:
-            threshold_c = _f_to_c(val_min) if unit == 'F' else val_min
-            if kind == "above":
-                resolved_yes = tc > threshold_c
-            elif kind == "below":
-                resolved_yes = tc <= threshold_c
-            else:
-                half_width = 0.2778 if unit == 'F' else 0.5
-                resolved_yes = (threshold_c - half_width) <= tc < (threshold_c + half_width)
-
-        if resolved_yes is not None:
-            display_unit = 'F' if unit == 'F' else 'C'
-            display_tc = tc * 9/5 + 32 if unit == 'F' else tc
-            logger.info(
-                f"🧪 DRY-RUN SAFETY-NET ({'WIN' if resolved_yes else 'LOSS'}): "
-                f"{pos.question[:50]} | actual={display_tc:.1f}°{display_unit} | "
-                f"date={target_date}"
-            )
-        return resolved_yes
-    except Exception as e:
-        logger.debug(f"Safety-net resolution error: {e}")
-        return None
-
-
 def check_and_close_positions(clob_client) -> List[Position]:
     closed = []
     now = datetime.now(timezone.utc)
@@ -662,22 +605,10 @@ def check_and_close_positions(clob_client) -> List[Position]:
         if isinstance(_recently_closed[_rc_cid], datetime):
             if (now - _recently_closed[_rc_cid]).total_seconds() > 86400:
                 del _recently_closed[_rc_cid]
-
-    resolution_count = 0
     for cid, pos in list(_active_positions.items()):
         age_hours = (now - pos.entry_time).total_seconds() / 3600
 
         resolved = check_market_resolved(cid, position=pos)
-
-        # v15 Safety Net: якщо end_date минув >18h і resolution все ще None —
-        # спробуємо прямий виклик fetch_historical_extreme (минуваємо Gamma кеш)
-        if resolved is None and pos.end_date and now > pos.end_date + timedelta(hours=18):
-            resolved = _try_direct_historical_resolution(pos)
-            if resolved is not None:
-                resolution_count += 1
-                logger.info(
-                    f"🔍 v15 Safety-net resolution via historical API: {resolved} for {pos.question[:50]}"
-                )
 
         if resolved is None and pos.token_id:
             market_ended = (
@@ -689,9 +620,16 @@ def check_and_close_positions(clob_client) -> List[Position]:
                     logger.info(
                         f"🔍 Resolution via direct CLOB (Gamma miss, market_ended)"
                     )
+            else:
+                # Debug: чому не резолвиться?
+                if pos.end_date:
+                    hours_left = (pos.end_date - now).total_seconds() / 3600
+                    if hours_left < 1.0:
+                        logger.debug(f"⏳ Resolution чекає end_date: {pos.question[:40]} | залишилось {hours_left*60:.0f}хв")
+                else:
+                    logger.debug(f"⚠️ Позиція без end_date: {pos.question[:40]}")
 
         if resolved is not None:
-            resolution_count += 1
             pos.resolve(resolved)
             _try_record_sigma(pos)
             logger.info(f"{'✅ WIN' if pos.pnl_usd > 0 else '❌ LOSS'}: {pos.question[:50]} | PnL ${pos.pnl_usd:+.2f}")
@@ -700,8 +638,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
             _recently_closed[cid] = now
             continue
 
-        # v15: force-close >24h after end_date (було 30h)
-        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=24):
+        if pos.token_id and pos.end_date and now > pos.end_date + timedelta(hours=30):
             resolved_yes = None
             try:
                 r = requests.get(
@@ -728,7 +665,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
                     pos.pnl_usd = -pos.size_usd
                     pos.pnl_pct = -1.0
                 logger.warning(
-                    f"⏰ Force-close >24h after end_date: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
+                    f"⏰ Force-close >30h after end_date: {pos.question[:50]} | {pos.status} | PnL ${pos.pnl_usd:+.2f}"
                 )
             closed.append(pos)
             del _active_positions[cid]
@@ -778,10 +715,6 @@ def check_and_close_positions(clob_client) -> List[Position]:
             del _active_positions[cid]
             _recently_closed[cid] = now
             continue
-
-    # v15: підсумкове логування resolutions/closes за цикл
-    if resolution_count > 0 or len(closed) > 0:
-        logger.info(f"📊 Cycle resolution summary: {resolution_count} resolved, {len(closed)} total closed")
 
     return closed
 
