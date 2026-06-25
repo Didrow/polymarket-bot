@@ -47,7 +47,7 @@ class EdgeResult:
     def summary(self) -> str:
         return (
             f"{self.edge_direction} | edge={self.edge:.1%} | "
-            f"our_prob={self.estimated_prob:.0%} | market={self.market_prob:.0%} | "
+            f"our_prob={self.estimated_prob:.2f} | market={self.market_prob:.2f} | "
             f"{self.reason}"
         )
 
