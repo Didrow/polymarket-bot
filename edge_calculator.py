@@ -511,6 +511,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         # But we still need to set a reason for this market
         reason = f"CATEGORICAL|42°C SPECIAL | our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
 
+    reason = "SKIP"  # Initialize reason for all non-tradeable cases
     return EdgeResult(
         market=market,
         forecast=forecast,
@@ -521,8 +522,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         confidence=confidence,
         time_decay_factor=time_decay,
         reason=reason,
-        is_tradeable=True,
-        size_usd=round(size_usd, 2),
+        is_tradeable=False,
+        size_usd=0.0,
         threshold_c=threshold_c,
         distance_c=distance_c or 0.0,
     )
