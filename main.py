@@ -473,8 +473,9 @@ def main():
 
             safeguard.save_positions(_trader._active_positions)
 
+            safeguard.print_summary()
+
             if time.time() - last_summary_time >= 1800:
-                safeguard.print_summary()
                 summary = safeguard.state
                 notifier.notify_daily_summary(
                     capital=summary.current_capital,
