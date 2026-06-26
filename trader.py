@@ -577,12 +577,15 @@ def _record_sigma_on_resolution(pos: "Position", resolved_yes: bool, actual_temp
             from sigma_calibrator import record_forecast_error
             source = "CONSENSUS"
             record_forecast_error(pos.city, source, pos.forecast_at_entry_c, actual_temp_c)
+        else:
+            logger.debug(f"📐 Sigma skip: forecast={pos.forecast_at_entry_c:.1f}, actual={actual_temp_c:.1f}")
     except Exception as e:
-        logger.debug(f"Sigma record error: {e}")
+        logger.warning(f"📐 Sigma record error: {e}")
 
 
 def _try_record_sigma(pos: "Position"):
     if pos.forecast_at_entry_c == 0.0:
+        logger.debug(f"📐 Sigma skip: no forecast_at_entry for {pos.question[:40]}")
         return
     try:
         from data_fetcher import fetch_historical_extreme
@@ -592,9 +595,11 @@ def _try_record_sigma(pos: "Position"):
         if extremes:
             is_low = 'lowest' in pos.question.lower()
             actual = extremes[0] if is_low else extremes[1]
-            _record_sigma_on_resolution(pos, True, actual)
+            _record_sigma_on_resolution(pos, pos.pnl_usd > 0, actual)
+        else:
+            logger.debug(f"📐 Sigma skip: no extremes for {pos.city}/{t_date}")
     except Exception as e:
-        logger.debug(f"Sigma record attempt error: {e}")
+        logger.warning(f"📐 Sigma record attempt error: {e}")
 
 
 def check_and_close_positions(clob_client) -> List[Position]:

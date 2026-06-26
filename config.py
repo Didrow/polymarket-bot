@@ -49,7 +49,7 @@ ENABLE_ADJACENT_GRID: bool = True
 SNIPER_GRID_DISTANCE_C: float = 2.5 # v14.3: 4.0→2.5 (повернуто до sniper-точності: ±1.25°C від прогнозу)
 SNIPER_GRID_DISTANCE_F: float = 4.5 # v14.3: 3.6→4.5 (сумірно з C: ±2.5°C = 4.5°F)
 SNIPER_GRID_MIN_EDGE: float = 0.03 # v14.3: 0.01→0.03 (підвищено для відсіювання шуму в хвостових бакетах)
-SNIPER_GRID_MIN_EDGE_NORMAL: float = 0.18 # v14.3: новий параметр — мінімальний edge для нормальних ринків (price ≥ 10¢)
+SNIPER_GRID_MIN_EDGE_NORMAL: float = 0.05 # v14.4: 0.18→0.05 (0.18 блокував нормальні ринки — було занадто жорстко)
 SNIPER_GRID_MIN_PROB: float = 0.08 # v14: 0.08 (збережено)
 SNIPER_GRID_MAX_ASK: float = 0.85 # v14: 0.60→0.85 (розширено верхню межу для захоплення ринків з високою ймовірністю)
 SNIPER_GRID_MIN_ASK: float = 0.005 # v14.2: 0.01→0.005 (дозволити ринки з ask ≥ 0.5¢ для хвостових бакетів)
@@ -127,7 +127,7 @@ PROB_EXACT_CALIBRATION_SCALE: float = 1.00
 PROB_RANGE_CALIBRATION_SCALE: float = 1.00
 PROB_DISTANCE_SCALE_C: float = 3.0
 PROB_DISTANCE_SCALE_F: float = 4.5
-PROB_DISTANCE_POWER: float = 0.3
+PROB_DISTANCE_POWER: float = 0.50 # v14.4: 0.3→0.5 (крутіше спадання — далекі бакети не отримують завищену ймовірність)
 PROB_CONFIDENCE_WEIGHT: float = 0.25
 PROB_TIME_DECAY_SHORT: float = 1.00
 PROB_TIME_DECAY_MID: float = 0.95
@@ -150,8 +150,8 @@ MAX_EDGE_CAP: float = 0.60 # v14: 0.35→0.60 (підвищено для доз�
 
 # ── v14: ALTEREGOETH FEATURES ──────────────────────────────────
 # v14.1: Market-price anchoring (боротьба з 0% win rate)
-MARKET_ANCHOR_WEIGHT: float = 0.10 # v14.1: 30%→10% ваги ринку, 90% нашої моделі — зменшено для збереження слабких сигналів
-MARKET_ANCHOR_THRESHOLD: float = 0.20 # застосовувати для ринків <20¢
+MARKET_ANCHOR_WEIGHT: float = 0.35 # v14.4: 0.10→0.35 (довіра ринку — модель систематично переоцінює екстремальні темп.)
+MARKET_ANCHOR_THRESHOLD: float = 0.40 # v14.4: 0.20→0.40 (застосовувати анкор для ринків <40¢, не лише <20¢)
 
 # Self-calibrating sigma (sigma_calibrator.py)
 SIGMA_CAL_ENABLED: bool = True

@@ -437,11 +437,8 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
 
     direction = "BUY_YES"
-    # Edge = різниця між нашою ймовірністю та ціною ринку
+    # Edge = різниця між нашою ймовірністю та ціною ринку (обчислюється після calibration)
     # НЕ множимо на confidence — це має впливати на РОЗМІР позиції, а не на фільтрацію
-    raw_edge = our_prob - market_prob
-    # Cap edge щоб запобігти хибним сигналам від METAR artifacts
-    eff_edge = min(raw_edge, getattr(config, 'MAX_EDGE_CAP', 0.75))
 
     kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
     range_max_c = _f_to_c(val_max) if kind == "range" and val_max is not None and unit == 'F' else val_max
@@ -461,11 +458,11 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         confidence,
     )
 
-    # v14.1: Market-price anchoring — ринок зазвичай точніший за модель
-    # Якщо ринок каже <15¢ (10% шанс), а ми кажемо 27% — ми майже напевно помиляємось
-    # Blend: 90% our_prob + 10% market_prob для дешевих ринків (<20¢) — зменшено з 0.30 до 0.10
-    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.10)
-    market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.20)
+    # v14.4: Market-price anchoring — ринок систематично точніший за модель
+    # Blend: 65% our_prob + 35% market_prob для ринків <40¢
+    # Модель переоцінює екстремальні температури — анкор тягне її назад до реальності
+    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.35)
+    market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.40)
     if market_prob < market_anchor_threshold:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
         logger.debug(f"ANCHORED: market_prob={market_prob:.4f} → our_prob={our_prob:.4f} | {market.question[:40]}")

@@ -53,6 +53,7 @@
   - 13.06.2026: виправлено хибний `daily_loss` у `safeguards.py` — тепер рахується по equity (`cash + portfolio_value`), без подвійного додавання unrealized PnL; додано price validation у `edge_calculator.py`; `compileall` + price smoke пройдені.
   - 13.06.2026: `skip: city=99` розшифровано як кількість відсіяних ринків по `CITY_WHITELIST`, а не як код міста.
   - 13.06.2026: після перевірки аналізу — WeatherBot v10.2 готовий до 7-денного DRY-RUN; перед LIVE потрібен backtest: Sharpe > 1.0, win rate > 45%, ≥50 resolved trades.
+  - **26.06.2026: v14.4 — Довіра ринку (MARKET_ANCHOR_WEIGHT 0.10→0.35) — виправлення систематичної переоцінки екстремальних температур:** `config.py` піднято `MARKET_ANCHOR_WEIGHT` до 0.35 (анкор до 40¢), `PROB_DISTANCE_POWER` 0.3→0.5 (крутіше спадання), `SNIPER_GRID_MIN_EDGE_NORMAL` 0.18→0.05 (розблокування нормальних ринків); `trader.py` додано логування sigma_calibrator + виправлено `True`→`pos.pnl_usd > 0`; `edge_calculator.py` видалено мертвий код `raw_edge`/`eff_edge` до calibration.
 - **B2B Lead Agent:** nanobot + Gemini API
 - **UA Skills:** 30+ скілів для opencode (юрист, лікар, продажі тощо)
 
