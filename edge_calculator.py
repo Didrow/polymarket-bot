@@ -358,9 +358,10 @@ def _is_extreme_tail_yes_market(market_prob: float) -> bool:
 
 
 def _grid_min_edge_for_market(market_prob: float) -> float:
-    if _is_extreme_tail_yes_market(market_prob):
-        return getattr(config, "EXTREME_TAIL_MIN_EDGE_YES", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015))
-    return getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
+    if market_prob < 0.10:  # tail markets (price < 10¢)
+        return getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
+    else:  # normal markets
+        return getattr(config, "SNIPER_GRID_MIN_EDGE_NORMAL", 0.18)
 
 
 def _grid_tradeable(

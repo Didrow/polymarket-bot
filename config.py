@@ -46,9 +46,10 @@ EXTREME_TAIL_MAX_SIZE_USD: float = 2.0     # v13: 1.5→2.0 (більше на �
 EXTREME_TAIL_MIN_EDGE_YES: float = 0.01 # v13: 0.04→0.01 (знижено для виявлення слабких edge у хвостових ринках)
 
 ENABLE_ADJACENT_GRID: bool = True
-SNIPER_GRID_DISTANCE_C: float = 4.0 # v14.2: 3.0→4.0 (розширено сітку до ±2°C для захоплення хвостових бакетів)
-SNIPER_GRID_DISTANCE_F: float = 3.6 # v14.2: 2.7→3.6 (сітка ±2°F, сумірно з C)
-SNIPER_GRID_MIN_EDGE: float = 0.01 # v14: 0.03→0.01 (знижено для виявлення слабких, але реальних edge-сигналів)
+SNIPER_GRID_DISTANCE_C: float = 2.5 # v14.3: 4.0→2.5 (повернуто до sniper-точності: ±1.25°C від прогнозу)
+SNIPER_GRID_DISTANCE_F: float = 4.5 # v14.3: 3.6→4.5 (сумірно з C: ±2.5°C = 4.5°F)
+SNIPER_GRID_MIN_EDGE: float = 0.03 # v14.3: 0.01→0.03 (підвищено для відсіювання шуму в хвостових бакетах)
+SNIPER_GRID_MIN_EDGE_NORMAL: float = 0.18 # v14.3: новий параметр — мінімальний edge для нормальних ринків (price ≥ 10¢)
 SNIPER_GRID_MIN_PROB: float = 0.08 # v14: 0.08 (збережено)
 SNIPER_GRID_MAX_ASK: float = 0.85 # v14: 0.60→0.85 (розширено верхню межу для захоплення ринків з високою ймовірністю)
 SNIPER_GRID_MIN_ASK: float = 0.005 # v14.2: 0.01→0.005 (дозволити ринки з ask ≥ 0.5¢ для хвостових бакетів)
@@ -58,7 +59,7 @@ GRID_FORECAST_STEP_C: float = 0.5 # v14: 1.0→0.5 (крок сітки 0.5°C, 
 GRID_FORECAST_SPAN_C: float = 1.5 # v14: 2.0→1.5 (половина сітки ±0.75°C, не ±1.0°C)
 
 ADJACENT_GRID_SIZE_USD: float = 1.5        # хвости сітки — менші ставки
-ADJACENT_GRID_MIN_EDGE: float = 0.01 # v13: 0.03→0.01 (знижено для виявлення слабких edge у сусідніх бакетах)
+ADJACENT_GRID_MIN_EDGE: float = 0.03 # v14.3: 0.01→0.03 (підвищено для відсіювання шуму в сусідніх бакетах)
 ADJACENT_GRID_MIN_PROB: float = 0.06       # v13: 0.05→0.06
 ADJACENT_GRID_MAX_ASK: float = 0.85 # v14: 0.60→0.85 (розширено верхню межу для сусідніх бакетів)
 
@@ -88,7 +89,7 @@ KELLY_PROB_CAP: float = 0.60               # v13: новий параметр, �
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
 VALIDATION_MIN_RESOLVED_TRADES: int = 50
 VALIDATION_MIN_DRY_RUN_HOURS: int = 240
-VALIDATION_MIN_WIN_RATE: float = 0.50
+VALIDATION_MIN_WIN_RATE: float = 0.20 # v14.3: 0.50→0.20 (реалістично для sniper grid — асиметрична стратегія з рідкими, але високими виплатами)
 VALIDATION_MIN_ROI: float = 0.00
 VALIDATION_MIN_EQUITY: float = 0.00
 
