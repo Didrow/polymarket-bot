@@ -1,7 +1,7 @@
 """
-data_fetcher.py — Polymarket Weather Bot (GRID / YES LADDERING EDITION)
-Джерела: NOAA + NASA POWER + Open-Meteo GFS/ECMWF + Open-Meteo ENSEMBLE (31 members)
-Пріоритет METAR для ринків з resolution ≤ 12 годин (ColdMath style)
+data_fetcher.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
+Джерела: METAR + OBSERVED (перший пріоритет для ≤12h) + Open-Meteo ENSEMBLE + NOAA + NASA POWER + GFS/ECMWF
+v15: METAR = основа стратегії (не 10% побічне джерело), observed = фізичний floor
 """
 
 import math
@@ -824,7 +824,7 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
 def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
     """
     Повертає консенсусний прогноз для заданого міста.
-    Якщо hours_to_resolution <= 12, METAR отримує дуже високу вагу (ColdMath стиль).
+    v15: METAR = основа стратегії (60% вага ≤8h, 40% ≤12h).
     """
     # Бакет hours для кешу: ≤12, ≤24, >24
     _h_bucket = "short" if hours_to_resolution <= 12 else ("mid" if hours_to_resolution <= 24 else "long")
@@ -835,27 +835,48 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
 
     forecasts_w = []
 
-    # 1. Отримуємо METAR завжди (він може бути None, якщо немає ICAO)
+    # v15: METAR — перший пріоритет. Для ≤12h METAR отримує 60% ваги (арбітраж)
     metar_fc = fetch_metar(city)
-    
-    # 2. Отримуємо прогнози від інших джерел (ансамбль, NOAA, NASA, Open-Meteo)
+
     fc_ensemble = fetch_open_meteo_ensemble(city, hours_to_resolution, target_date)
     fc_noaa = fetch_noaa_forecast(city, hours_to_resolution, target_date)
     fc_nasa = fetch_nasa_power(city, hours_to_resolution)
     fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution, target_date)
     fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution, target_date)
 
-    # 3. Визначаємо ваги залежно від часу до resolution (Тільки моделі, без METAR!)
-    if hours_to_resolution <= 12.0:
-        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.50))
-        if fc_gfs: forecasts_w.append((fc_gfs, 0.25))
-        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.25))
+    # v15: METAR-ARBITRAGE зважування
+    if hours_to_resolution <= 8.0:
+        # Для ультракоротких горизонтів: METAR + observed домінують
+        if metar_fc:
+            forecasts_w.append((metar_fc, 0.60))
+        if fc_ensemble:
+            forecasts_w.append((fc_ensemble, 0.20))
+        if fc_gfs:
+            forecasts_w.append((fc_gfs, 0.10))
+        if fc_ecmwf:
+            forecasts_w.append((fc_ecmwf, 0.10))
+    elif hours_to_resolution <= 12.0:
+        # Короткі: METAR суттєвий, але ансамбль ще важливий
+        if metar_fc:
+            forecasts_w.append((metar_fc, 0.40))
+        if fc_ensemble:
+            forecasts_w.append((fc_ensemble, 0.35))
+        if fc_gfs:
+            forecasts_w.append((fc_gfs, 0.15))
+        if fc_ecmwf:
+            forecasts_w.append((fc_ecmwf, 0.10))
     else:
-        if fc_ensemble: forecasts_w.append((fc_ensemble, 0.45))
-        if fc_noaa: forecasts_w.append((fc_noaa, 0.25))
-        if fc_gfs: forecasts_w.append((fc_gfs, 0.15))
-        if fc_ecmwf: forecasts_w.append((fc_ecmwf, 0.10))
-        if fc_nasa: forecasts_w.append((fc_nasa, 0.05))
+        # Довгі (>12h): METAR лише для корекції, ансамбль + NOAA домінують
+        if fc_ensemble:
+            forecasts_w.append((fc_ensemble, 0.45))
+        if fc_noaa:
+            forecasts_w.append((fc_noaa, 0.25))
+        if fc_gfs:
+            forecasts_w.append((fc_gfs, 0.15))
+        if fc_ecmwf:
+            forecasts_w.append((fc_ecmwf, 0.10))
+        if fc_nasa:
+            forecasts_w.append((fc_nasa, 0.05))
 
     # Якщо після зважування немає жодного прогнозу — повертаємо ансамбль або None
     if not forecasts_w:
@@ -885,9 +906,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
         sources_used=all_sources,
     )
 
-    # Передаємо members лише якщо METAR не домінує (вага < 0.5).
-    # При METAR >= 0.5: result.temp_high_c відображає METAR-реальність,
-    # але ensemble members з іншого дня → prob_exact дасть хибний результат.
+    # v15: Ensemble members передаємо лише якщо METAR вага < 0.5
     _metar_weight = next(
         (w for f, w in forecasts_w if "METAR" in f.sources_used), 0.0
     )
@@ -895,36 +914,21 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
         result.temp_high_members = fc_ensemble.temp_high_members
         result.temp_low_members = fc_ensemble.temp_low_members
 
-    # Застосовуємо спостережені дані як фізичне обмеження для ринків, що вирішуються сьогодні
-    if hours_to_resolution <= 24.0:
+    # v15: observed = жорсткий floor/ceiling (фізичне обмеження)
+    if hours_to_resolution <= 12.0:
         observed = _fetch_observed_daily_extremes(city)
         if observed:
             obs_low, obs_high = observed
-            # Добовий максимум не може бути нижчим за вже спостережений максимум
             result.temp_high_c = max(result.temp_high_c, obs_high)
-            # Добовий мінімум не може бути вищим за вже спостережений мінімум
             result.temp_low_c = min(result.temp_low_c, obs_low)
-
-            # НЕ модифікуємо ensemble members observed даними!
-            # Observed = floor для temp_high_c, але НЕ для ймовірнісних розрахунків.
-            # Підтягування members до observed створює хибну впевненість (99%)
-            # коли поріг близько до поточної температури.
 
             if "OBSERVED" not in result.sources_used:
                 result.sources_used.append("OBSERVED")
 
-        # METAR: використовуємо ТІЛЬКИ як дані для корекції середнього прогнозу
-        # НЕ застосовуємо до ensemble members — це створює хибну впевненість (99%)
-        # Поточна температура ≠ добовий максимум/мінімум
-        # temp_low_c коригуємо dewpoint (ночі мінімум ближче до dewpoint, ніж до поточної)
-        if metar_fc and hours_to_resolution < 14.0:
-            current_temp = metar_fc.temp_high_c
-            current_dewp = metar_fc.temp_low_c  # dewpoint з METAR
-            result.temp_high_c = round(result.temp_high_c * 0.9 + current_temp * 0.1, 1)
-            result.temp_low_c = round(result.temp_low_c * 0.9 + current_dewp * 0.1, 1)
-
-            if "METAR" not in result.sources_used:
-                result.sources_used.append("METAR")
+        # v15: METAR вже в зваженому середній (вага 40-60%).
+        # НЕ додаємо окрему 10% корекцію — це вже враховано у зважуванні вище.
+        if metar_fc and "METAR" not in result.sources_used:
+            result.sources_used.append("METAR")
 
     # v14.6: City-specific season bias correction
     # ENSEMBLE систематично занижує температуру для US міст у літній сезон

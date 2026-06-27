@@ -1,13 +1,12 @@
 """
-edge_calculator.py — Polymarket Weather Bot (PROFITABLE SNIPER GRID v13)
+edge_calculator.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
-Стратегія neobrother-style forecast ladder grid:
-- BUY_YES only, focus on buckets NEAR the forecast peak (8-60¢)
-- Grid of 3-5 adjacent temperature buckets (±1°C from forecast)
-- Realistic probabilities via reduced over-calibration (v13)
-- Quarter-Kelly position sizing for optimal bankroll growth
-- Adaptive spread filter for liquid markets
-- Distance filter for categorical markets (max 2.5°C from forecast)
+Стратегія: арбітраж запізнілого ринку
+- Тільки above/below ринки де METAR/observed ПІДТВЕРДЖУЄ напрямок
+- Поточна температура вже вище/нижче порогу → риночок ще не оновив ціну
+- Короткий горизонт (≤8h): ринок ще не встиг переосмислити
+- Вхід 15-70¢ (реальна ліквідність), win rate 55-70%
+- Немає adjacent grid, немає tail-х vmin — тільки якісний арбітраж
 """
 
 import math
@@ -17,7 +16,7 @@ from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
 import config
-from data_fetcher import WeatherForecast, get_best_forecast
+from data_fetcher import WeatherForecast, get_best_forecast, fetch_metar, _fetch_observed_daily_extremes
 from market_scanner import PolyMarket
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,7 @@ class EdgeResult:
     estimated_prob: float
     market_prob: float
     edge: float
-    edge_direction: str      # Тепер завжди "BUY_YES"
+    edge_direction: str
     confidence: float
     reason: str
     is_tradeable: bool
@@ -38,6 +37,8 @@ class EdgeResult:
     size_usd: float = 0.0
     threshold_c: float = 0.0
     distance_c: float = 0.0
+    metar_temp_c: float = 0.0
+    observed_high_c: float = 0.0
 
     @property
     def edge_pct(self) -> str:
@@ -45,19 +46,20 @@ class EdgeResult:
 
     @property
     def summary(self) -> str:
+        metar_str = f"metar={self.metar_temp_c:.1f}°C" if self.metar_temp_c else "no-metar"
+        obs_str = f"obs_hi={self.observed_high_c:.1f}°C" if self.observed_high_c else ""
         return (
             f"{self.edge_direction} | edge={self.edge:.1%} | "
             f"our_prob={self.estimated_prob:.2f} | market={self.market_prob:.2f} | "
-            f"{self.reason}"
+            f"{self.reason} | {metar_str} {obs_str}"
         )
 
 
 # ══════════════════════════════════════════════════════════════════
-# ПАРСИНГ ДІАПАЗОНІВ ТА ПОРОГІВ (оновлено для підтримки range)
+# ПАРСИНГ ДІАПАЗОНІВ ТА ПОРОГІВ
 # ══════════════════════════════════════════════════════════════════
 
 def _unit_from_question(question: str) -> str:
-    """Визначає одиницю температури з питання. США за замовчуванням — °F."""
     q = question.lower()
     explicit_units = re.findall(r'[-+]?\d+\.?\d*\s*°?\s*([cf])\b', q)
     if explicit_units:
@@ -66,7 +68,6 @@ def _unit_from_question(question: str) -> str:
         return 'F'
     if 'celsius' in q or 'centigrade' in q:
         return 'C'
-
     fahrenheit_cities = {"chicago", "dallas", "nyc", "new york", "san francisco",
                          "miami", "los angeles", "seattle", "atlanta", "boston",
                          "denver", "phoenix", "las vegas", "austin", "minneapolis",
@@ -77,24 +78,17 @@ def _unit_from_question(question: str) -> str:
 
 
 def _f_delta_to_c(delta_f: float) -> float:
-    """Converts a Fahrenheit temperature difference to Celsius."""
     return delta_f * 5.0 / 9.0
 
 
 def _strip_temperature_conversions(question: str) -> str:
-    """Прибирає конверсії типу 83°F=28.3°C, щоб вони не парсились як range."""
     return re.sub(r'=\s*[-+]?\d+\.?\d*\s*°?\s*[cf]\b', '', question, flags=re.IGNORECASE)
 
 
 def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Optional[float], str]:
-    """
-    Парсить запитання на предмет діапазонів або одинарних порогів температур.
-    Повертає: (kind, val_min, val_max, unit)
-    """
     q_lower = _strip_temperature_conversions(question).lower()
     unit = _unit_from_question(question)
 
-    # 1. Діапазони: "between 16 and 18°C", "16-18°C", "16°C to 18°C".
     range_match = re.search(
         r'(?:between\s+)?([-+]?\d+\.?\d*)\s*°?\s*[cf]\s*(?:-|–|to|and)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]',
         q_lower,
@@ -113,14 +107,12 @@ def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Opti
         except ValueError:
             pass
 
-    # 2. Одинарні пороги
     kind = "categorical"
     if any(w in q_lower for w in ["or higher", "or above", "above", "exceed"]):
         kind = "above"
     elif any(w in q_lower for w in ["or below", "or lower", "below", "under"]):
         kind = "below"
 
-    # Парсинг одинарного значення з явною одиницею.
     m = re.search(r'([-+]?\d+\.?\d*)\s*°\s*([FfCc])\b', q_lower)
     if m:
         return kind, float(m.group(1)), None, 'F' if m.group(2).lower() == 'f' else 'C'
@@ -129,7 +121,7 @@ def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Opti
     if m:
         return kind, float(m.group(1)), None, 'F' if m.group(2).lower() == 'f' else 'C'
 
-    m = re.search(r'\bbe\s+([-+]?\d+\.?\d*)', q_lower)
+    m = re.search(r'\be\s+([-+]?\d+\.?\d*)', q_lower)
     if m:
         return kind, float(m.group(1)), None, unit
 
@@ -157,27 +149,32 @@ def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
     if not forecast or not forecast.sources_used:
         return 0.60
     sources = forecast.sources_used
-    
-    if "Open-Meteo_ENSEMBLE" in sources or "ENSEMBLE" in sources:
+    if "METAR" in sources and "OBSERVED" in sources:
+        return 0.95
+    if "METAR" in sources:
+        return 0.92
+    if "OBSERVED" in sources:
         return 0.90
-        
+    if "Open-Meteo_ENSEMBLE" in sources or "ENSEMBLE" in sources:
+        return 0.85
     n = len(sources)
-    if "NOAA" in sources and n >= 2: return 0.95
-    if "NOAA" in sources: return 0.90
-    if any("GFS" in s for s in sources) and any("ECMWF" in s for s in sources): return 0.87
-    return 0.75
+    if "NOAA" in sources and n >= 2:
+        return 0.85
+    if any("GFS" in s for s in sources) and any("ECMWF" in s for s in sources):
+        return 0.80
+    return 0.70
 
 
 def _time_decay_for_hours(hours: float) -> float:
+    if hours <= 6.0:
+        return 1.00
     if hours <= 12.0:
-        return getattr(config, "PROB_TIME_DECAY_SHORT", 1.00)
-    if hours <= 24.0:
-        return getattr(config, "PROB_TIME_DECAY_MID", 0.95)
-    return getattr(config, "PROB_TIME_DECAY_LONG", 0.90)
+        return 0.95
+    return 0.90
 
 
 # ══════════════════════════════════════════════════════════════════
-# РОЗРАХУНОК ЙМОВІРНОСТІ (з підтримкою діапазонів)
+# РОЗРАХУНОК ЙМОВІРНОСТІ
 # ══════════════════════════════════════════════════════════════════
 
 def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -> Tuple[float, float, str]:
@@ -190,10 +187,7 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
 
     if kind == "range":
         mean_c = forecast.temp_low_c if is_low else forecast.temp_high_c
-        members = forecast._get_adjusted_members(is_low)
-
         if unit == 'F':
-            # Конвертуємо F-межі в C для узгодженого Gaussian
             t_min_c = _f_to_c(val_min - 0.5)
             t_max_c = _f_to_c(val_max + 0.5)
             label = f"range|{val_min}-{val_max}°F"
@@ -204,15 +198,11 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
             label = f"range|{val_min}-{val_max}°C"
             threshold_c = (val_min + val_max) / 2
 
-        # Використовуємо динамічну sigma конкретного міста та горизонту прогнозу
         sigma = forecast._get_sigma(hours)
-
-        # Gaussian CDF (узгоджена з prob_above_temp_c / prob_exact_temp_c)
         p_high = 0.5 * (1 + math.erf((t_max_c - mean_c) / (sigma * math.sqrt(2))))
-        p_low  = 0.5 * (1 + math.erf((t_min_c - mean_c) / (sigma * math.sqrt(2))))
+        p_low = 0.5 * (1 + math.erf((t_min_c - mean_c) / (sigma * math.sqrt(2))))
         prob_parametric = max(0.0, p_high - p_low)
 
-        # Кап для range (з config.py, спільний з prob_exact_temp_c)
         if hours <= 6.0:
             _max_r = config.PROB_CAP_EXACT_SHORT
         elif hours <= 18.0:
@@ -220,22 +210,19 @@ def estimate_market_probability(market: PolyMarket, forecast: WeatherForecast) -
         else:
             _max_r = config.PROB_CAP_EXACT_LONG
 
-        # v13: реалістичні ймовірності для range бакетів (сітка ±1°C)
-        # Було 0.30/0.70*0.55 (discount 45%) — our_prob занадто малий.
-        # Тепер 0.40/0.60*0.75 (discount 25%) — our_prob реалістичний для сітки.
+        members = forecast._get_adjusted_members(is_low)
         if members and len(members) >= 5:
             count_in = sum(1 for m in members if t_min_c <= m < t_max_c)
             prob_empirical = count_in / len(members)
             if prob_empirical == 0.0:
-                p = prob_parametric * 0.50  # v13: 0.30→0.50
+                p = prob_parametric * 0.50
             else:
-                p = (prob_empirical * 0.40 + prob_parametric * 0.60) * 0.75  # v13: 0.30/0.70*0.55 → 0.40/0.60*0.75
+                p = (prob_empirical * 0.40 + prob_parametric * 0.60) * 0.75
         else:
-            p = prob_parametric * 0.75  # v13: 0.55→0.75
+            p = prob_parametric * 0.75
 
         return round(max(0.01, min(_max_r, p)), 4), threshold_c, label
 
-    # Звичайний одинарний поріг
     if val_min is not None:
         if unit == 'F':
             threshold_c = _f_to_c(val_min)
@@ -272,20 +259,20 @@ def _calibrated_probability(
     p = max(0.0, min(1.0, raw_prob))
 
     if kind in {"above", "below"}:
-        p *= getattr(config, "PROB_THRESHOLD_CALIBRATION_SCALE", 0.85)
+        p *= getattr(config, "PROB_THRESHOLD_CALIBRATION_SCALE", 0.95)
     elif kind == "range":
         p *= getattr(config, "PROB_RANGE_CALIBRATION_SCALE", 0.85)
     else:
         p *= getattr(config, "PROB_EXACT_CALIBRATION_SCALE", 0.85)
 
     if distance_c is not None:
-        scale = getattr(config, "PROB_DISTANCE_SCALE_C", 2.0)
+        scale = getattr(config, "PROB_DISTANCE_SCALE_C", 3.0)
         power = getattr(config, "PROB_DISTANCE_POWER", 0.5)
         p *= 1.0 / (1.0 + (abs(distance_c) / scale) ** power)
 
     p *= _time_decay_for_hours(hours)
 
-    confidence_weight = getattr(config, "PROB_CONFIDENCE_WEIGHT", 0.25)
+    confidence_weight = getattr(config, "PROB_CONFIDENCE_WEIGHT", 0.15)
     p *= (1.0 - confidence_weight) + confidence_weight * confidence
 
     return round(max(0.01, min(0.95, p)), 4)
@@ -310,30 +297,6 @@ def _apply_probability_calibration(
     )
 
 
-def _distance_filter_ok(
-    kind: str,
-    threshold_c: Optional[float],
-    fc_temp: Optional[float],
-    unit: str,
-    range_max_c: Optional[float] = None,
-) -> Tuple[bool, Optional[float]]:
-    if threshold_c is None or fc_temp is None:
-        return True, None
-
-    max_dist = _f_delta_to_c(getattr(config, "SNIPER_GRID_DISTANCE_F", 2.7)) if unit == 'F' else getattr(config, "SNIPER_GRID_DISTANCE_C", 1.5)
-    if kind == "range" and range_max_c is not None:
-        if threshold_c <= fc_temp <= range_max_c:
-            return True, 0.0
-        distance = min(abs(fc_temp - threshold_c), abs(fc_temp - range_max_c))
-        return distance <= max_dist, distance
-
-    distance = abs(fc_temp - threshold_c)
-    if kind in {"categorical", "range"}:
-        return distance <= max_dist, distance
-
-    return True, distance
-
-
 def _valid_yes_price(value: float, field_name: str) -> bool:
     return value is not None and math.isfinite(float(value)) and 0.0 <= float(value) <= 1.0
 
@@ -349,44 +312,86 @@ def _log_price_validation(market: PolyMarket) -> None:
         )
 
 
-def _is_extreme_tail_yes_market(market_prob: float) -> bool:
-    return (
-        getattr(config, "ENABLE_EXTREME_TAIL_YES", True)
-        and market_prob >= getattr(config, "EXTREME_TAIL_MIN_ASK_YES", 0.005)
-        and market_prob <= getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.80)
-    )
+# ══════════════════════════════════════════════════════════════════
+# v15: METAR ARBITRAGE CONFIRMATION
+# ══════════════════════════════════════════════════════════════════
 
-
-def _grid_min_edge_for_market(market_prob: float) -> float:
-    if market_prob < 0.10:  # tail markets (price < 10¢)
-        return getattr(config, "SNIPER_GRID_MIN_EDGE", 0.015)
-    else:  # normal markets
-        return getattr(config, "SNIPER_GRID_MIN_EDGE_NORMAL", 0.18)
-
-
-def _grid_tradeable(
+def _check_metar_confirmation(
+    city: str,
     kind: str,
-    kind_label: str,
-    market_prob: float,
+    threshold_c: float,
+    is_low: bool,
+) -> Tuple[bool, float, float, float]:
+    """
+    Перевіряє чи METAR та observed data підтверджують напрямок ринку.
+
+    Для "above X°C": поточна METAR-температура має бути ≥ (threshold - buffer)
+    Для "below X°C": поточна METAR-температура має бути ≤ (threshold + buffer)
+
+    Повертає: (confirmed, metar_temp_c, observed_high_c, distance_from_threshold_c)
+    """
+    metar_temp = 0.0
+    obs_high = 0.0
+    distance = 0.0
+    buffer_c = getattr(config, "METAR_ARB_TEMP_CONFIRM_C", 1.0)
+
+    metar_fc = fetch_metar(city)
+    if metar_fc:
+        metar_temp = metar_fc.temp_high_c
+
+    observed = _fetch_observed_daily_extremes(city)
+    if observed:
+        obs_high = observed[1]
+
+    if kind == "above":
+        best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
+        distance = best_evidence - threshold_c
+        confirmed = best_evidence >= (threshold_c - buffer_c)
+    elif kind == "below":
+        best_evidence_cold = metar_temp
+        if observed and observed[0] > 0:
+            best_evidence_cold = min(metar_temp, observed[0]) if metar_temp > 0 else observed[0]
+        distance = threshold_c - best_evidence_cold
+        confirmed = best_evidence_cold <= (threshold_c + buffer_c)
+    else:
+        confirmed = False
+
+    return confirmed, metar_temp, obs_high, distance
+
+
+def _boost_prob_from_metar(
     our_prob: float,
-    eff_edge: float,
-    dist_ok: bool,
-    min_edge: Optional[float] = None,
-    min_prob: Optional[float] = None,
-) -> bool:
-    grid_min_edge = min_edge if min_edge is not None else _grid_min_edge_for_market(market_prob)
-    grid_min_prob = min_prob if min_prob is not None else getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)
-    return (
-        dist_ok
-        and market_prob >= getattr(config, "SNIPER_GRID_MIN_ASK", 0.01)
-        and market_prob <= getattr(config, "SNIPER_GRID_MAX_ASK", getattr(config, "EXTREME_TAIL_MAX_ASK_YES", 0.75))
-        and our_prob >= grid_min_prob
-        and eff_edge >= grid_min_edge
-    )
+    kind: str,
+    metar_confirmed: bool,
+    metar_distance_c: float,
+    hours: float,
+) -> float:
+    """
+    Якщо METAR підтверджує напрямок — підіймаємо ймовірність.
+    Чим ближче resolution і чим далі METAR від порогу — тим більше підіймаємо.
+    """
+    if not metar_confirmed:
+        return our_prob
+
+    if kind not in ("above", "below"):
+        return our_prob
+
+    hours_factor = max(0.0, (8.0 - hours) / 8.0)
+    dist_bonus = min(metar_distance_c / 3.0, 1.0)
+    boost = 0.10 * hours_factor * dist_bonus
+    boosted = min(our_prob + boost, 0.90)
+
+    if boost > 0.01:
+        logger.debug(
+            f"🔍 METAR BOOST: +{boost:.1%} | hours={hours:.1f}h | "
+            f"dist={metar_distance_c:.1f}°C → our_prob {our_prob:.0%}→{boosted:.0%}"
+        )
+
+    return round(boosted, 4)
 
 
 # ══════════════════════════════════════════════════════════════════
-# ОБЧИСЛЕННЯ EDGE (з каліброваною ймовірністю та снайперською сіткою)
+# ОБЧИСЛЕННЯ EDGE (v15: METAR ARBITRAGE)
 # ══════════════════════════════════════════════════════════════════
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -403,6 +408,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
+    kind = _detect_market_kind(market.question)
+
+    allowed_kinds = getattr(config, "METAR_ARB_KINDS_ONLY", ["above", "below"])
+    if kind not in allowed_kinds:
+        return None
+
     from market_scanner import get_target_date
     t_date = get_target_date(market.question, market.end_date, city)
     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=t_date)
@@ -413,14 +424,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     time_decay = _time_decay_for_hours(market.hours_to_resolution)
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
 
-    # Використовуємо ASK для розрахунку реальної вартості входу
     _log_price_validation(market)
     market_prob = market.best_ask_yes
 
-    # Якщо ask підозріло малий (< 1¢) — пробуємо midpoint
     if market_prob < 0.01:
         midpoint = getattr(market, "midpoint_yes", 0.0)
-        grid_min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.005)
+        grid_min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.15)
         if grid_min_ask <= midpoint <= 0.99:
             logger.debug(f"💡 Ask={market_prob:.4f} < 1¢, fallback на midpoint={midpoint:.4f}")
             market_prob = midpoint
@@ -431,114 +440,119 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market_prob <= 0.001 or market_prob >= 0.99:
         return None
 
-    kind = _detect_market_kind(market.question)
     is_low = 'lowest' in market.question.lower()
-    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c # float
-    src = "ENSEMBLE" if (hasattr(forecast, 'temp_high_members') and forecast.temp_high_members) else "SINGLE"
-
-    direction = "BUY_YES"
-    # Edge = різниця між нашою ймовірністю та ціною ринку (обчислюється після calibration)
-    # НЕ множимо на confidence — це має впливати на РОЗМІР позиції, а не на фільтрацію
-
-    kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
-    range_max_c = _f_to_c(val_max) if kind == "range" and val_max is not None and unit == 'F' else val_max
-    dist_ok, distance_c = _distance_filter_ok(kind, threshold_c, fc_temp, unit, range_max_c)
-    if not dist_ok:
-        logger.debug(
-            f"Пропускаємо поза сіткою: прогноз={fc_temp:.1f}°C, "
-            f"ціль={threshold_c:.1f}°C, різниця={distance_c:.1f}°C ({unit})"
-        )
+    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
+    distance_c = abs(fc_temp - threshold_c)
 
     our_prob = _apply_probability_calibration(
         our_prob,
         kind_label,
         market.hours_to_resolution,
         distance_c,
-        unit,
+        _unit_from_question(market.question),
         confidence,
     )
 
-    # v14.4: Market-price anchoring — ринок систематично точніший за модель
-    # Blend: 65% our_prob + 35% market_prob для ринків <40¢
-    # Модель переоцінює екстремальні температури — анкор тягне її назад до реальності
-    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.35)
-    market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.40)
+    market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.20)
+    market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.50)
     if market_prob < market_anchor_threshold:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
         logger.debug(f"ANCHORED: market_prob={market_prob:.4f} → our_prob={our_prob:.4f} | {market.question[:40]}")
 
-    raw_edge = our_prob - market_prob
-    eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
-
-    grid_min_edge = _grid_min_edge_for_market(market_prob)
-    tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok, min_edge=grid_min_edge)
-
-    # hard filter: фантомний edge — модель дає \u003e15% а ринок цінує бакет у \u003c1¢
-    # при співвідношенні 15:1 модель майже завжди помиляється
-    if tradeable and market_prob < 0.01 and our_prob > 0.15:
-        logger.debug(
-            f"⛔ PHANTOM EDGE: our={our_prob:.0%} vs mkt={market_prob:.1%} — "
-            f"ratio {our_prob/max(market_prob,0.001):.0f}:1 | {market.question[:40]}"
-        )
-        tradeable = False
-
-    if tradeable:
-        # ── Size розраховується в trader.py (decide_position_size) з актуальним capital ──
-        size_usd = 0.0
-        reason = (
-            f"SNIPER GRID YES @ {market_prob:.3f} | {kind_label} | "
-            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {src}"
-        )
-    
-    # Додаткове логування для всіх ринків, щоб виявити причину нульового edge
-    logger.debug(
-        f"EDGE: {market.question[:40]} | "
-        f"our={our_prob:.0%} | mkt={market_prob:.0%} | "
-        f"edge={eff_edge:.1%} | dist={distance_c:.1f}°C | "
-        f"decay={time_decay:.2f} | {kind_label} | {src}"
+    metar_confirmed, metar_temp_c, observed_high_c, metar_distance_c = _check_metar_confirmation(
+        city, kind, threshold_c, is_low
     )
 
-    if tradeable:
+    if getattr(config, "METAR_ARB_REQUIRE_METAR", True) and not metar_confirmed:
+        logger.debug(
+            f"❌ METAR NOT CONFIRMED: {kind}|{threshold_c:.1f}°C | "
+            f"city={city} | metar={metar_temp_c:.1f}°C | obs_hi={observed_high_c:.1f}°C"
+        )
         return EdgeResult(
             market=market,
             forecast=forecast,
             estimated_prob=our_prob,
             market_prob=market_prob,
-            edge=eff_edge,
-            edge_direction=direction,
+            edge=0.0,
+            edge_direction="BUY_YES",
             confidence=confidence,
+            reason="SKIP_METAR",
+            is_tradeable=False,
             time_decay_factor=time_decay,
-            reason=reason,
-            is_tradeable=True,
-            size_usd=size_usd,
+            size_usd=0.0,
             threshold_c=threshold_c,
-            distance_c=distance_c or 0.0,
+            distance_c=distance_c,
+            metar_temp_c=metar_temp_c,
+            observed_high_c=observed_high_c,
         )
+
+    our_prob = _boost_prob_from_metar(our_prob, kind, metar_confirmed, metar_distance_c, market.hours_to_resolution)
+
+    raw_edge = our_prob - market_prob
+    eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.50))
+
+    min_ask = getattr(config, "METAR_ARB_MIN_ASK", 0.15)
+    max_ask = getattr(config, "METAR_ARB_MAX_ASK", 0.70)
+    min_edge = getattr(config, "METAR_ARB_MIN_EDGE", 0.08)
+    min_prob = getattr(config, "METAR_ARB_MIN_PROB", 0.55)
+    max_dist = getattr(config, "METAR_ARB_MAX_DIST_C", 3.0)
+
+    tradeable = (
+        market_prob >= min_ask
+        and market_prob <= max_ask
+        and our_prob >= min_prob
+        and eff_edge >= min_edge
+        and distance_c <= max_dist
+    )
+
+    if tradeable and market_prob < 0.10 and our_prob > 0.20:
+        logger.debug(
+            f"⛔ PHANTOM: our={our_prob:.0%} vs mkt={market_prob:.0%} — ratio too high | {market.question[:40]}"
+        )
+        tradeable = False
+
+    if tradeable:
+        reason = (
+            f"🎯 METAR ARB {kind.upper()} @ {market_prob:.3f} | {kind_label} | "
+            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f}"
+        )
+    else:
+        reason = "SKIP"
+
+    logger.debug(
+        f"EDGE: {market.question[:40]} | "
+        f"our={our_prob:.0%} | mkt={market_prob:.0%} | "
+        f"edge={eff_edge:.1%} | dist={distance_c:.1f}°C | "
+        f"decay={time_decay:.2f} | {kind_label} | "
+        f"METAR={'✓' if metar_confirmed else '✗'}"
+    )
 
     return EdgeResult(
         market=market,
         forecast=forecast,
         estimated_prob=our_prob,
         market_prob=market_prob,
-        edge=eff_edge,
-        edge_direction=direction,
+        edge=eff_edge if tradeable else raw_edge,
+        edge_direction="BUY_YES",
         confidence=confidence,
+        reason=reason,
+        is_tradeable=tradeable,
         time_decay_factor=time_decay,
-        reason="SKIP",
-        is_tradeable=False,
         size_usd=0.0,
         threshold_c=threshold_c,
-        distance_c=distance_c or 0.0,
+        distance_c=distance_c,
+        metar_temp_c=metar_temp_c,
+        observed_high_c=observed_high_c,
     )
 
 
 # ══════════════════════════════════════════════════════════════════
-# СКАНУВАННЯ
+# СКАНУВАННЯ (v15: simplified — no adjacent grid)
 # ══════════════════════════════════════════════════════════════════
 
 def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results = []
-    skip_vol = skip_city = skip_hours = skip_none = skip_spread = 0
+    skip_vol = skip_city = skip_hours = skip_none = skip_spread = skip_kind = 0
 
     for market in markets:
         if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
@@ -551,16 +565,20 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             if market.detected_city not in config.CITY_WHITELIST:
                 skip_city += 1
                 continue
-        # ✅ v5 FIX: spread filter адаптований під GRID YES
-        # Для tail-ринків (ask ≤ 15¢) bid=0 — це норма, spread = ask
-        # Тому для них дозволяємо spread до ask (тобто весь spread)
+
+        kind = _detect_market_kind(market.question)
+        allowed_kinds = getattr(config, "METAR_ARB_KINDS_ONLY", ["above", "below"])
+        if kind not in allowed_kinds:
+            skip_kind += 1
+            continue
+
         spread = market.best_ask_yes - market.best_bid_yes
         if market.best_ask_yes <= 0.15:
             max_spread = max(0.10, market.best_ask_yes)
-        elif market.best_ask_yes <= getattr(config, "SNIPER_GRID_MAX_ASK", 0.75):
+        elif market.best_ask_yes <= 0.55:
             max_spread = max(0.08, market.best_ask_yes * 0.25)
         else:
-            max_spread = 0.05
+            max_spread = 0.06
         if spread > max_spread:
             skip_spread += 1
             continue
@@ -574,127 +592,11 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             logger.info(f"✅ EDGE: {edge.summary}")
             results.append(edge)
 
-    # 🎯 Другий прохід: пошук Adjacent Grid (сусідніх бакетів для SNIPER)
-    if getattr(config, 'ENABLE_ADJACENT_GRID', False):
-        sniper_results = [r for r in results if "SNIPER" in r.reason]
-        for sniper in sniper_results:
-            city = sniper.market.detected_city
-            end_date = sniper.market.end_date
-            threshold = sniper.threshold_c
-            
-            for market in markets:
-                if market.detected_city != city: continue
-                if abs((market.end_date - end_date).total_seconds()) > 7200: continue
-                if any(r.market.condition_id == market.condition_id for r in results): continue
-                
-                if market.volume_usd < config.MIN_MARKET_VOLUME_USD: continue
-                if market.best_ask_yes > config.ADJACENT_GRID_MAX_ASK: continue
-                
-                kind, val_min, val_max, unit = _parse_range_or_threshold(market.question)
-                if val_min is None:
-                    continue
-                adj_threshold = _f_to_c(val_min) if unit == 'F' else val_min
-                adj_range_max_c = _f_to_c(val_max) if kind == "range" and val_max is not None and unit == 'F' else val_max
-                if kind == "range" and val_max is not None:
-                    adj_threshold = _f_to_c((val_min + val_max) / 2) if unit == 'F' else (val_min + val_max) / 2
-                max_dist_adj = _f_delta_to_c(config.SNIPER_GRID_DISTANCE_F) if unit == 'F' else config.SNIPER_GRID_DISTANCE_C
-                if 0 < abs(adj_threshold - threshold) <= max_dist_adj:
-                    from market_scanner import get_target_date
-                    adj_t_date = get_target_date(market.question, market.end_date, city)
-                    forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=adj_t_date)
-                    if not forecast: continue
-                    
-                    our_prob, adj_th_c, adj_kind_label = estimate_market_probability(market, forecast)
-                    confidence = _confidence_from_forecast(forecast)
-                    time_decay = _time_decay_for_hours(market.hours_to_resolution)
-                    _log_price_validation(market)
-                    market_prob = market.best_ask_yes
-                    if market_prob < 0.01:
-                        midpoint = getattr(market, "midpoint_yes", 0.0)
-                        grid_min_ask = getattr(config, "SNIPER_GRID_MIN_ASK", 0.005)
-                        if grid_min_ask <= midpoint <= 0.99:
-                            logger.debug(f"💡 Adjacent Ask={market_prob:.4f} < 1¢, fallback на midpoint={midpoint:.4f}")
-                            market_prob = midpoint
-                        else:
-                            logger.debug(f"⏭️ SKIP Adjacent: ask={market_prob:.4f} замалий, midpoint={midpoint:.4f} невалідний")
-                            continue
-
-                    if market_prob <= 0.001 or market_prob >= 0.99:
-                        continue
-                    adj_kind, adj_val_min, adj_val_max, adj_unit = _parse_range_or_threshold(market.question)
-                    adj_is_low = 'lowest' in market.question.lower()
-                    adj_fc_temp = forecast.temp_low_c if adj_is_low else forecast.temp_high_c
-                    adj_range_max_c = _f_to_c(adj_val_max) if adj_kind == "range" and adj_val_max is not None and adj_unit == 'F' else adj_val_max
-                    adj_dist_ok, adj_distance_c = _distance_filter_ok(adj_kind, adj_th_c, adj_fc_temp, adj_unit, adj_range_max_c)
-                    our_prob = _apply_probability_calibration(
-                        our_prob,
-                        adj_kind_label,
-                        market.hours_to_resolution,
-                        adj_distance_c,
-                        adj_unit,
-                        confidence,
-                    )
-                    if not adj_dist_ok:
-                        continue
-                    if our_prob < getattr(config, "ADJACENT_GRID_MIN_PROB", getattr(config, "SNIPER_GRID_MIN_PROB", 0.05)):
-                        continue
-                    raw_edge = our_prob - market_prob
-                    eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.75))
-                    
-                    if eff_edge < getattr(config, "ADJACENT_GRID_MIN_EDGE", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.01)):
-                        continue
-                    if _grid_tradeable(
-                        adj_kind,
-                        adj_kind_label,
-                        market_prob,
-                        our_prob,
-                        eff_edge,
-                        adj_dist_ok,
-                        min_edge=getattr(config, "ADJACENT_GRID_MIN_EDGE", getattr(config, "SNIPER_GRID_MIN_EDGE", 0.03)),
-                        min_prob=getattr(config, "ADJACENT_GRID_MIN_PROB", getattr(config, "SNIPER_GRID_MIN_PROB", 0.06)),
-                    ):
-                        # ── v13: Kelly sizing for adjacent grid buckets ──
-                        if getattr(config, "USE_KELLY", False) and our_prob > 0 and market_prob > 0:
-                            kelly_fraction = (our_prob - market_prob) / (1 - market_prob)
-                            kelly_fraction = max(0, min(kelly_fraction, 1.0))
-                            kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
-                            adj_size_usd = round(kelly_fraction * kelly_scale * config.INITIAL_CAPITAL * 0.70, 2)
-                            adj_size_usd = max(config.MIN_POSITION_USD, min(adj_size_usd, getattr(config, "KELLY_MAX_POSITION_USD", config.MAX_POSITION_USD)))
-                        else:
-                            adj_size_usd = config.ADJACENT_GRID_SIZE_USD
-                        edge = EdgeResult(
-                            market=market,
-                            forecast=forecast,
-                            estimated_prob=our_prob,
-                            market_prob=market_prob,
-                            edge=eff_edge,
-                            edge_direction="BUY_YES",
-                            confidence=confidence,
-                            reason=f"🎯 ADJACENT GRID YES @ {market_prob:.3f} | {adj_kind_label} | our_prob={our_prob:.0%} | dist={adj_distance_c:.1f}°C | decay={time_decay:.2f}",
-                            is_tradeable=True,
-                            size_usd=adj_size_usd,
-                            threshold_c=adj_th_c,
-                            distance_c=adj_distance_c or 0.0,
-                            time_decay_factor=time_decay,
-                        )
-                        logger.info(f"✅ EDGE: {edge.summary}")
-                        results.append(edge)
-
-    # Сортування: спершу edge, потім ближчі до прогнозу grid-ринки.
-    def sort_key(r: EdgeResult):
-        grid_distance = abs(r.distance_c) if "GRID" in r.reason else 0.0
-        kind_bonus = 0.0
-        q = r.market.question.lower()
-        if any(w in q for w in ["or higher", "or above", "above", "exceed"]):
-            kind_bonus = 0.04
-        elif any(w in q for w in ["or below", "or lower", "below", "under"]):
-            kind_bonus = 0.04
-        return (r.edge + kind_bonus, -grid_distance)
-
-    results.sort(key=sort_key, reverse=True)
+    results.sort(key=lambda r: r.edge, reverse=True)
 
     logger.info(
         f"Edge scan: {len(results)} tradeable / {len(markets)} ринків "
-        f"| skip: vol={skip_vol}, hours={skip_hours}, city={skip_city}, spread={skip_spread}, none={skip_none}"
+        f"| skip: vol={skip_vol}, hours={skip_hours}, city={skip_city}, "
+        f"kind={skip_kind}, spread={skip_spread}, none={skip_none}"
     )
     return results

@@ -1,5 +1,5 @@
 """
-main.py — Polymarket Weather Bot 2026 (COMPOUND READY)
+main.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 """
 
 import os
@@ -332,7 +332,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "ADJACENT_GRID" if "ADJACENT" in edge_result.reason else ("GRID" if "GRID" in edge_result.reason else ("VALUE" if "VALUE" in edge_result.reason else "SNIPER"))
+            _strategy = "METAR_ARB" if "METAR" in edge_result.reason else "SNIPER"
             log_trade_to_pg({
                 "cycle": cycle_count,
                 "action": "OPEN",
@@ -370,7 +370,8 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT 2026  🌤️")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v15  🌤️")
+    logger.info("  🎯 METAR ARBITRAGE SNIPER")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
@@ -381,10 +382,13 @@ def main():
         else:
             logger.info(f"  Розмір:   {config.COMPOUND_RISK_PCT:.1%} від капіталу")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
-    logger.info(f"  Edge min:  {config.MIN_EDGE_ENTRY:.0%} / tail {config.EXTREME_TAIL_MIN_EDGE_YES:.1%}")
-    logger.info(f"  Stake:     ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
-    logger.info(f"  Спред max: dynamic grid/liquid")
-    logger.info(f"  Правило:   тільки weather ринки < {config.MAX_RESOLUTION_HOURS}h")
+    logger.info(f"  Стратегія:  METAR-арбітраж (above/below only)")
+    logger.info(f"  Горизонт:   {config.METAR_ARB_MIN_HOURS:.1f}-{config.METAR_ARB_MAX_HOURS:.0f}h до resolution")
+    logger.info(f"  Вхід:       {config.METAR_ARB_MIN_ASK:.0%}-{config.METAR_ARB_MAX_ASK:.0%} (ask)")
+    logger.info(f"  Edge min:   {config.METAR_ARB_MIN_EDGE:.0%}")
+    logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
+    logger.info(f"  Adjacent:   ВИМКНЕНО (v15 — only above/below METAR arb)")
+    logger.info(f"  Правило:   лише weather ринки ≤ {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
     logger.info("")
 
