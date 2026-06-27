@@ -309,17 +309,17 @@ US_CITIES = {
 }
 
 CITY_SEASON_BIAS_C: Dict[str, Dict[str, float]] = {
-    "Miami": {"summer": 2.5, "winter": 0.0, "shoulder": 0.5},
-    "Dallas": {"summer": 2.0, "winter": 0.0, "shoulder": 0.3},
-    "Chicago": {"summer": 1.5, "winter": 0.0, "shoulder": 0.2},
-    "NYC": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
-    "New York": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
-    "Los Angeles": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "Miami": {"summer": 1.7, "winter": 0.0, "shoulder": 0.5},
+    "Dallas": {"summer": 1.2, "winter": 0.0, "shoulder": 0.3},
+    "Chicago": {"summer": 0.8, "winter": 0.0, "shoulder": 0.2},
+    "NYC": {"summer": 0.6, "winter": 0.0, "shoulder": 0.2},
+    "New York": {"summer": 0.6, "winter": 0.0, "shoulder": 0.2},
+    "Los Angeles": {"summer": 0.5, "winter": 0.0, "shoulder": 0.2},
     "Houston": {"summer": 1.0, "winter": 0.0, "shoulder": 0.3},
-    "Atlanta": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "Atlanta": {"summer": 0.7, "winter": 0.0, "shoulder": 0.2},
     "Seattle": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
     "Denver": {"summer": 0.4, "winter": 0.0, "shoulder": 0.1},
-    "Boston": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "Boston": {"summer": 0.6, "winter": 0.0, "shoulder": 0.2},
 }
 
 

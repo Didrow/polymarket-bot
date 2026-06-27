@@ -59,9 +59,12 @@
     - data_fetcher.py: past_days fallback, warning logging
     - trader.py: sigma skip warning level
   - **27.06.2026: v14.6 — City bias correction + ABOVE/BELOW priority + freeze + resolution diagnostics:**
-    - data_fetcher.py: CITY_SEASON_BIAS_C (Miami +1.4, Dallas +1.1, Chicago +0.8, NYC/LA/Boston +0.6, Houston +1.0, Atlanta +0.8) — корекція temp_high_c після консенсусу; лог BIAS_CORR
+    - data_fetcher.py: CITY_SEASON_BIAS_C (Miami +2.5→1.7, Dallas +2.0→1.2, Chicago +1.5→0.8, NYC/NY/Boston +1.0→0.6, LA +1.0→0.5, Houston +1.0, Atlanta +1.0→0.7) — корекція temp_high_c після консенсусу; лог BIAS_CORR
     - edge_calculator.py: ABOVE/BELOW +4% edge bonus при сортуванні
-    - config.py: MAX_OPEN_PER_CYCLE=0 (заморожено поки позиції не резолвнуться)
+  - **27.06.2026: v14.7 — Bias values знижено до SQL-обґрунтованих + MAX_OPEN=2:**
+    - data_fetcher.py: CITY_SEASON_BIAS_C знижено (Miami 2.5→1.7, Dallas 2.0→1.2, Chicago 1.5→0.8, NYC/NY/Boston 1.0→0.6, LA 1.0→0.5, Houston 1.0→1.0, Atlanta 1.0→0.7) — наближені до реального bias ~3°F=1.7°C для Miami
+    - config.py: MAX_OPEN_PER_CYCLE 12→2 (обережне тестування bias на 2-3 угодах, не 0 і не 12)
+    - WORKSPACE.md: синхронізовано bias значення з кодом
     - trader.py: DRY-RUN resolution логує fc_entry + fc_err (forecast vs actual °C)
 - **B2B Lead Agent:** nanobot + Gemini API
 - **UA Skills:** 30+ скілів для opencode (юрист, лікар, продажі тощо)
