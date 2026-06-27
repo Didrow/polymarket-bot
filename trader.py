@@ -215,9 +215,13 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                     _resolution_cache[clean_id] = (time.time(), resolved_yes)
                     display_tc = tc_c * 9/5 + 32 if unit == 'F' else tc_c
                     display_unit = 'F' if unit == 'F' else 'C'
+                    fc_entry = position.forecast_at_entry_c
+                    fc_actual_diff = abs(fc_entry - tc_c) if fc_entry != 0.0 else None
                     logger.warning(
                         f"🧪 DRY-RUN RESOLVED ({'WIN' if resolved_yes else 'LOSS'}): "
                         f"{position.question[:50]} | actual={display_tc:.1f}°{display_unit} | "
+                        f"fc_entry={fc_entry:.1f}°C | "
+                        f"{'fc_err=' + f'{fc_actual_diff:.1f}°C' if fc_actual_diff is not None else 'no_fc_entry'} | "
                         f"date={market_date} | cid={clean_id[:20]}"
                     )
                     return resolved_yes

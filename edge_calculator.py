@@ -683,7 +683,13 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     # Сортування: спершу edge, потім ближчі до прогнозу grid-ринки.
     def sort_key(r: EdgeResult):
         grid_distance = abs(r.distance_c) if "GRID" in r.reason else 0.0
-        return (r.edge, -grid_distance)
+        kind_bonus = 0.0
+        q = r.market.question.lower()
+        if any(w in q for w in ["or higher", "or above", "above", "exceed"]):
+            kind_bonus = 0.04
+        elif any(w in q for w in ["or below", "or lower", "below", "under"]):
+            kind_bonus = 0.04
+        return (r.edge + kind_bonus, -grid_distance)
 
     results.sort(key=sort_key, reverse=True)
 

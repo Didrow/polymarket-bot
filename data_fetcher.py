@@ -308,6 +308,31 @@ US_CITIES = {
     "Portland", "Nashville", "Charlotte", "Orlando",
 }
 
+CITY_SEASON_BIAS_C: Dict[str, Dict[str, float]] = {
+    "Miami": {"summer": 2.5, "winter": 0.0, "shoulder": 0.5},
+    "Dallas": {"summer": 2.0, "winter": 0.0, "shoulder": 0.3},
+    "Chicago": {"summer": 1.5, "winter": 0.0, "shoulder": 0.2},
+    "NYC": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "New York": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "Los Angeles": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "Houston": {"summer": 1.0, "winter": 0.0, "shoulder": 0.3},
+    "Atlanta": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+    "Seattle": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Denver": {"summer": 0.4, "winter": 0.0, "shoulder": 0.1},
+    "Boston": {"summer": 1.0, "winter": 0.0, "shoulder": 0.2},
+}
+
+
+def _get_season_bias_c(city: str) -> float:
+    month = datetime.now(timezone.utc).month
+    if month in (6, 7, 8):
+        season = "summer"
+    elif month in (12, 1, 2):
+        season = "winter"
+    else:
+        season = "shoulder"
+    return CITY_SEASON_BIAS_C.get(city, {}).get(season, 0.0)
+
 
 def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float, float]]:
     if prefer_airport and city in AIRPORT_COORDS:
@@ -900,6 +925,20 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
 
             if "METAR" not in result.sources_used:
                 result.sources_used.append("METAR")
+
+    # v14.6: City-specific season bias correction
+    # ENSEMBLE систематично занижує температуру для US міст у літній сезон
+    bias = _get_season_bias_c(city)
+    if bias != 0.0:
+        is_low_forecast = any(w in city.lower() for w in ["buenos", "sao paulo", "cape", "sydney"])
+        if not is_low_forecast:
+            result.temp_high_c = round(result.temp_high_c + bias, 1)
+            result.temp_low_c = round(result.temp_low_c + bias * 0.3, 1)
+            if "BIAS_CORR" not in result.sources_used:
+                result.sources_used.append("BIAS_CORR")
+            logger.info(
+                f"🌡️ BIAS_CORR {city}: +{bias:.1f}°C → temp_high={result.temp_high_c:.1f}°C"
+            )
 
     _cache_set(key, result)
     logger.info(
