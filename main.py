@@ -46,6 +46,8 @@ console_handler.setFormatter(log_formatter)
 
 root_logger = logging.getLogger()
 root_logger.setLevel(getattr(logging, config.LOG_LEVEL, logging.DEBUG))
+for _lib in ("urllib3", "certifi", "charset_normalizer", "idna", "requests", "httpcore", "httpx"):
+    logging.getLogger(_lib).setLevel(logging.WARNING)
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 

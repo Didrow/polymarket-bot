@@ -127,10 +127,8 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         now = datetime.now(timezone.utc)
         hours_left = (end_date - now).total_seconds() / 3600
         if hours_left <= 0:
-            logger.debug(f"Skip expired market: {raw.get('question', '')[:100]} | end={end_date.isoformat()}")
             return None
         if hours_left > hours_limit:
-            logger.debug(f"Skip far-end market: {raw.get('question', '')[:100]} | end={end_date.isoformat()} | hours={hours_left:.1f}")
             return None
 
         volume = 0.0
