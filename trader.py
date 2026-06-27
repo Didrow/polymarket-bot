@@ -597,7 +597,10 @@ def _try_record_sigma(pos: "Position"):
             actual = extremes[0] if is_low else extremes[1]
             _record_sigma_on_resolution(pos, pos.pnl_usd > 0, actual)
         else:
-            logger.debug(f"📐 Sigma skip: no extremes for {pos.city}/{t_date}")
+            logger.warning(
+                f"📐 Sigma skip: no extremes for {pos.city}/{t_date} "
+                f"(forecast_at_entry={pos.forecast_at_entry_c:.1f}°C)"
+            )
     except Exception as e:
         logger.warning(f"📐 Sigma record attempt error: {e}")
 

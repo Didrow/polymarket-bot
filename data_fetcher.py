@@ -965,19 +965,40 @@ def fetch_historical_extreme(city: str, date) -> Optional[Tuple[float, float]]:
             timeout=10,
         )
         if r.status_code != 200:
-            # Fallback: звичайний forecast API (зберігає короткий архів)
-            r = requests.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": lat,
-                    "longitude": lon,
-                    "start_date": date_str,
-                    "end_date": date_str,
-                    "daily": "temperature_2m_max,temperature_2m_min",
-                    "timezone": "auto",
-                },
-                timeout=10,
-            )
+            # Fallback 1: forecast API з past_days (дає recent спостереження)
+            from datetime import date as _date
+            today = _date.today()
+            try:
+                target = _date.fromisoformat(date_str)
+                days_ago = (today - target).days
+            except (ValueError, TypeError):
+                days_ago = 1
+            if 0 < days_ago <= 5:
+                r = requests.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params={
+                        "latitude": lat,
+                        "longitude": lon,
+                        "past_days": days_ago,
+                        "daily": "temperature_2m_max,temperature_2m_min",
+                        "timezone": "auto",
+                    },
+                    timeout=10,
+                )
+            else:
+                # Fallback 2: forecast API з start_date/end_date (короткий архів)
+                r = requests.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params={
+                        "latitude": lat,
+                        "longitude": lon,
+                        "start_date": date_str,
+                        "end_date": date_str,
+                        "daily": "temperature_2m_max,temperature_2m_min",
+                        "timezone": "auto",
+                    },
+                    timeout=10,
+                )
 
         r.raise_for_status()
         daily = r.json().get("daily", {})
@@ -992,7 +1013,12 @@ def fetch_historical_extreme(city: str, date) -> Optional[Tuple[float, float]]:
                 _cache_set(cache_key, result)
                 logger.info(f"📊 Historical {city} on {date_str}: min={t_min}°C, max={t_max}°C")
                 return result
+            else:
+                logger.warning(f"📊 Historical {city} on {date_str}: API returned null values (t_max={t_max}, t_min={t_min})")
+        else:
+            logger.warning(f"📊 Historical {city} on {date_str}: API returned empty arrays (t_max={len(t_max_vals)}, t_min={len(t_min_vals)})")
     except Exception as e:
-        logger.debug(f"Historical data error {city} on {date_str}: {e}")
+        logger.warning(f"Historical data error {city} on {date_str}: {e}")
 
+    logger.debug(f"Historical data unavailable: {city} on {date_str}")
     return None

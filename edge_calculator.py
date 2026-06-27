@@ -473,6 +473,15 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     grid_min_edge = _grid_min_edge_for_market(market_prob)
     tradeable = _grid_tradeable(kind, kind_label, market_prob, our_prob, eff_edge, dist_ok, min_edge=grid_min_edge)
 
+    # hard filter: фантомний edge — модель дає \u003e15% а ринок цінує бакет у \u003c1¢
+    # при співвідношенні 15:1 модель майже завжди помиляється
+    if tradeable and market_prob < 0.01 and our_prob > 0.15:
+        logger.debug(
+            f"⛔ PHANTOM EDGE: our={our_prob:.0%} vs mkt={market_prob:.1%} — "
+            f"ratio {our_prob/max(market_prob,0.001):.0f}:1 | {market.question[:40]}"
+        )
+        tradeable = False
+
     if tradeable:
         # ── Size розраховується в trader.py (decide_position_size) з актуальним capital ──
         size_usd = 0.0
