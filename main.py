@@ -458,6 +458,7 @@ def main():
     cycle_count = 0
     last_summary_time = time.time()
     empty_cycles = 0
+    _debug_auto_revert_cycle = None
 
     while _running:
         try:
@@ -477,6 +478,11 @@ def main():
                 empty_cycles += 1
             else:
                 empty_cycles = 0
+
+            if _debug_auto_revert_cycle is not None and cycle_count > _debug_auto_revert_cycle:
+                root_logger.setLevel(logging.INFO)
+                _debug_auto_revert_cycle = None
+                logger.info("🔧 LOG_LEVEL → INFO (автовернення після DEBUG-циклу)")
 
             safeguard.save_positions(_trader._active_positions)
 
@@ -501,23 +507,30 @@ def main():
 
         if _running:
             sleep_time = config.SCAN_INTERVAL_SEC
-            # v11: Розумний адаптивний сон: враховує найближчий resolution та порожні цикли
             if empty_cycles >= 3:
-                # Якщо є позиції — орієнтуємось на найближчий end_date
                 if _trader._active_positions:
                     end_dates = [p.end_date for p in _trader._active_positions.values() if p.end_date]
                     if end_dates:
                         nearest = min(end_dates)
                         hours_to_nearest = (nearest - datetime.now(timezone.utc)).total_seconds() / 3600
                         if hours_to_nearest > 2.0:
-                            sleep_time = min(300, int(hours_to_nearest * 300))  # v11: 900→300
+                            sleep_time = min(300, int(hours_to_nearest * 300))
                         else:
-                            sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)  # v11: 1.5→1.0
+                            sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
                     else:
-                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)  # v11: 1.5→1.0
+                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
                 else:
-                    sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)  # v11: 1.5→1.0
-                logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s...\n")
+                    now_utc = datetime.now(timezone.utc)
+                    if 12 <= now_utc.hour < 24:
+                        sleep_time = 3600
+                        logger.info(f"⏸ Мертва зона ({now_utc.hour}:00 UTC) — наступний скан через 60 хв")
+                    else:
+                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
+                    if _debug_auto_revert_cycle is None:
+                        _debug_auto_revert_cycle = cycle_count + 5
+                        root_logger.setLevel(logging.DEBUG)
+                        logger.info("🔧 LOG_LEVEL → DEBUG (перший активний цикл, автовернення через 5 циклів)")
+                    logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s...\n")
             else:
                 logger.info(f"💤 Сплю {sleep_time}s...\n")
             time.sleep(sleep_time)
