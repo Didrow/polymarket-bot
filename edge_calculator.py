@@ -506,8 +506,10 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         range_high_c=range_high_c,
     )
 
+    _pre_edge = min(our_prob - market_prob, getattr(config, "MAX_EDGE_CAP", 0.50))
+    _min_edge_pre = getattr(config, "METAR_ARB_MIN_EDGE", 0.04)
     if getattr(config, "METAR_ARB_REQUIRE_METAR", False) and not metar_confirmed:
-        high_prob_fallback = our_prob >= 0.70 and eff_edge >= min_edge
+        high_prob_fallback = our_prob >= 0.70 and _pre_edge >= _min_edge_pre
         if not high_prob_fallback:
             logger.debug(
                 f"❌ METAR NOT CONFIRMED: {kind}|{threshold_c:.1f}°C | "
