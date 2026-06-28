@@ -3,10 +3,11 @@ edge_calculator.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
  Стратегія: арбітраж запізнілого ринку
 - Тільки above/below + range/categorical ринки де METAR/observed ПІДТВЕРДЖУЄ напрямок
+  або high-prob fallback (our_prob ≥ 70%, edge ≥ 4%)
 - Поточна температура вже вище/нижче порогу / в межах range → ринок ще не оновив ціну
-- Короткий горизонт (≤8h): ринок ще не встиг переосмислити
-- Вхід 10-70¢ (реальна ліквідність), win rate 55-70%
-- Немає adjacent grid, немає tail-х vmin — тільки якісний арбітраж
+- Короткий горизонт (≤12h): ринок ще не встиг переосмислити
+- Вхід 5-70¢ (реальна ліквідність), edge ≥4%, win rate 55-70%
+- Немає adjacent grid, немає tail-vmin — тільки якісний арбітраж
 """
 
 import math
@@ -505,39 +506,41 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         range_high_c=range_high_c,
     )
 
-    if getattr(config, "METAR_ARB_REQUIRE_METAR", True) and not metar_confirmed:
-        logger.debug(
-            f"❌ METAR NOT CONFIRMED: {kind}|{threshold_c:.1f}°C | "
-            f"city={city} | metar={metar_temp_c:.1f}°C | obs_hi={observed_high_c:.1f}°C"
-        )
-        return EdgeResult(
-            market=market,
-            forecast=forecast,
-            estimated_prob=our_prob,
-            market_prob=market_prob,
-            edge=0.0,
-            edge_direction="BUY_YES",
-            confidence=confidence,
-            reason="SKIP_METAR",
-            is_tradeable=False,
-            time_decay_factor=time_decay,
-            size_usd=0.0,
-            threshold_c=threshold_c,
-            distance_c=distance_c,
-            metar_temp_c=metar_temp_c,
-            observed_high_c=observed_high_c,
-        )
+    if getattr(config, "METAR_ARB_REQUIRE_METAR", False) and not metar_confirmed:
+        high_prob_fallback = our_prob >= 0.70 and eff_edge >= min_edge
+        if not high_prob_fallback:
+            logger.debug(
+                f"❌ METAR NOT CONFIRMED: {kind}|{threshold_c:.1f}°C | "
+                f"city={city} | metar={metar_temp_c:.1f}°C | obs_hi={observed_high_c:.1f}°C"
+            )
+            return EdgeResult(
+                market=market,
+                forecast=forecast,
+                estimated_prob=our_prob,
+                market_prob=market_prob,
+                edge=0.0,
+                edge_direction="BUY_YES",
+                confidence=confidence,
+                reason="SKIP_METAR",
+                is_tradeable=False,
+                time_decay_factor=time_decay,
+                size_usd=0.0,
+                threshold_c=threshold_c,
+                distance_c=distance_c,
+                metar_temp_c=metar_temp_c,
+                observed_high_c=observed_high_c,
+            )
 
     our_prob = _boost_prob_from_metar(our_prob, kind, metar_confirmed, metar_distance_c, market.hours_to_resolution)
 
     raw_edge = our_prob - market_prob
     eff_edge = min(raw_edge, getattr(config, "MAX_EDGE_CAP", 0.50))
 
-    min_ask = getattr(config, "METAR_ARB_MIN_ASK", 0.15)
+    min_ask = getattr(config, "METAR_ARB_MIN_ASK", 0.05)
     max_ask = getattr(config, "METAR_ARB_MAX_ASK", 0.70)
-    min_edge = getattr(config, "METAR_ARB_MIN_EDGE", 0.08)
-    min_prob = getattr(config, "METAR_ARB_MIN_PROB", 0.55)
-    max_dist = getattr(config, "METAR_ARB_MAX_DIST_C", 3.0)
+    min_edge = getattr(config, "METAR_ARB_MIN_EDGE", 0.04)
+    min_prob = getattr(config, "METAR_ARB_MIN_PROB", 0.45)
+    max_dist = getattr(config, "METAR_ARB_MAX_DIST_C", 5.0)
 
     tradeable = (
         market_prob >= min_ask
@@ -547,16 +550,23 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         and distance_c <= max_dist
     )
 
-    if tradeable and market_prob < 0.10 and our_prob > 0.20:
+    if not tradeable and not metar_confirmed and our_prob >= 0.70 and eff_edge >= min_edge and market_prob >= min_ask and market_prob <= max_ask:
+        tradeable = True
+        logger.debug(
+            f"🔓 HIGH-PROB FALLBACK: our={our_prob:.0%} edge={eff_edge:.1%} METAR=✗ | {market.question[:40]}"
+        )
+
+    if tradeable and market_prob < 0.05 and our_prob > 0.20:
         logger.debug(
             f"⛔ PHANTOM: our={our_prob:.0%} vs mkt={market_prob:.0%} — ratio too high | {market.question[:40]}"
         )
         tradeable = False
 
     if tradeable:
+        metar_tag = "✓METAR" if metar_confirmed else "HIGH-PROB"
         reason = (
             f"🎯 METAR ARB {kind.upper()} @ {market_prob:.3f} | {kind_label} | "
-            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f}"
+            f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {metar_tag}"
         )
     else:
         reason = "SKIP"
@@ -616,9 +626,9 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
 
         spread = market.best_ask_yes - market.best_bid_yes
         if market.best_ask_yes <= 0.15:
-            max_spread = max(0.10, market.best_ask_yes)
+            max_spread = max(0.15, market.best_ask_yes)
         elif market.best_ask_yes <= 0.55:
-            max_spread = max(0.08, market.best_ask_yes * 0.25)
+            max_spread = 0.25
         else:
             max_spread = 0.06
         if spread > max_spread:

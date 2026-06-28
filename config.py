@@ -2,11 +2,11 @@
 config.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
  Стратегія: арбітраж запізнілого ринку (neobrother-style)
-- Above/below + range/categorical ринки (мета: range бакети "between X-Y°F")
-- Тільки коли METAR підтверджує напрямок (поточна T вже вище/нижче порогу / в межах range)
-- Тільки години ≤8 до resolution (ринок ще не оновив ціну)
-- Ціна входу 10-70¢ (реальна ліквідність, ринок ще не на 90¢+)
-- Менше угод, вища якість: 1-3/день, win rate 55-70%
+ - Above/below + range/categorical ринки (мета: range бакети "between X-Y°F")
+ - Тільки коли METAR підтверджує напрямок (або high-prob fallback ≥70%)
+ - Ринки ≤12h до resolution (ринок ще не оновив ціну)
+ - Ціна входу 5-70¢ (реальна ліквідність, ринок ще не на 90¢+)
+ - Edge ≥4% (знижений поріг для DRY-RUN валідації)
 - DRY-RUN validation gates must pass before LIVE trading is allowed.
 """
 
@@ -40,17 +40,17 @@ MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 
 # ── v15: METAR ARBITRAGE STRATEGY ──────────────────────────────
 METAR_ARB_ENABLED: bool = True
-METAR_ARB_MAX_HOURS: float = 8.0
+METAR_ARB_MAX_HOURS: float = 12.0
 METAR_ARB_MIN_HOURS: float = 1.5
-METAR_ARB_MIN_ASK: float = 0.10
+METAR_ARB_MIN_ASK: float = 0.05
 METAR_ARB_MAX_ASK: float = 0.70
-METAR_ARB_MIN_EDGE: float = 0.08
+METAR_ARB_MIN_EDGE: float = 0.04
 METAR_ARB_MIN_PROB: float = 0.45
-METAR_ARB_REQUIRE_METAR: bool = True
+METAR_ARB_REQUIRE_METAR: bool = False
 METAR_ARB_REQUIRE_OBSERVED: bool = True
 METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range", "categorical"]
-METAR_ARB_MAX_DIST_C: float = 3.0
-METAR_ARB_TEMP_CONFIRM_C: float = 0.3
+METAR_ARB_MAX_DIST_C: float = 5.0
+METAR_ARB_TEMP_CONFIRM_C: float = 0.6
 
 # ── LEGACY GRID (DISABLED — replaced by METAR arb) ────────────
 ENABLE_EXTREME_TAIL_YES: bool = False
@@ -81,7 +81,7 @@ MIN_EDGE_HOLD: float = 0.03
 MIN_PROB_ENTRY: float = 0.55
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
-MAX_RESOLUTION_HOURS: int = 8
+MAX_RESOLUTION_HOURS: int = 12
 MIN_RESOLUTION_HOURS: float = 1.5
 MIN_MARKET_VOLUME_USD: float = 500.0
 SCAN_INTERVAL_SEC: int = 300

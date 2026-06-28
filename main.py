@@ -224,7 +224,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     markets = fetch_weather_markets()
     if not markets:
-        logger.info("Немає активних weather-ринків (≤ 8h). Чекаємо...")
+        logger.info("Немає активних weather-ринків (≤ 12h). Чекаємо...")
         return 0
 
     if cycle_count % 5 == 0:
@@ -390,6 +390,7 @@ def main():
     logger.info(f"  Edge min:   {config.METAR_ARB_MIN_EDGE:.0%}")
     logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
     logger.info(f"  Adjacent:   ВИМКНЕНО (v15 — only METAR arb above/below/range/categorical)")
+    logger.info(f"  METAR req:  {'✅ обовʼязковий' if config.METAR_ARB_REQUIRE_METAR else '❌ optional (high-prob fallback ≥70%)'}")
     logger.info(f"  Правило:   лише weather ринки ≤ {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
     logger.info("")
