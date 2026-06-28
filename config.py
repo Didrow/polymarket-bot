@@ -41,11 +41,12 @@ MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 # ── v15: METAR ARBITRAGE STRATEGY ──────────────────────────────
 METAR_ARB_ENABLED: bool = True
 METAR_ARB_MAX_HOURS: float = 12.0
-METAR_ARB_MIN_HOURS: float = 1.5
+METAR_ARB_MIN_HOURS: float = 1.0
 METAR_ARB_MIN_ASK: float = 0.05
 METAR_ARB_MAX_ASK: float = 0.70
 METAR_ARB_MIN_EDGE: float = 0.04
 METAR_ARB_MIN_PROB: float = 0.45
+METAR_ARB_MIN_PROB_RANGE: float = 0.20
 METAR_ARB_REQUIRE_METAR: bool = False
 METAR_ARB_REQUIRE_OBSERVED: bool = True
 METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range", "categorical"]
@@ -82,7 +83,7 @@ MIN_PROB_ENTRY: float = 0.55
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 12
-MIN_RESOLUTION_HOURS: float = 1.5
+MIN_RESOLUTION_HOURS: float = 1.0
 MIN_MARKET_VOLUME_USD: float = 500.0
 SCAN_INTERVAL_SEC: int = 300
 OSINT_SCAN_INTERVAL_SEC: int = 300

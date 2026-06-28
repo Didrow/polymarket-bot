@@ -539,7 +539,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     min_ask = getattr(config, "METAR_ARB_MIN_ASK", 0.05)
     max_ask = getattr(config, "METAR_ARB_MAX_ASK", 0.70)
     min_edge = getattr(config, "METAR_ARB_MIN_EDGE", 0.04)
-    min_prob = getattr(config, "METAR_ARB_MIN_PROB", 0.45)
+    min_prob = getattr(config, "METAR_ARB_MIN_PROB_RANGE", 0.20) if kind in ("range", "categorical") else getattr(config, "METAR_ARB_MIN_PROB", 0.45)
     max_dist = getattr(config, "METAR_ARB_MAX_DIST_C", 5.0)
 
     tradeable = (
