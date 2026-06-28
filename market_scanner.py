@@ -58,6 +58,9 @@ class PolyMarket:
     market_type: str = ""
     threshold_value: Optional[float] = None
     is_above: Optional[bool] = None
+    range_low: Optional[float] = None
+    range_high: Optional[float] = None
+    kind: str = ""
     raw: Dict = field(default_factory=dict)
 
 
@@ -208,6 +211,31 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         elif any(w in full for w in ["below", "under", "or lower"]):
             is_above = False
 
+        range_low = None
+        range_high = None
+        kind = "categorical"
+        if any(w in full for w in ["or higher", "or above", "above", "exceed"]):
+            kind = "above"
+        elif any(w in full for w in ["or below", "or lower", "below", "under"]):
+            kind = "below"
+        _range_re = re.search(
+            r'between\s+([-+]?\d+\.?\d*)\s*°?\s*[cf]?\s*(?:-|–|to|and)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]?',
+            question, re.IGNORECASE
+        ) or re.search(
+            r'([-+]?\d+\.?\d*)\s*°?\s*[cf]?\s*(?:-|–)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]?\b',
+            question, re.IGNORECASE
+        )
+        if _range_re:
+            try:
+                rl = float(_range_re.group(1))
+                rh = float(_range_re.group(2))
+                if abs(rl) < 200 and abs(rh) < 200 and rl != rh:
+                    range_low = min(rl, rh)
+                    range_high = max(rl, rh)
+                    kind = "range"
+            except ValueError:
+                pass
+
         # НОРМАЛІЗАЦІЯ ID ОДРАЗУ НА ЕТАПІ ПАРСИНГУ
         raw_cid = raw.get("conditionId") or raw.get("id", "")
         norm_cid = normalize_condition_id(raw_cid)
@@ -229,6 +257,9 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
             market_type=mtype,
             threshold_value=threshold,
             is_above=is_above,
+            range_low=range_low,
+            range_high=range_high,
+            kind=kind,
             raw=raw,
         )
     except Exception as e:

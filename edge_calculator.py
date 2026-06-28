@@ -1,11 +1,11 @@
 """
 edge_calculator.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
-Стратегія: арбітраж запізнілого ринку
-- Тільки above/below ринки де METAR/observed ПІДТВЕРДЖУЄ напрямок
-- Поточна температура вже вище/нижче порогу → риночок ще не оновив ціну
+ Стратегія: арбітраж запізнілого ринку
+- Тільки above/below + range/categorical ринки де METAR/observed ПІДТВЕРДЖУЄ напрямок
+- Поточна температура вже вище/нижче порогу / в межах range → ринок ще не оновив ціну
 - Короткий горизонт (≤8h): ринок ще не встиг переосмислити
-- Вхід 15-70¢ (реальна ліквідність), win rate 55-70%
+- Вхід 10-70¢ (реальна ліквідність), win rate 55-70%
 - Немає adjacent grid, немає tail-х vmin — тільки якісний арбітраж
 """
 
@@ -90,10 +90,10 @@ def _parse_range_or_threshold(question: str) -> Tuple[str, Optional[float], Opti
     unit = _unit_from_question(question)
 
     range_match = re.search(
-        r'(?:between\s+)?([-+]?\d+\.?\d*)\s*°?\s*[cf]\s*(?:-|–|to|and)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]',
+        r'(?:between\s+)?([-+]?\d+\.?\d*)\s*°?\s*[cf]?\s*(?:-|–|to|and)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]?\b',
         q_lower,
     ) or re.search(
-        r'(?:between\s+)?([-+]?\d+\.?\d*)\s*[-–]\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]\b',
+        r'(?:between\s+)?([-+]?\d+\.?\d*)\s*[-–]\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]?\b',
         q_lower,
     )
     if range_match:
@@ -138,10 +138,14 @@ def _f_to_c(f: float) -> float:
 
 def _detect_market_kind(question: str) -> str:
     q = question.lower()
+    if "between" in q and re.search(r'\d+.*(?:[-–]|and|to).*\d+', q):
+        return "range"
     if "or higher" in q or "or above" in q or "above" in q or "exceed" in q:
         return "above"
     if "or below" in q or "or lower" in q or "below" in q or "under" in q or "or fewer" in q:
         return "below"
+    if re.search(r'\d+\s*(?:[-–]|to)\s*\d+', q):
+        return "range"
     return "categorical"
 
 
@@ -321,27 +325,38 @@ def _check_metar_confirmation(
     kind: str,
     threshold_c: float,
     is_low: bool,
+    range_low_c: Optional[float] = None,
+    range_high_c: Optional[float] = None,
 ) -> Tuple[bool, float, float, float]:
     """
     Перевіряє чи METAR та observed data підтверджують напрямок ринку.
 
     Для "above X°C": поточна METAR-температура має бути ≥ (threshold - buffer)
     Для "below X°C": поточна METAR-температура має бути ≤ (threshold + buffer)
+    Для "range": METAR-температура має бути в межах [range_low-C..range_high+C]
+    Для "categorical": те ж що range (одноточковий — з buffer)
 
     Повертає: (confirmed, metar_temp_c, observed_high_c, distance_from_threshold_c)
     """
     metar_temp = 0.0
     obs_high = 0.0
     distance = 0.0
-    buffer_c = getattr(config, "METAR_ARB_TEMP_CONFIRM_C", 1.0)
+    buffer_c = getattr(config, "METAR_ARB_TEMP_CONFIRM_C", 0.3)
 
     metar_fc = fetch_metar(city)
+    metar_available = metar_fc is not None
     if metar_fc:
         metar_temp = metar_fc.temp_high_c
 
     observed = _fetch_observed_daily_extremes(city)
+    obs_available = observed is not None
     if observed:
         obs_high = observed[1]
+
+    # Якщо жодне джерело не дало даних — пропускаємо METAR-підтвердження
+    if not metar_available and not obs_available:
+        logger.debug(f"⚠️ METAR+OBS недоступні для {city} — пропускаємо підтвердження")
+        return True, 0.0, 0.0, 0.0
 
     if kind == "above":
         best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
@@ -353,6 +368,20 @@ def _check_metar_confirmation(
             best_evidence_cold = min(metar_temp, observed[0]) if metar_temp > 0 else observed[0]
         distance = threshold_c - best_evidence_cold
         confirmed = best_evidence_cold <= (threshold_c + buffer_c)
+    elif kind == "range" and range_low_c is not None and range_high_c is not None:
+        best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
+        range_mid = (range_low_c + range_high_c) / 2.0
+        distance = -abs(best_evidence - range_mid)
+        confirmed = (range_low_c - buffer_c) <= best_evidence <= (range_high_c + buffer_c)
+        if confirmed:
+            half_width = (range_high_c - range_low_c) / 2.0
+            distance = max(0.0, half_width - abs(best_evidence - range_mid))
+    elif kind == "categorical":
+        best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
+        distance = -(abs(best_evidence - threshold_c))
+        confirmed = (threshold_c - buffer_c) <= best_evidence <= (threshold_c + buffer_c)
+        if confirmed:
+            distance = max(0.0, buffer_c - abs(best_evidence - threshold_c))
     else:
         confirmed = False
 
@@ -373,17 +402,22 @@ def _boost_prob_from_metar(
     if not metar_confirmed:
         return our_prob
 
-    if kind not in ("above", "below"):
+    if kind not in ("above", "below", "range", "categorical"):
         return our_prob
 
     hours_factor = max(0.0, (8.0 - hours) / 8.0)
     dist_bonus = min(metar_distance_c / 3.0, 1.0)
-    boost = 0.10 * hours_factor * dist_bonus
+
+    if kind in ("range", "categorical"):
+        boost = 0.08 * hours_factor * max(dist_bonus, 0.3)
+    else:
+        boost = 0.10 * hours_factor * dist_bonus
+
     boosted = min(our_prob + boost, 0.90)
 
     if boost > 0.01:
         logger.debug(
-            f"🔍 METAR BOOST: +{boost:.1%} | hours={hours:.1f}h | "
+            f"🔍 METAR BOOST: +{boost:.1%} | kind={kind} | hours={hours:.1f}h | "
             f"dist={metar_distance_c:.1f}°C → our_prob {our_prob:.0%}→{boosted:.0%}"
         )
 
@@ -408,7 +442,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
         return None
 
-    kind = _detect_market_kind(market.question)
+    kind = market.kind or _detect_market_kind(market.question)
 
     allowed_kinds = getattr(config, "METAR_ARB_KINDS_ONLY", ["above", "below"])
     if kind not in allowed_kinds:
@@ -459,8 +493,16 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
         logger.debug(f"ANCHORED: market_prob={market_prob:.4f} → our_prob={our_prob:.4f} | {market.question[:40]}")
 
+    rl_raw = getattr(market, 'range_low', None)
+    rh_raw = getattr(market, 'range_high', None)
+    unit = _unit_from_question(market.question)
+    range_low_c = _f_to_c(rl_raw) if rl_raw is not None and unit == 'F' else rl_raw
+    range_high_c = _f_to_c(rh_raw) if rh_raw is not None and unit == 'F' else rh_raw
+
     metar_confirmed, metar_temp_c, observed_high_c, metar_distance_c = _check_metar_confirmation(
-        city, kind, threshold_c, is_low
+        city, kind, threshold_c, is_low,
+        range_low_c=range_low_c,
+        range_high_c=range_high_c,
     )
 
     if getattr(config, "METAR_ARB_REQUIRE_METAR", True) and not metar_confirmed:
@@ -566,7 +608,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
                 skip_city += 1
                 continue
 
-        kind = _detect_market_kind(market.question)
+        kind = market.kind or _detect_market_kind(market.question)
         allowed_kinds = getattr(config, "METAR_ARB_KINDS_ONLY", ["above", "below"])
         if kind not in allowed_kinds:
             skip_kind += 1

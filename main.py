@@ -224,7 +224,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     markets = fetch_weather_markets()
     if not markets:
-        logger.info("Немає активних weather-ринків (< 48h). Чекаємо...")
+        logger.info("Немає активних weather-ринків (≤ 8h). Чекаємо...")
         return 0
 
     if cycle_count % 5 == 0:
@@ -384,12 +384,12 @@ def main():
         else:
             logger.info(f"  Розмір:   {config.COMPOUND_RISK_PCT:.1%} від капіталу")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
-    logger.info(f"  Стратегія:  METAR-арбітраж (above/below only)")
+    logger.info(f"  Стратегія:  METAR-арбітраж (above/below/range/categorical)")
     logger.info(f"  Горизонт:   {config.METAR_ARB_MIN_HOURS:.1f}-{config.METAR_ARB_MAX_HOURS:.0f}h до resolution")
     logger.info(f"  Вхід:       {config.METAR_ARB_MIN_ASK:.0%}-{config.METAR_ARB_MAX_ASK:.0%} (ask)")
     logger.info(f"  Edge min:   {config.METAR_ARB_MIN_EDGE:.0%}")
     logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
-    logger.info(f"  Adjacent:   ВИМКНЕНО (v15 — only above/below METAR arb)")
+    logger.info(f"  Adjacent:   ВИМКНЕНО (v15 — only METAR arb above/below/range/categorical)")
     logger.info(f"  Правило:   лише weather ринки ≤ {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
     logger.info("")

@@ -1,11 +1,11 @@
 """
 config.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
-Стратегія: арбітраж запізнілого ринку (neobrother-style)
-- Тільки above/below ринки (не range/categorical — занадто точне влучання)
-- Тільки коли METAR підтверджує напрямок (поточна T вже вище/нижче порогу)
+ Стратегія: арбітраж запізнілого ринку (neobrother-style)
+- Above/below + range/categorical ринки (мета: range бакети "between X-Y°F")
+- Тільки коли METAR підтверджує напрямок (поточна T вже вище/нижче порогу / в межах range)
 - Тільки години ≤8 до resolution (ринок ще не оновив ціну)
-- Ціна входу 15-70¢ (реальна ліквідність, ринок ще не на 90¢+)
+- Ціна входу 10-70¢ (реальна ліквідність, ринок ще не на 90¢+)
 - Менше угод, вища якість: 1-3/день, win rate 55-70%
 - DRY-RUN validation gates must pass before LIVE trading is allowed.
 """
@@ -42,15 +42,15 @@ MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 METAR_ARB_ENABLED: bool = True
 METAR_ARB_MAX_HOURS: float = 8.0
 METAR_ARB_MIN_HOURS: float = 1.5
-METAR_ARB_MIN_ASK: float = 0.15
+METAR_ARB_MIN_ASK: float = 0.10
 METAR_ARB_MAX_ASK: float = 0.70
 METAR_ARB_MIN_EDGE: float = 0.08
-METAR_ARB_MIN_PROB: float = 0.55
+METAR_ARB_MIN_PROB: float = 0.45
 METAR_ARB_REQUIRE_METAR: bool = True
 METAR_ARB_REQUIRE_OBSERVED: bool = True
-METAR_ARB_KINDS_ONLY: List[str] = ["above", "below"]
+METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range", "categorical"]
 METAR_ARB_MAX_DIST_C: float = 3.0
-METAR_ARB_TEMP_CONFIRM_C: float = 1.0
+METAR_ARB_TEMP_CONFIRM_C: float = 0.3
 
 # ── LEGACY GRID (DISABLED — replaced by METAR arb) ────────────
 ENABLE_EXTREME_TAIL_YES: bool = False
