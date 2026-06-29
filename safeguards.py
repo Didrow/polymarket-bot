@@ -759,6 +759,7 @@ class SafeguardManager:
 
     def pre_trade_check(self, size_usd: float, capital: float) -> bool:
         if size_usd < config.MIN_POSITION_USD:
+            logger.warning(f"⚠️ pre_trade_check: size=${size_usd:.2f} < MIN=${config.MIN_POSITION_USD:.2f}")
             return False
         # Перевірка розміру відносно капіталу — працює і в DRY-RUN
         if size_usd > capital * 0.15:

@@ -316,12 +316,17 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if not safeguard.check_hourly_trade_limit():
             break
 
-        size = getattr(edge_result, 'size_usd', edge_result.edge * current_capital * config.MAX_POSITION_PCT)
+        _raw_size = getattr(edge_result, 'size_usd', 0.0)
+        if _raw_size <= 0:
+            _raw_size = edge_result.edge * current_capital * config.MAX_POSITION_PCT
+        size = max(config.MIN_POSITION_USD, min(_raw_size, config.MAX_POSITION_USD))
+        logger.debug(f"💰 Size: ${size:.2f} для {edge_result.market.question[:50]} (raw={_raw_size:.2f}, edge={edge_result.edge:.1%})")
         projected_exposure = portfolio.get("total_value", 0.0) + size
         if projected_exposure > current_capital * getattr(config, "MAX_TOTAL_EXPOSURE_PCT", 0.35):
             logger.info("Ліміт сумарної експозиції досягнуто — пропускаємо")
             continue
         if not safeguard.pre_trade_check(size, current_capital):
+            logger.warning(f"⚠️ pre_trade_check FAIL: size=${size:.2f}, capital=${current_capital:.2f} | {edge_result.market.question[:50]}")
             continue
 
         position = place_trade(edge_result, current_capital, clob_client)
