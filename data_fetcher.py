@@ -835,7 +835,10 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
 
     forecasts_w = []
 
-    # v15: METAR — перший пріоритет. Для ≤12h METAR отримує 60% ваги (арбітраж)
+    # v16: METAR fetching for confirmation only (not for forecast average)
+    # METAR temp_high_c is CURRENT hourly temp, not daily high.
+    # Mixing it into the daily-high weighted average was pulling forecasts
+    # down toward morning temps (e.g., 24°C → 21.4°C), destroying all edge.
     metar_fc = fetch_metar(city)
 
     fc_ensemble = fetch_open_meteo_ensemble(city, hours_to_resolution, target_date)
@@ -844,29 +847,27 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
     fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution, target_date)
     fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution, target_date)
 
-    # v15: METAR-ARBITRAGE зважування
+    # v16: Pure forecast models only — METAR is for confirmation, not prediction
     if hours_to_resolution <= 8.0:
-        # Для ультракоротких горизонтів: METAR + observed домінують
-        if metar_fc:
-            forecasts_w.append((metar_fc, 0.60))
         if fc_ensemble:
-            forecasts_w.append((fc_ensemble, 0.20))
+            forecasts_w.append((fc_ensemble, 0.50))
         if fc_gfs:
-            forecasts_w.append((fc_gfs, 0.10))
+            forecasts_w.append((fc_gfs, 0.25))
         if fc_ecmwf:
-            forecasts_w.append((fc_ecmwf, 0.10))
+            forecasts_w.append((fc_ecmwf, 0.15))
+        if fc_noaa:
+            forecasts_w.append((fc_noaa, 0.10))
     elif hours_to_resolution <= 12.0:
-        # Короткі: METAR суттєвий, але ансамбль ще важливий
-        if metar_fc:
-            forecasts_w.append((metar_fc, 0.40))
         if fc_ensemble:
-            forecasts_w.append((fc_ensemble, 0.35))
+            forecasts_w.append((fc_ensemble, 0.45))
         if fc_gfs:
-            forecasts_w.append((fc_gfs, 0.15))
+            forecasts_w.append((fc_gfs, 0.25))
         if fc_ecmwf:
-            forecasts_w.append((fc_ecmwf, 0.10))
+            forecasts_w.append((fc_ecmwf, 0.15))
+        if fc_noaa:
+            forecasts_w.append((fc_noaa, 0.15))
     else:
-        # Довгі (>12h): METAR лише для корекції, ансамбль + NOAA домінують
+        # Довгі (>12h): ансамбль + NOAA домінують
         if fc_ensemble:
             forecasts_w.append((fc_ensemble, 0.45))
         if fc_noaa:

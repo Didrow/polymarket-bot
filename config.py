@@ -55,8 +55,8 @@ METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range", "categorical"]
 METAR_ARB_MAX_DIST_C: float = 5.0
 METAR_ARB_TEMP_CONFIRM_C: float = 1.2
 CLIMATE_SANITY_ENABLED: bool = True
-PROB_RATIO_MAX_METAR: float = 7.0
-PROB_RATIO_MAX_NO_METAR: float = 3.0
+PROB_RATIO_MAX_METAR: float = 12.0
+PROB_RATIO_MAX_NO_METAR: float = 6.0
 
 # ── LEGACY GRID (DISABLED — replaced by METAR arb) ────────────
 ENABLE_EXTREME_TAIL_YES: bool = False

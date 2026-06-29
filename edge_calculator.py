@@ -617,7 +617,14 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     market_anchor_weight = getattr(config, "MARKET_ANCHOR_WEIGHT", 0.20)
     market_anchor_threshold = getattr(config, "MARKET_ANCHOR_THRESHOLD", 0.50)
-    if market_prob < market_anchor_threshold:
+    # v16: Skip market anchor when our forecast confidence is high (METAR-confirmed
+    # or strong ensemble). Anchoring to a low market price destroys legitimate edge.
+    _fc_sources = forecast.sources_used if forecast else []
+    _high_confidence = (
+        ("METAR" in _fc_sources and "OBSERVED" in _fc_sources)
+        or ("Open-Meteo_ENSEMBLE" in _fc_sources or "ENSEMBLE" in _fc_sources)
+    )
+    if market_prob < market_anchor_threshold and not _high_confidence:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
         logger.debug(f"ANCHORED: market_prob={market_prob:.4f} → our_prob={our_prob:.4f} | {market.question[:40]}")
 
@@ -675,10 +682,17 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     )
 
     if tradeable and market_prob < 0.05 and our_prob > 0.20:
-        logger.debug(
-            f"⛔ PHANTOM: our={our_prob:.0%} vs mkt={market_prob:.0%} — ratio too high | {market.question[:40]}"
-        )
-        tradeable = False
+        # v16: Allow PHANTOM trades when METAR confirms — these are high-edge arb
+        # opportunities where market hasn't updated yet. Reject only unconfirmed.
+        if not metar_confirmed:
+            logger.debug(
+                f"⛔ PHANTOM (no METAR): our={our_prob:.0%} vs mkt={market_prob:.0%} | {market.question[:40]}"
+            )
+            tradeable = False
+        else:
+            logger.debug(
+                f"✅ PHANTOM+METAR: our={our_prob:.0%} vs mkt={market_prob:.0%} — high-edge arb | {market.question[:40]}"
+            )
 
     if tradeable and market_prob > 0.01:
         prob_ratio = our_prob / market_prob
