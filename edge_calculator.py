@@ -3,16 +3,18 @@ edge_calculator.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
  Стратегія: арбітраж запізнілого ринку
 - Тільки above/below + range/categorical ринки де METAR/observed ПІДТВЕРДЖУЄ напрямок
-  або high-prob fallback (our_prob ≥ 70%, edge ≥ 4%)
+  (METAR required — no high-prob fallback without METAR)
 - Поточна температура вже вище/нижче порогу / в межах range → ринок ще не оновив ціну
 - Короткий горизонт (≤12h): ринок ще не встиг переосмислити
-- Вхід 5-70¢ (реальна ліквідність), edge ≥4%, win rate 55-70%
-- Немає adjacent grid, немає tail-vmin — тільки якісний арбітраж
+- Вхід 15-70¢ (реальна ліквідність), edge ≥4%, win rate 55-70%
+- Climate sanity filter: reject impossible temperatures for city/season
+- Prob ratio check: reject when our_prob/market_prob ratio suspiciously high
 """
 
 import math
 import re
 import logging
+from datetime import datetime, timezone
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
@@ -426,6 +428,89 @@ def _boost_prob_from_metar(
 
 
 # ══════════════════════════════════════════════════════════════════
+# CLIMATE SANITY FILTER
+# ══════════════════════════════════════════════════════════════════
+
+_CLIMATE_BOUNDS_C = {
+    "miami":         {"low": (8, 10, 12, 15, 20, 23, 24, 24, 24, 20, 14, 9),  "high": (27, 28, 29, 31, 33, 34, 35, 35, 34, 32, 30, 28)},
+    "los angeles":   {"low": (8, 9, 10, 12, 14, 16, 18, 18, 17, 14, 10, 8),    "high": (22, 22, 23, 24, 25, 28, 32, 33, 31, 27, 24, 21)},
+    "chicago":       {"low": (-16,-13,-7,1,7,13,16,15,9,2,-6,-13),              "high": (-2,1,7,16,22,28,30,29,24,16,7,0)},
+    "new york":      {"low": (-4,-3,1,7,13,18,21,20,16,9,3,-2),                "high": (4,5,11,18,24,29,32,31,27,20,12,6)},
+    "nyc":           {"low": (-4,-3,1,7,13,18,21,20,16,9,3,-2),                "high": (4,5,11,18,24,29,32,31,27,20,12,6)},
+    "dallas":        {"low": (2,4,8,14,19,23,25,25,20,14,7,3),                 "high": (14,16,22,26,31,35,38,38,33,26,19,14)},
+    "seattle":       {"low": (2,3,4,6,9,12,14,14,11,7,3,1),                    "high": (9,11,13,16,20,23,27,27,24,17,11,8)},
+    "denver":        {"low": (-9,-7,-4,1,7,12,15,14,9,2,-4,-8),                 "high": (7,9,13,17,23,30,33,32,27,19,12,6)},
+    "atlanta":       {"low": (-1,0,4,10,16,20,22,22,18,11,5,0),                "high": (13,15,20,24,28,32,34,34,30,24,18,13)},
+    "boston":        {"low": (-6,-5,0,6,12,17,20,20,15,9,3,-4),                 "high": (3,4,9,16,22,27,30,29,25,18,11,5)},
+    "houston":       {"low": (6,8,12,17,21,24,25,25,22,17,11,7),                "high": (18,20,24,27,31,34,36,36,33,28,23,18)},
+    "london":        {"low": (2,2,3,5,8,11,14,13,11,8,4,2),                    "high": (9,10,12,15,19,22,25,24,20,15,11,9)},
+    "paris":         {"low": (2,2,4,7,11,14,16,16,13,9,5,3),                    "high": (8,10,14,17,21,25,27,27,23,17,11,8)},
+    "berlin":        {"low": (-3,-3,0,4,9,12,14,14,10,5,1,-2),                  "high": (4,5,10,15,20,24,26,25,20,14,8,4)},
+    "munich":        {"low": (-5,-4,-1,3,8,12,14,14,10,5,0,-4),                 "high": (3,5,10,15,20,23,25,25,20,14,8,3)},
+    "tokyo":         {"low": (2,3,6,11,16,20,24,25,22,15,9,4),                  "high": (10,11,15,20,24,27,31,33,28,22,17,12)},
+    "seoul":         {"low": (-6,-4,0,6,12,17,22,22,16,8,1,-4),                 "high": (1,4,10,17,23,27,29,30,26,20,12,4)},
+    "busan":         {"low": (-2,0,4,9,14,18,22,23,19,13,6,0),                  "high": (7,9,13,18,23,26,29,30,27,22,15,9)},
+    "buenos aires":  {"low": (18,17,16,12,9,6,5,7,9,13,15,17),                 "high": (31,30,27,23,19,16,15,17,19,22,26,29)},
+    "sao paulo":     {"low": (18,18,17,15,12,10,9,10,12,14,16,17),              "high": (29,29,28,26,24,22,22,24,24,25,27,28)},
+    "cape town":     {"low": (14,14,12,10,7,5,4,5,7,10,12,14),                  "high": (28,28,26,24,20,18,17,18,20,23,25,27)},
+    "sydney":        {"low": (18,18,16,13,10,8,7,8,10,13,15,17),                "high": (28,28,26,24,21,18,18,20,22,24,25,27)},
+    "lucknow":       {"low": (8,11,16,22,26,28,27,26,25,20,13,8),               "high": (24,28,35,40,42,40,35,34,34,33,29,24)},
+}
+
+def _climate_sanity_check(city: str, threshold_c: float, kind: str, is_low: bool,
+                          range_low_c: float = None, range_high_c: float = None,
+                          months_ahead: int = 0) -> bool:
+    """
+    Перевіряє чи поріг/діапазон температури кліматично можливий для міста.
+    Повертає True якщо ОК, False якщо неможливо (напр. Miami LOW 25°C влітку).
+    """
+    city_key = city.lower().strip()
+    if city_key not in _CLIMATE_BOUNDS_C:
+        return True
+
+    bounds = _CLIMATE_BOUNDS_C[city_key]
+    now = datetime.now(timezone.utc)
+    month_idx = (now.month - 1 + months_ahead) % 12
+    t_lo = bounds["low"][month_idx]
+    t_hi = bounds["high"][month_idx]
+    margin_hi_c = 8.0
+    margin_lo_c = 5.0
+
+    if kind in ("range", "categorical") and range_low_c is not None and range_high_c is not None:
+        if range_high_c < t_lo - margin_lo_c:
+            return False
+        if range_low_c > t_hi + margin_hi_c:
+            return False
+        if is_low and range_high_c < t_lo:
+            return False
+        if not is_low and range_low_c > t_hi:
+            return False
+        return True
+
+    if kind == "above":
+        if is_low:
+            if threshold_c >= t_lo + margin_lo_c:
+                return False
+        else:
+            if threshold_c >= t_hi + margin_hi_c:
+                return False
+        return True
+
+    if kind == "below":
+        if is_low:
+            if threshold_c < t_lo - margin_lo_c:
+                return False
+        else:
+            if threshold_c <= t_lo - margin_hi_c:
+                return False
+            if threshold_c > t_hi + margin_hi_c:
+                return False
+        return True
+
+    return True
+
+
+# ══════════════════════════════════════════════════════════════════
 # ОБЧИСЛЕННЯ EDGE (v15: METAR ARBITRAGE)
 # ══════════════════════════════════════════════════════════════════
 
@@ -479,6 +564,19 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
     distance_c = abs(fc_temp - threshold_c)
 
+    rl_raw = getattr(market, 'range_low', None)
+    rh_raw = getattr(market, 'range_high', None)
+    unit = _unit_from_question(market.question)
+    range_low_c = _f_to_c(rl_raw) if rl_raw is not None and unit == 'F' else rl_raw
+    range_high_c = _f_to_c(rh_raw) if rh_raw is not None and unit == 'F' else rh_raw
+
+    if getattr(config, "CLIMATE_SANITY_ENABLED", True) and not _climate_sanity_check(city, threshold_c, kind, is_low, range_low_c, range_high_c):
+        logger.debug(
+            f"🚫 CLIMATE IMPOSSIBLE: {city} | {kind} | threshold={threshold_c:.1f}°C | "
+            f"range=[{range_low_c},{range_high_c}] | is_low={is_low} | {market.question[:50]}"
+        )
+        return None
+
     our_prob = _apply_probability_calibration(
         our_prob,
         kind_label,
@@ -493,12 +591,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market_prob < market_anchor_threshold:
         our_prob = our_prob * (1 - market_anchor_weight) + market_prob * market_anchor_weight
         logger.debug(f"ANCHORED: market_prob={market_prob:.4f} → our_prob={our_prob:.4f} | {market.question[:40]}")
-
-    rl_raw = getattr(market, 'range_low', None)
-    rh_raw = getattr(market, 'range_high', None)
-    unit = _unit_from_question(market.question)
-    range_low_c = _f_to_c(rl_raw) if rl_raw is not None and unit == 'F' else rl_raw
-    range_high_c = _f_to_c(rh_raw) if rh_raw is not None and unit == 'F' else rh_raw
 
     metar_confirmed, metar_temp_c, observed_high_c, metar_distance_c = _check_metar_confirmation(
         city, kind, threshold_c, is_low,
@@ -552,20 +644,23 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         and distance_c <= max_dist
     )
 
-    if not tradeable and not metar_confirmed and our_prob >= 0.70 and eff_edge >= min_edge and market_prob >= min_ask and market_prob <= max_ask:
-        tradeable = True
-        logger.debug(
-            f"🔓 HIGH-PROB FALLBACK: our={our_prob:.0%} edge={eff_edge:.1%} METAR=✗ | {market.question[:40]}"
-        )
-
     if tradeable and market_prob < 0.05 and our_prob > 0.20:
         logger.debug(
             f"⛔ PHANTOM: our={our_prob:.0%} vs mkt={market_prob:.0%} — ratio too high | {market.question[:40]}"
         )
         tradeable = False
 
+    if tradeable and market_prob > 0.01:
+        prob_ratio = our_prob / market_prob
+        max_ratio = getattr(config, "PROB_RATIO_MAX_METAR", 5.0) if metar_confirmed else getattr(config, "PROB_RATIO_MAX_NO_METAR", 3.0)
+        if prob_ratio > max_ratio:
+            logger.debug(
+                f"⛔ PROB-RATIO: our={our_prob:.0%} / mkt={market_prob:.0%} = {prob_ratio:.1f}x > {max_ratio:.0f}x | {market.question[:40]}"
+            )
+            tradeable = False
+
     if tradeable:
-        metar_tag = "✓METAR" if metar_confirmed else "HIGH-PROB"
+        metar_tag = "✓METAR" if metar_confirmed else "NO-METAR"
         reason = (
             f"🎯 METAR ARB {kind.upper()} @ {market_prob:.3f} | {kind_label} | "
             f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {metar_tag}"

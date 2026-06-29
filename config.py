@@ -3,11 +3,12 @@ config.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
 
  Стратегія: арбітраж запізнілого ринку (neobrother-style)
  - Above/below + range/categorical ринки (мета: range бакети "between X-Y°F")
- - Тільки коли METAR підтверджує напрямок (або high-prob fallback ≥70%)
+ - Тільки коли METAR підтверджує напрямок (вимагається обов'язково)
  - Ринки ≤12h до resolution (ринок ще не оновив ціну)
- - Ціна входу 5-70¢ (реальна ліквідність, ринок ще не на 90¢+)
+ - Ціна входу 15-70¢ (реальна ліквідність, ринок ще не на 90¢+)
  - Edge ≥4% (знижений поріг для DRY-RUN валідації)
-- DRY-RUN validation gates must pass before LIVE trading is allowed.
+ - Climate sanity filter: reject impossible temperature ranges
+ - DRY-RUN validation gates must pass before LIVE trading is allowed.
 """
 
 from typing import List
@@ -33,6 +34,7 @@ FAST_SLOT_THRESHOLD_HOURS: float = 8.0
 MAX_POSITIONS_PER_CITY: int = 2
 MAX_DRAWDOWN_PCT: float = 0.30
 STOP_LOSS_PCT: float = 0.15
+STOP_LOSS_MIN_HOLD_HOURS: float = 1.0
 MAX_POSITION_USD: float = 5.0
 MAX_DAILY_LOSS_PCT: float = 0.15
 MAX_DAILY_LOSS_USD: float = 15.0
@@ -42,16 +44,19 @@ MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 METAR_ARB_ENABLED: bool = True
 METAR_ARB_MAX_HOURS: float = 12.0
 METAR_ARB_MIN_HOURS: float = 1.0
-METAR_ARB_MIN_ASK: float = 0.05
+METAR_ARB_MIN_ASK: float = 0.15
 METAR_ARB_MAX_ASK: float = 0.70
 METAR_ARB_MIN_EDGE: float = 0.04
 METAR_ARB_MIN_PROB: float = 0.45
 METAR_ARB_MIN_PROB_RANGE: float = 0.20
-METAR_ARB_REQUIRE_METAR: bool = False
+METAR_ARB_REQUIRE_METAR: bool = True
 METAR_ARB_REQUIRE_OBSERVED: bool = True
 METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range", "categorical"]
 METAR_ARB_MAX_DIST_C: float = 5.0
 METAR_ARB_TEMP_CONFIRM_C: float = 0.6
+CLIMATE_SANITY_ENABLED: bool = True
+PROB_RATIO_MAX_METAR: float = 5.0
+PROB_RATIO_MAX_NO_METAR: float = 3.0
 
 # ── LEGACY GRID (DISABLED — replaced by METAR arb) ────────────
 ENABLE_EXTREME_TAIL_YES: bool = False
@@ -83,7 +88,7 @@ MIN_PROB_ENTRY: float = 0.55
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 12
-MIN_RESOLUTION_HOURS: float = 1.0
+MIN_RESOLUTION_HOURS: float = 3.0
 MIN_MARKET_VOLUME_USD: float = 500.0
 SCAN_INTERVAL_SEC: int = 300
 OSINT_SCAN_INTERVAL_SEC: int = 300
@@ -138,7 +143,7 @@ WHALE_THRESHOLD_USD: float = 2000.0
 PROBABILITY_CALIBRATION_ENABLED: bool = True
 PROB_THRESHOLD_CALIBRATION_SCALE: float = 0.95
 PROB_EXACT_CALIBRATION_SCALE: float = 0.80
-PROB_RANGE_CALIBRATION_SCALE: float = 0.80
+PROB_RANGE_CALIBRATION_SCALE: float = 0.65
 PROB_DISTANCE_SCALE_C: float = 3.0
 PROB_DISTANCE_SCALE_F: float = 4.5
 PROB_DISTANCE_POWER: float = 0.50
