@@ -49,7 +49,7 @@ METAR_ARB_MAX_ASK: float = 0.70
 METAR_ARB_MIN_EDGE: float = 0.04
 METAR_ARB_MIN_PROB: float = 0.45
 METAR_ARB_MIN_PROB_RANGE: float = 0.15
-METAR_ARB_REQUIRE_METAR: bool = True
+METAR_ARB_REQUIRE_METAR: bool = False
 METAR_ARB_REQUIRE_OBSERVED: bool = True
 METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range", "categorical"]
 METAR_ARB_MAX_DIST_C: float = 5.0
@@ -88,7 +88,7 @@ MIN_PROB_ENTRY: float = 0.55
 
 # ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
 MAX_RESOLUTION_HOURS: int = 12
-MIN_RESOLUTION_HOURS: float = 3.0
+MIN_RESOLUTION_HOURS: float = 1.0
 MIN_MARKET_VOLUME_USD: float = 500.0
 SCAN_INTERVAL_SEC: int = 300
 OSINT_SCAN_INTERVAL_SEC: int = 300
