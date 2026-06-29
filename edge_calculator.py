@@ -330,19 +330,26 @@ def _check_metar_confirmation(
     is_low: bool,
     range_low_c: Optional[float] = None,
     range_high_c: Optional[float] = None,
+    forecast: Optional[WeatherForecast] = None,
 ) -> Tuple[bool, float, float, float]:
     """
     Перевіряє чи METAR та observed data підтверджують напрямок ринку.
 
-    Для "above X°C": поточна METAR-температура має бути ≥ (threshold - buffer)
-    Для "below X°C": поточна METAR-температура має бути ≤ (threshold + buffer)
-    Для "range": METAR-температура має бути в межах [range_low-C..range_high+C]
+    Для "above X°C": best_evidence (obs_hi > forecast_high > metar) >= threshold - buffer
+    Для "below X°C": best_evidence_cold (obs_low < forecast_low < metar) <= threshold + buffer
+    Для "range": best_evidence в межах [range_low-C..range_high+C]
     Для "categorical": те ж що range (одноточковий — з buffer)
+
+    When observed data unavailable (429/no data), falls back to forecast high/low
+    instead of raw METAR hourly temp — because METAR is current reading, not daily extreme.
 
     Повертає: (confirmed, metar_temp_c, observed_high_c, distance_from_threshold_c)
     """
     metar_temp = 0.0
     obs_high = 0.0
+    obs_low = 0.0
+    fc_high = 0.0
+    fc_low = 0.0
     distance = 0.0
     buffer_c = getattr(config, "METAR_ARB_TEMP_CONFIRM_C", 0.3)
 
@@ -351,28 +358,45 @@ def _check_metar_confirmation(
     if metar_fc:
         metar_temp = metar_fc.temp_high_c
 
+    if forecast:
+        fc_high = forecast.temp_high_c
+        fc_low = forecast.temp_low_c
+
     observed = _fetch_observed_daily_extremes(city)
     obs_available = observed is not None
     if observed:
         obs_high = observed[1]
+        obs_low = observed[0]
 
-    # Якщо жодне джерело не дало даних — пропускаємо METAR-підтвердження
-    if not metar_available and not obs_available:
-        logger.debug(f"⚠️ METAR+OBS недоступні для {city} — пропускаємо підтвердження")
+    if not metar_available and not obs_available and not forecast:
+        logger.debug(f"⚠️ METAR+OBS+FC недоступні для {city} — пропускаємо підтвердження")
         return True, 0.0, 0.0, 0.0
 
     if kind == "above":
-        best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
+        candidates = [metar_temp]
+        if obs_high > 0:
+            candidates.append(obs_high)
+        if fc_high > 0:
+            candidates.append(fc_high)
+        best_evidence = max(candidates)
         distance = best_evidence - threshold_c
         confirmed = best_evidence >= (threshold_c - buffer_c)
     elif kind == "below":
-        best_evidence_cold = metar_temp
-        if observed and observed[0] > 0:
-            best_evidence_cold = min(metar_temp, observed[0]) if metar_temp > 0 else observed[0]
+        candidates = [metar_temp]
+        if obs_low > 0:
+            candidates.append(obs_low)
+        if fc_low > 0:
+            candidates.append(fc_low)
+        best_evidence_cold = min(candidates)
         distance = threshold_c - best_evidence_cold
         confirmed = best_evidence_cold <= (threshold_c + buffer_c)
     elif kind == "range" and range_low_c is not None and range_high_c is not None:
-        best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
+        candidates = [metar_temp]
+        if obs_high > 0:
+            candidates.append(obs_high)
+        if fc_high > 0:
+            candidates.append(fc_high)
+        best_evidence = max(candidates)
         range_mid = (range_low_c + range_high_c) / 2.0
         distance = -abs(best_evidence - range_mid)
         confirmed = (range_low_c - buffer_c) <= best_evidence <= (range_high_c + buffer_c)
@@ -380,7 +404,12 @@ def _check_metar_confirmation(
             half_width = (range_high_c - range_low_c) / 2.0
             distance = max(0.0, half_width - abs(best_evidence - range_mid))
     elif kind == "categorical":
-        best_evidence = max(metar_temp, obs_high) if obs_high > 0 else metar_temp
+        candidates = [metar_temp]
+        if obs_high > 0:
+            candidates.append(obs_high)
+        if fc_high > 0:
+            candidates.append(fc_high)
+        best_evidence = max(candidates)
         distance = -(abs(best_evidence - threshold_c))
         confirmed = (threshold_c - buffer_c) <= best_evidence <= (threshold_c + buffer_c)
         if confirmed:
@@ -596,6 +625,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         city, kind, threshold_c, is_low,
         range_low_c=range_low_c,
         range_high_c=range_high_c,
+        forecast=forecast,
     )
 
     _pre_edge = min(our_prob - market_prob, getattr(config, "MAX_EDGE_CAP", 0.50))
