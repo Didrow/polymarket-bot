@@ -124,13 +124,26 @@ EMAIL_SENDER: str = os.getenv("EMAIL_SENDER", "")
 EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
 
 # ── WHITELIST МІСТ (тільки з METAR/ICAO) ──────────────────────
+# Розширено 30.06.2026 — звірено з активними Polymarket ринками (1919 markets)
+# Усі міста мають ICAO-код у CITY_TO_ICAO (data_fetcher.py)
 CITY_WHITELIST: List[str] = [
-    "NYC", "New York", "Chicago", "Los Angeles",
-    "Miami", "Dallas", "Seattle", "Denver", "Atlanta",
-    "Boston", "Houston", "London", "Paris", "Berlin",
-    "Munich", "Tokyo", "Seoul", "Busan",
-    "Buenos Aires", "Sao Paulo", "Cape Town", "Sydney",
-    "Lucknow",
+    # USA (10) — найбільше ринків, надійний METAR
+    "NYC", "New York", "Chicago", "Los Angeles", "Miami", "Dallas",
+    "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
+    "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
+    "Portland", "Nashville", "Charlotte", "Orlando",
+    # Європа (11) — всі великі хаби з METAR
+    "London", "Paris", "Berlin", "Munich", "Amsterdam", "Rome",
+    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague",
+    # Азія (10) — Hong Kong/Shanghai/Beijing мають топ-обсяг ринків
+    "Tokyo", "Seoul", "Busan", "Singapore", "Hong Kong", "Shanghai",
+    "Beijing", "Dubai", "Bangkok", "Lucknow",
+    # Південна Америка (3)
+    "Buenos Aires", "Sao Paulo", "Santiago", "Lima",
+    # Африка (2)
+    "Cape Town", "Lagos",
+    # Океанія (5)
+    "Sydney", "Melbourne", "Brisbane", "Perth", "Auckland", "Wellington",
 ]
 
 KNOWN_WHALE_WALLETS: List[str] = []

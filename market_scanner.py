@@ -24,6 +24,13 @@ WEATHER_CITIES = [
     "san-francisco", "chicago", "chengdu", "ankara", "busan", "jeddah", "karachi",
     "dallas", "buenos-aires", "lagos", "lucknow", "paris", "berlin", "seoul",
     "miami", "seattle", "sydney", "sao-paulo", "munich", "los-angeles",
+    # Розширено 30.06.2026 — міста з активними Polymarket ринками + METAR покриттям
+    "hong-kong", "shanghai", "singapore", "beijing", "madrid", "warsaw",
+    "amsterdam", "auckland", "melbourne", "brisbane", "perth", "santiago",
+    "lima", "prague", "vienna", "dublin", "dubai", "bangkok",
+    "atlanta", "denver", "houston", "austin", "boston", "phoenix",
+    "las-vegas", "minneapolis", "portland", "nashville", "charlotte", "orlando",
+    "rome",
 ]
 
 
@@ -108,6 +115,17 @@ def _detect_city(text: str) -> str:
         "sao paulo": "Sao Paulo", "são paulo": "Sao Paulo",
         "munich": "Munich", "münchen": "Munich",
         "los angeles": "Los Angeles", "los angeles ca": "Los Angeles",
+        # Розширено 30.06.2026 — міста з активними Polymarket ринками
+        "hong kong": "Hong Kong", "shanghai": "Shanghai", "singapore": "Singapore",
+        "beijing": "Beijing", "madrid": "Madrid", "warsaw": "Warsaw",
+        "amsterdam": "Amsterdam", "auckland": "Auckland", "melbourne": "Melbourne",
+        "brisbane": "Brisbane", "perth": "Perth", "santiago": "Santiago",
+        "lima": "Lima", "prague": "Prague", "vienna": "Vienna", "dublin": "Dublin",
+        "dubai": "Dubai", "bangkok": "Bangkok", "rome": "Rome",
+        "atlanta": "Atlanta", "denver": "Denver", "houston": "Houston",
+        "austin": "Austin", "boston": "Boston", "phoenix": "Phoenix",
+        "las vegas": "Las Vegas", "minneapolis": "Minneapolis", "portland": "Portland",
+        "nashville": "Nashville", "charlotte": "Charlotte", "orlando": "Orlando",
     }
     for key, city in cities.items():
         if key in t:
@@ -449,10 +467,15 @@ def get_target_date(question: str, end_date: datetime, city: str) -> datetime.da
     offsets = {
         "NYC": -4, "New York": -4, "Chicago": -5, "Los Angeles": -7, "San Francisco": -7,
         "Miami": -4, "Dallas": -5, "Seattle": -7, "Boston": -4, "Denver": -6, "Atlanta": -4,
+        "Houston": -5, "Austin": -5, "Phoenix": -7, "Las Vegas": -7, "Minneapolis": -5,
+        "Portland": -7, "Nashville": -5, "Charlotte": -4, "Orlando": -4,
         "London": 1, "Paris": 2, "Berlin": 2, "Munich": 2, "Rome": 2, "Madrid": 2, "Amsterdam": 2,
+        "Dublin": 1, "Warsaw": 2, "Vienna": 2, "Prague": 2,
         "Tokyo": 9, "Seoul": 9, "Busan": 9, "Lucknow": 5.5, "Singapore": 8, "Dubai": 4, "Bangkok": 7,
-        "Sydney": 10, "Buenos Aires": -3, "Cape Town": 2, "Sao Paulo": -3, "Moscow": 3, "Lagos": 1,
-        "Wellington": 12,
+        "Hong Kong": 8, "Shanghai": 8, "Beijing": 8, "Chengdu": 7, "Ankara": 3,
+        "Jeddah": 3, "Karachi": 5, "Moscow": 3,
+        "Sydney": 10, "Melbourne": 10, "Brisbane": 10, "Perth": 8, "Auckland": 12, "Wellington": 12,
+        "Buenos Aires": -3, "Cape Town": 2, "Sao Paulo": -3, "Santiago": -4, "Lima": -5, "Lagos": 1,
     }
     offset = offsets.get(city, 0)
     local_end = end_date + timedelta(hours=offset)
