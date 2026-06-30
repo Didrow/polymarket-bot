@@ -699,6 +699,16 @@ def check_and_close_positions(clob_client) -> List[Position]:
         else:
             logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
 
+        # Hard stop-loss: emergency exit regardless of hold time
+        hard_sl = getattr(config, "HARD_STOP_LOSS_PCT", None)
+        if hard_sl is not None and pos.pnl_pct <= -hard_sl and pos.entry_price > 0.03:
+            logger.info(f"🔴 HARD Stop-loss: {pos.question[:50]} | entry={pos.entry_price:.4f} cur={pos.current_price:.4f} pnl={pos.pnl_pct:.0%} age={age_hours:.1f}h")
+            pos.status = "STOP_LOSS"
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
+
         if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.03:
             sl_min_hold = getattr(config, "STOP_LOSS_MIN_HOLD_HOURS", 1.0)
             if age_hours < sl_min_hold:
