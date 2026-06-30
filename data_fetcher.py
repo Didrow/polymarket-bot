@@ -798,14 +798,14 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
         if not times or not temps:
             return None
 
-        now = datetime.now(timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_str = times[-1][:10] if times else None
+        if not today_str:
+            return None
 
         today_temps = []
         for t_str, temp in zip(times, temps):
             try:
-                t = datetime.fromisoformat(t_str)
-                if t >= today_start and temp is not None:
+                if t_str[:10] == today_str and temp is not None:
                     today_temps.append(temp)
             except:
                 pass
