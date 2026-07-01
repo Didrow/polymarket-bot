@@ -161,12 +161,37 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
         if time.time() - _rc_ts < _RESOLUTION_CACHE_TTL:
             return _rc_val
 
-    # DRY-RUN fast path: чекаємо повного завершення доби (02:00 UTC наступного дня)
+    # DRY-RUN fast path: чекаємо завершення локальної доби міста + buffer.
+    # get_target_date() повертає ЛОКАЛЬНУ календарну дату міста (не UTC).
+    # Локальна північ = target_date 00:00 local = target_date 00:00 UTC - offset.
+    # Якщо просто конструювати datetime(target_date, UTC) + 26h — помилка для не-UTC міст.
+    # Правильно: кінець локальної доби = (target_date + 1 day) 00:00 local
+    #           = (target_date + 1 day) 00:00 UTC - offset.
+    # Додаємо 3 години buffer для запізнення архівного API.
     if config.DRY_RUN and position and position.end_date:
         from market_scanner import get_target_date
         now = datetime.now(timezone.utc)
         target_date = get_target_date(position.question, position.end_date, position.city)
-        day_completed = datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc) + timedelta(days=1, hours=2)
+        # timezone offsets (місто → UTC зміщення в годинах)
+        _CITY_TZ_OFFSETS = {
+            "NYC": -4, "New York": -4, "Chicago": -5, "Los Angeles": -7, "San Francisco": -7,
+            "Miami": -4, "Dallas": -5, "Seattle": -7, "Boston": -4, "Denver": -6, "Atlanta": -4,
+            "Houston": -5, "Austin": -5, "Phoenix": -7, "Las Vegas": -7, "Minneapolis": -5,
+            "Portland": -7, "Nashville": -5, "Charlotte": -4, "Orlando": -4,
+            "London": 1, "Paris": 2, "Berlin": 2, "Munich": 2, "Rome": 2, "Madrid": 2, "Amsterdam": 2,
+            "Dublin": 1, "Warsaw": 2, "Vienna": 2, "Prague": 2,
+            "Tokyo": 9, "Seoul": 9, "Busan": 9, "Lucknow": 5.5, "Singapore": 8, "Dubai": 4, "Bangkok": 7,
+            "Hong Kong": 8, "Shanghai": 8, "Beijing": 8, "Chengdu": 7, "Ankara": 3,
+            "Jeddah": 3, "Karachi": 5, "Moscow": 3,
+            "Sydney": 10, "Melbourne": 10, "Brisbane": 10, "Perth": 8, "Auckland": 12, "Wellington": 12,
+            "Buenos Aires": -3, "Cape Town": 2, "Sao Paulo": -3, "Santiago": -4, "Lima": -5, "Lagos": 1,
+        }
+        _tz_offset = _CITY_TZ_OFFSETS.get(position.city, 0)
+        # Кінець локальної доби в UTC: (target_date + 1 day) 00:00 local
+        #           = (target_date + 1 day) 00:00 UTC - offset.
+        # + 3 години buffer для запізнення архівного API.
+        _next_day = target_date + timedelta(days=1)
+        day_completed = datetime(_next_day.year, _next_day.month, _next_day.day, tzinfo=timezone.utc) - timedelta(hours=_tz_offset) + timedelta(hours=3)
         if now > day_completed:
             from data_fetcher import fetch_historical_extreme
             market_date = target_date

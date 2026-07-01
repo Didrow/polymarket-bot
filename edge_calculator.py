@@ -335,13 +335,17 @@ def _check_metar_confirmation(
     """
     Перевіряє чи METAR та observed data підтверджують напрямок ринку.
 
-    Для "above X°C": best_evidence (obs_hi > forecast_high > metar) >= threshold - buffer
-    Для "below X°C": best_evidence_cold (obs_low < forecast_low < metar) <= threshold + buffer
+    v17: Прогноз (fc_high/fc_low) ВИДАЛЕНО з confirmation logic для всіх kind.
+    Причина: прогноз вже використовується для our_prob — повторне використання
+    для "підтвердження" = circular logic = forecast-bet (12 програшів поспіль).
+    Тепер тільки METAR + observed data (фізична істина) підтверджують ринок.
+
+    Для "above X°C": best_evidence = max(metar_temp, obs_high) >= threshold - buffer
+    Для "below X°C": best_evidence_cold = min(metar_temp, obs_low) <= threshold + buffer
     Для "range": best_evidence в межах [range_low-C..range_high+C]
     Для "categorical": те ж що range (одноточковий — з buffer)
 
-    When observed data unavailable (429/no data), falls back to forecast high/low
-    instead of raw METAR hourly temp — because METAR is current reading, not daily extreme.
+    When observed data unavailable (429/no data), falls back to METAR only.
 
     Повертає: (confirmed, metar_temp_c, observed_high_c, distance_from_threshold_c)
     """
@@ -373,45 +377,70 @@ def _check_metar_confirmation(
         return True, 0.0, 0.0, 0.0
 
     if kind == "above":
+        # v18: STRICT METAR-арбітраж — температура ВЖЕ досягла порогу.
+        # "Майже досягнуто" (best_evidence >= threshold - buffer) = forecast-bet.
+        # Буфер НЕ застосовується — бо our_prob вже використовує прогноз.
         candidates = [metar_temp]
         if obs_high > 0:
             candidates.append(obs_high)
-        if fc_high > 0:
-            candidates.append(fc_high)
         best_evidence = max(candidates)
         distance = best_evidence - threshold_c
-        confirmed = best_evidence >= (threshold_c - buffer_c)
+        confirmed = best_evidence >= threshold_c
+        if confirmed and obs_high > 0 and obs_high < threshold_c:
+            confirmed = False
+            logger.debug(
+                f"⛔ ABOVE forecast-bet rejected: obs_hi={obs_high:.1f}°C < "
+                f"threshold={threshold_c:.1f}°C | fc_high={fc_high:.1f}°C — not METAR arb"
+            )
     elif kind == "below":
+        # v18: STRICT — температура ВЖЕ нижче порогу.
         candidates = [metar_temp]
         if obs_low > 0:
             candidates.append(obs_low)
-        if fc_low > 0:
-            candidates.append(fc_low)
         best_evidence_cold = min(candidates)
         distance = threshold_c - best_evidence_cold
-        confirmed = best_evidence_cold <= (threshold_c + buffer_c)
+        confirmed = best_evidence_cold <= threshold_c
+        if confirmed and obs_low > 0 and obs_low > threshold_c:
+            confirmed = False
+            logger.debug(
+                f"⛔ BELOW forecast-bet rejected: obs_low={obs_low:.1f}°C > "
+                f"threshold={threshold_c:.1f}°C | fc_low={fc_low:.1f}°C — not METAR arb"
+            )
     elif kind == "range" and range_low_c is not None and range_high_c is not None:
+        # v18: STRICT range — спостережена температура ВЖЕ в бакеті.
+        # НІ buffer знизу (дозволяв forecast-bet), НІ buffer зверху
+        # (температура вже вийшла за бакет = ринок програє).
+        # Це найчистіший METAR-арбітраж: фізична істина в бакеті, ринок ще не цінує.
         candidates = [metar_temp]
         if obs_high > 0:
             candidates.append(obs_high)
-        if fc_high > 0:
-            candidates.append(fc_high)
         best_evidence = max(candidates)
         range_mid = (range_low_c + range_high_c) / 2.0
         distance = -abs(best_evidence - range_mid)
-        confirmed = (range_low_c - buffer_c) <= best_evidence <= (range_high_c + buffer_c)
+        confirmed = range_low_c <= best_evidence <= range_high_c
+        if not confirmed and obs_high > 0:
+            logger.debug(
+                f"⛔ RANGE strict rejected: obs_hi={obs_high:.1f}°C outside "
+                f"[{range_low_c:.1f}, {range_high_c:.1f}] | fc_high={fc_high:.1f}°C — not METAR arb"
+            )
         if confirmed:
             half_width = (range_high_c - range_low_c) / 2.0
             distance = max(0.0, half_width - abs(best_evidence - range_mid))
     elif kind == "categorical":
+        # v18: categorical — одноточковий, ПОТРЕБУЄ buffer (температура ≈ threshold).
+        # Але тільки METAR/observed, без forecast.
         candidates = [metar_temp]
         if obs_high > 0:
             candidates.append(obs_high)
-        if fc_high > 0:
-            candidates.append(fc_high)
         best_evidence = max(candidates)
         distance = -(abs(best_evidence - threshold_c))
         confirmed = (threshold_c - buffer_c) <= best_evidence <= (threshold_c + buffer_c)
+        if confirmed and obs_high > 0 and abs(obs_high - threshold_c) > buffer_c:
+            confirmed = False
+            logger.debug(
+                f"⛔ CATEGORICAL forecast-bet rejected: obs_hi={obs_high:.1f}°C | "
+                f"threshold={threshold_c:.1f}°C | fc_high={fc_high:.1f}°C — not METAR arb"
+            )
         if confirmed:
             distance = max(0.0, buffer_c - abs(best_evidence - threshold_c))
     else:
