@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _active_positions: Dict[str, "Position"] = {}
 _recently_closed: Dict[str, Any] = {}
+_suppressed_logs: set = set()
 
 def normalize_condition_id(cid: str) -> str:
     if not cid:
@@ -273,9 +274,11 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
     except:
         pass
 
-    if not is_closed and not is_resolved:
-        logger.debug(f"Market {clean_id[:20]} is still OPEN (end_date={end_date})")
-        return None
+        if not is_closed and not is_resolved:
+            if clean_id not in _suppressed_logs:
+                _suppressed_logs.add(clean_id)
+                logger.debug(f"Market {clean_id[:20]} is still OPEN (end_date={end_date})")
+            return None
 
     # Спробуємо визначити переможця з токенів
     tokens = market_data.get("tokens", [])
@@ -662,7 +665,10 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 if pos.end_date:
                     hours_left = (pos.end_date - now).total_seconds() / 3600
                     if hours_left < 1.0:
-                        logger.debug(f"⏳ Resolution чекає end_date: {pos.question[:40]} | залишилось {hours_left*60:.0f}хв")
+                        res_key = f"res:{cid}"
+                        if res_key not in _suppressed_logs:
+                            _suppressed_logs.add(res_key)
+                            logger.debug(f"⏳ Resolution чекає end_date: {pos.question[:40]} | залишилось {hours_left*60:.0f}хв")
                 else:
                     logger.debug(f"⚠️ Позиція без end_date: {pos.question[:40]}")
 
@@ -722,7 +728,10 @@ def check_and_close_positions(clob_client) -> List[Position]:
         if price is not None:
             pos.update_pnl(1.0 - price if pos.direction == "BUY_NO" else price)
         else:
-            logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
+            mtm_key = f"mtm:{cid}"
+            if mtm_key not in _suppressed_logs:
+                _suppressed_logs.add(mtm_key)
+                logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
 
         # Hard stop-loss: emergency exit regardless of hold time
         hard_sl_base = getattr(config, "HARD_STOP_LOSS_PCT", 0.30)
@@ -738,9 +747,12 @@ def check_and_close_positions(clob_client) -> List[Position]:
         if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.03:
             sl_min_hold = getattr(config, "STOP_LOSS_MIN_HOLD_HOURS", 1.0)
             if age_hours < sl_min_hold:
-                logger.debug(
-                    f"⏸️ SL deferred: age={age_hours:.1f}h < {sl_min_hold}h | {pos.question[:40]}"
-                )
+                sl_key = f"sl:{cid}"
+                if sl_key not in _suppressed_logs:
+                    _suppressed_logs.add(sl_key)
+                    logger.debug(
+                        f"⏸️ SL deferred: age={age_hours:.1f}h < {sl_min_hold}h | {pos.question[:40]}"
+                    )
             else:
                 logger.info(f"🔴 Stop-loss: {pos.question[:50]} | entry={pos.entry_price:.4f} cur={pos.current_price:.4f} pnl={pos.pnl_pct:.0%} age={age_hours:.1f}h")
                 pos.status = "STOP_LOSS"
@@ -769,6 +781,9 @@ def check_and_close_positions(clob_client) -> List[Position]:
             del _active_positions[cid]
             _recently_closed[cid] = now
             continue
+
+    if len(_suppressed_logs) > 200:
+        _suppressed_logs.clear()
 
     return closed
 

@@ -281,6 +281,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     opened_this_cycle = 0
     city_counts_this_cycle = {}
     logged_slow_slots_full = False
+    dup_count = 0
+    city_limit_count = 0
     for edge_result in tradeable:
         if opened_this_cycle >= config.MAX_OPEN_PER_CYCLE:
             break
@@ -300,7 +302,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
         norm_q = _normalize_q(edge_result.market.question)
         if norm_q in active_questions:
-            logger.info(f"📊 Дублікат по питанням — пропускаємо: {edge_result.market.question[:60]}")
+            dup_count += 1
             continue
 
         # Перевірка ліміту позицій на місто (антикореляція)
@@ -311,7 +313,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             grid_limit = getattr(config, "SNIPER_GRID_MAX_MARKETS_PER_CITY", config.MAX_POSITIONS_PER_CITY)
             is_grid = "GRID" in edge_result.reason
             if city_count >= (grid_limit if is_grid else config.MAX_POSITIONS_PER_CITY):
-                logger.info(f"📊 Ліміт {'сітки' if is_grid else 'міста'} {grid_limit if is_grid else config.MAX_POSITIONS_PER_CITY} для {city} — пропускаємо")
+                city_limit_count += 1
                 continue
         if not safeguard.check_hourly_trade_limit():
             break
@@ -370,6 +372,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 dry_run=config.DRY_RUN,
             )
 
+    if dup_count > 0 or city_limit_count > 0:
+        logger.info(f"📊 Пропущено: {dup_count} дублікатів, {city_limit_count} ліміт міста")
     return opened_this_cycle
 
 def main():
@@ -519,7 +523,7 @@ def main():
                         nearest = min(end_dates)
                         hours_to_nearest = (nearest - datetime.now(timezone.utc)).total_seconds() / 3600
                         if hours_to_nearest > 2.0:
-                            sleep_time = min(300, int(hours_to_nearest * 300))
+                            sleep_time = min(3600, max(300, int(hours_to_nearest * 300)))
                         else:
                             sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
                     else:
@@ -529,13 +533,17 @@ def main():
                     if 12 <= now_utc.hour < 24:
                         sleep_time = 3600
                         logger.info(f"⏸ Мертва зона ({now_utc.hour}:00 UTC) — наступний скан через 60 хв")
+                    elif empty_cycles >= 12:
+                        sleep_time = 1800
+                    elif empty_cycles >= 6:
+                        sleep_time = 900
                     else:
-                        sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
+                        sleep_time = int(config.SCAN_INTERVAL_SEC * 2.0)
                     if _debug_auto_revert_cycle is None:
                         _debug_auto_revert_cycle = cycle_count + 5
                         root_logger.setLevel(logging.DEBUG)
                         logger.info("🔧 LOG_LEVEL → DEBUG (перший активний цикл, автовернення через 5 циклів)")
-                    logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s...\n")
+                logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s ({empty_cycles} порожніх циклів поспіль)...\n")
             else:
                 logger.info(f"💤 Сплю {sleep_time}s...\n")
             time.sleep(sleep_time)

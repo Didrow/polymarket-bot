@@ -669,10 +669,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if getattr(config, "METAR_ARB_REQUIRE_METAR", False) and not metar_confirmed:
         high_prob_fallback = our_prob >= 0.70 and _pre_edge >= _min_edge_pre
         if not high_prob_fallback:
-            logger.debug(
-                f"❌ METAR NOT CONFIRMED: {kind}|{threshold_c:.1f}°C | "
-                f"city={city} | metar={metar_temp_c:.1f}°C | obs_hi={observed_high_c:.1f}°C"
-            )
             return EdgeResult(
                 market=market,
                 forecast=forecast,
@@ -711,15 +707,10 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     )
 
     if tradeable and market_prob < 0.05 and our_prob > 0.20:
-        # v16: Allow PHANTOM trades when METAR confirms — these are high-edge arb
-        # opportunities where market hasn't updated yet. Reject only unconfirmed.
         if not metar_confirmed:
-            logger.debug(
-                f"⛔ PHANTOM (no METAR): our={our_prob:.0%} vs mkt={market_prob:.0%} | {market.question[:40]}"
-            )
             tradeable = False
         else:
-            logger.debug(
+            logger.info(
                 f"✅ PHANTOM+METAR: our={our_prob:.0%} vs mkt={market_prob:.0%} — high-edge arb | {market.question[:40]}"
             )
 
@@ -727,9 +718,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         prob_ratio = our_prob / market_prob
         max_ratio = getattr(config, "PROB_RATIO_MAX_METAR", 5.0) if metar_confirmed else getattr(config, "PROB_RATIO_MAX_NO_METAR", 3.0)
         if prob_ratio > max_ratio:
-            logger.debug(
-                f"⛔ PROB-RATIO: our={our_prob:.0%} / mkt={market_prob:.0%} = {prob_ratio:.1f}x > {max_ratio:.0f}x | {market.question[:40]}"
-            )
             tradeable = False
 
     if tradeable:
@@ -738,16 +726,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             f"🎯 METAR ARB {kind.upper()} @ {market_prob:.3f} | {kind_label} | "
             f"our_prob={our_prob:.0%} | dist={distance_c:.1f}°C | decay={time_decay:.2f} | {metar_tag}"
         )
+        logger.info(
+            f"✅ EDGE: {market.question[:50]} | "
+            f"our={our_prob:.0%} | mkt={market_prob:.0%} | edge={eff_edge:.1%} | "
+            f"dist={distance_c:.1f}°C | {kind_label} | METAR={'✓' if metar_confirmed else '✗'}"
+        )
     else:
         reason = "SKIP"
-
-    logger.debug(
-        f"EDGE: {market.question[:40]} | "
-        f"our={our_prob:.0%} | mkt={market_prob:.0%} | "
-        f"edge={eff_edge:.1%} | dist={distance_c:.1f}°C | "
-        f"decay={time_decay:.2f} | {kind_label} | "
-        f"METAR={'✓' if metar_confirmed else '✗'}"
-    )
 
     return EdgeResult(
         market=market,
