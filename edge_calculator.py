@@ -703,7 +703,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         and market_prob <= max_ask
         and our_prob >= min_prob
         and eff_edge >= min_edge
-        and distance_c <= max_dist
+        and (metar_confirmed or distance_c <= max_dist)
     )
 
     if tradeable and market_prob < 0.05 and our_prob > 0.20:
