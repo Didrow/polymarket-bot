@@ -11,7 +11,7 @@ import logging
 import logging.handlers
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -224,8 +224,12 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     markets = fetch_weather_markets()
     if not markets:
-        logger.info("Немає активних weather-ринків (≤ 12h). Чекаємо...")
-        return 0
+        now_utc = datetime.now(timezone.utc)
+        next_midnight = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        sleep_sec = min((next_midnight - now_utc).total_seconds(), 43200)
+        logger.info(f"😴 Немає активних weather-ринків. Сплю {sleep_sec/60:.0f} хв до 00:00 UTC...")
+        time.sleep(sleep_sec)
+        return -1
 
     if cycle_count % 5 == 0:
         osint_data = scan_all_osint(markets)
