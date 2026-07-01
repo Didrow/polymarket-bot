@@ -224,17 +224,18 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
                     pass
 
         is_above = None
-        if any(w in full for w in ["above", "exceed", "or higher"]):
+        if any(w in q_lower for w in ["above", "exceed", "or higher"]):
             is_above = True
-        elif any(w in full for w in ["below", "under", "or lower"]):
+        elif any(w in q_lower for w in ["below", "under", "or lower"]):
             is_above = False
 
         range_low = None
         range_high = None
         kind = "categorical"
-        if any(w in full for w in ["or higher", "or above", "above", "exceed"]):
+        q_lower = question.lower()
+        if any(w in q_lower for w in ["or higher", "or above", "above", "exceed"]):
             kind = "above"
-        elif any(w in full for w in ["or below", "or lower", "below", "under"]):
+        elif any(w in q_lower for w in ["or below", "or lower", "below", "under"]):
             kind = "below"
         _range_re = re.search(
             r'between\s+([-+]?\d+\.?\d*)\s*°?\s*[cf]?\s*(?:-|–|to|and)\s*([-+]?\d+\.?\d*)\s*°?\s*[cf]?',

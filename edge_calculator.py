@@ -602,6 +602,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     time_decay = _time_decay_for_hours(market.hours_to_resolution)
     our_prob, threshold_c, kind_label = estimate_market_probability(market, forecast)
 
+    kind_from_label = kind_label.split("|")[0] if "|" in kind_label else kind_label
+    if kind != kind_from_label:
+        logger.debug(
+            f"⚠️ KIND MISMATCH: scanner={kind} vs probability_model={kind_from_label} | {market.question[:50]}"
+        )
+        return None
+
     _log_price_validation(market)
     market_prob = market.best_ask_yes
 
