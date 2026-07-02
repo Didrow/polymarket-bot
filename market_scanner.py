@@ -305,7 +305,7 @@ def _fetch_events_by_tag(tag_slug: str, hours_limit: float) -> List[PolyMarket]:
         r = requests.get(
             f"{config.GAMMA_URL}/events",
             params={"tag_slug": tag_slug, "active": "true", "closed": "false", "limit": 100},
-            timeout=15,
+            timeout=30,
         )
         if r.status_code == 200:
             data = r.json()
@@ -313,13 +313,13 @@ def _fetch_events_by_tag(tag_slug: str, hours_limit: float) -> List[PolyMarket]:
             for ev in events:
                 found.extend(_extract_markets_from_event(ev, hours_limit))
     except Exception as e:
-        logger.debug(f"tag={tag_slug} error: {e}")
+        logger.warning(f"⚠️ Tag search FAILED for '{tag_slug}': {type(e).__name__}: {e}")
     return found
 
 
 def _fetch_event_by_slug(slug: str, hours_limit: float) -> List[PolyMarket]:
     try:
-        r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug}, timeout=8)
+        r = requests.get(f"{config.GAMMA_URL}/events", params={"slug": slug}, timeout=15)
         if r.status_code != 200:
             return []
         data = r.json()
@@ -328,7 +328,8 @@ def _fetch_event_by_slug(slug: str, hours_limit: float) -> List[PolyMarket]:
         for ev in events:
             result.extend(_extract_markets_from_event(ev, hours_limit))
         return result
-    except Exception:
+    except Exception as e:
+        logger.warning(f"⚠️ Slug fetch FAILED for '{slug}': {type(e).__name__}: {e}")
         return []
 
 
