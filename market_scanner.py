@@ -126,6 +126,11 @@ def _detect_city(text: str) -> str:
         "austin": "Austin", "boston": "Boston", "phoenix": "Phoenix",
         "las vegas": "Las Vegas", "minneapolis": "Minneapolis", "portland": "Portland",
         "nashville": "Nashville", "charlotte": "Charlotte", "orlando": "Orlando",
+        # 02.07.2026 — додаткові міста з активними Polymarket ринками
+        "taipei": "Taipei", "chongqing": "Chongqing", "wuhan": "Wuhan",
+        "shenzhen": "Shenzhen", "kuala lumpur": "Kuala Lumpur",
+        "guangzhou": "Guangzhou", "qingdao": "Qingdao", "manila": "Manila",
+        "tel aviv": "Tel Aviv", "milan": "Milan", "tel aviv-yafo": "Tel Aviv",
     }
     for key, city in cities.items():
         if key in t:

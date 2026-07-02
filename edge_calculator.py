@@ -394,18 +394,38 @@ def _check_metar_confirmation(
             )
     elif kind == "below":
         # v18: STRICT — температура ВЖЕ нижче порогу.
-        candidates = [metar_temp]
-        if obs_low > 0:
-            candidates.append(obs_low)
+        # Для "lowest temp below X": obs_low (daily low so far) — коректно.
+        # Для "highest temp below X": obs_high (daily high so far) — виправлено 02.07.2026.
+        # metar_temp (поточна) не підходить для "highest below" — temp може ще зрости.
+        if is_low:
+            candidates = [metar_temp]
+            if obs_low > 0:
+                candidates.append(obs_low)
+        else:
+            # highest temp below: потрібен obs_high
+            candidates = [metar_temp]
+            if obs_high > 0:
+                candidates.append(obs_high)
+            else:
+                # без obs_high metar_temp не підтверджує — temp ще зросте
+                logger.debug(f"⛔ BELOW highest-temp no obs_high: can't confirm {city}")
+                return False, metar_temp, obs_high, threshold_c - metar_temp
         best_evidence_cold = min(candidates)
         distance = threshold_c - best_evidence_cold
         confirmed = best_evidence_cold <= threshold_c
-        if confirmed and obs_low > 0 and obs_low > threshold_c:
-            confirmed = False
-            logger.debug(
-                f"⛔ BELOW forecast-bet rejected: obs_low={obs_low:.1f}°C > "
-                f"threshold={threshold_c:.1f}°C | fc_low={fc_low:.1f}°C — not METAR arb"
-            )
+        if confirmed:
+            if is_low and obs_low > 0 and obs_low > threshold_c:
+                confirmed = False
+                logger.debug(
+                    f"⛔ BELOW forecast-bet rejected: obs_low={obs_low:.1f}°C > "
+                    f"threshold={threshold_c:.1f}°C — not METAR arb"
+                )
+            elif not is_low and obs_high > 0 and obs_high > threshold_c:
+                confirmed = False
+                logger.debug(
+                    f"⛔ BELOW highest-temp rejected: obs_high={obs_high:.1f}°C > "
+                    f"threshold={threshold_c:.1f}°C — not METAR arb"
+                )
     elif kind == "range" and range_low_c is not None and range_high_c is not None:
         # v18: STRICT range — спостережена температура ВЖЕ в бакеті.
         # НІ buffer знизу (дозволяв forecast-bet), НІ buffer зверху

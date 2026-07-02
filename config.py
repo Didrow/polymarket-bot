@@ -132,12 +132,15 @@ CITY_WHITELIST: List[str] = [
     "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
     "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
     "Portland", "Nashville", "Charlotte", "Orlando",
-    # Європа (11) — всі великі хаби з METAR
+    # Європа (14) — всі великі хаби з METAR
     "London", "Paris", "Berlin", "Munich", "Amsterdam", "Rome",
-    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague",
-    # Азія (10) — Hong Kong/Shanghai/Beijing мають топ-обсяг ринків
+    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague", "Milan",
+    "Moscow", "Ankara",
+    # Азія (18) — Hong Kong/Shanghai/Beijing мають топ-обсяг ринків
     "Tokyo", "Seoul", "Busan", "Singapore", "Hong Kong", "Shanghai",
-    "Beijing", "Dubai", "Bangkok", "Lucknow",
+    "Beijing", "Dubai", "Bangkok", "Lucknow", "Taipei", "Chongqing",
+    "Wuhan", "Shenzhen", "Kuala Lumpur", "Guangzhou", "Qingdao", "Manila",
+    "Chengdu", "Karachi", "Jeddah", "Tel Aviv",
     # Південна Америка (3)
     "Buenos Aires", "Sao Paulo", "Santiago", "Lima",
     # Африка (2)
