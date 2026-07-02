@@ -223,6 +223,7 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
                 except Exception:
                     pass
 
+        q_lower = question.lower()
         is_above = None
         if any(w in q_lower for w in ["above", "exceed", "or higher"]):
             is_above = True
@@ -232,7 +233,6 @@ def _parse_market_from_api(raw: Dict, hours_limit: float) -> Optional[PolyMarket
         range_low = None
         range_high = None
         kind = "categorical"
-        q_lower = question.lower()
         if any(w in q_lower for w in ["or higher", "or above", "above", "exceed"]):
             kind = "above"
         elif any(w in q_lower for w in ["or below", "or lower", "below", "under"]):
