@@ -534,9 +534,14 @@ def main():
                         sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
                 else:
                     now_utc = datetime.now(timezone.utc)
-                    if 12 <= now_utc.hour < 24:
-                        sleep_time = 3600
-                        logger.info(f"⏸ Мертва зона ({now_utc.hour}:00 UTC) — наступний скан через 60 хв")
+                    # Розумний сон: якщо зараз 06:00-23:59 UTC — сьогоднішні ринки вже мертві,
+                    # спімо до 00:30 UTC коли з'являються свіжі daily-temperature ринки
+                    if 6 <= now_utc.hour < 24:
+                        target = now_utc.replace(hour=0, minute=30, second=0, microsecond=0) + timedelta(days=1)
+                        sleep_seconds = int((target - now_utc).total_seconds())
+                        sleep_time = max(300, min(sleep_seconds, 23 * 3600))
+                        logger.info(f"🌙 Мертва зона ({now_utc.hour:02d}:{now_utc.minute:02d} UTC) — сьогоднішні ринки висохли. "
+                                   f"Сплю {sleep_time//3600}г {sleep_time%3600//60}хв до {target.strftime('%H:%M UTC')} (нові ринки)")
                     elif empty_cycles >= 12:
                         sleep_time = 1800
                     elif empty_cycles >= 6:
