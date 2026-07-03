@@ -150,7 +150,7 @@ def check_usdc_approval_limit() -> None:
     RULE 4: Нагадування про обмеження USDC approval.
     """
     logger.info("💱 RULE 4: USDC Approval рекомендація")
-    logger.info(f"⚠️  Встанови USDC approval ≤ ${config.MAX_USDC_APPROVAL}")
+    logger.info(f"⚠️  Встанови USDC approval ≤ $1000")
     logger.info("⚠️  Після торгівлі перевір revoke.cash для відкликання зайвих дозволів")
 
 

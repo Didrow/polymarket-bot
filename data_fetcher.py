@@ -21,6 +21,9 @@ _cache: Dict[str, Tuple[float, any]] = {}
 CACHE_TTL = 900  # 15 хвилин
 
 
+def _cache_set(key: str, val):
+    _cache[key] = (time.time(), val)
+
 def _cache_get(key: str):
     if key in _cache:
         ts, val = _cache[key]
