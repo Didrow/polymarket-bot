@@ -727,8 +727,8 @@ class SafeguardManager:
 
     def check_drawdown(self) -> bool:
         dd = self.state.drawdown_pct
-        if dd >= config.MAX_DRAWDOWN_PCT:
-            self._halt(f"Просадка {dd:.1%} >= ліміт {config.MAX_DRAWDOWN_PCT:.0%}")
+        if dd >= 0.30:
+            self._halt(f"Просадка {dd:.1%} >= ліміт 30%")
             return False
         return True
 
