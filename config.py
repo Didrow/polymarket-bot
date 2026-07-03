@@ -124,28 +124,25 @@ EMAIL_SENDER: str = os.getenv("EMAIL_SENDER", "")
 EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
 
 # ── WHITELIST МІСТ (тільки з METAR/ICAO) ──────────────────────
-# Розширено 30.06.2026 — звірено з активними Polymarket ринками (1919 markets)
-# Усі міста мають ICAO-код у CITY_TO_ICAO (data_fetcher.py)
+# Розширено 03.07.2026 — тільки міста з ICAO в CITY_TO_ICAO (data_fetcher.py)
+# Видалено 10 міст без ICAO: Milan, Taipei, Chongqing, Wuhan, Shenzhen, Kuala Lumpur, Guangzhou, Qingdao, Manila, Tel Aviv
 CITY_WHITELIST: List[str] = [
-    # USA (10) — найбільше ринків, надійний METAR
+    # USA (23) — найбільше ринків, надійний METAR
     "NYC", "New York", "Chicago", "Los Angeles", "Miami", "Dallas",
     "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
     "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
-    "Portland", "Nashville", "Charlotte", "Orlando",
-    # Європа (14) — всі великі хаби з METAR
+    "Portland", "Nashville", "Charlotte", "Orlando", "LA",
+    # Європа (13) — всі мають ICAO
     "London", "Paris", "Berlin", "Munich", "Amsterdam", "Rome",
-    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague", "Milan",
-    "Moscow", "Ankara",
-    # Азія (18) — Hong Kong/Shanghai/Beijing мають топ-обсяг ринків
+    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague", "Moscow", "Ankara",
+    # Азія (9) — тільки з ICAO
     "Tokyo", "Seoul", "Busan", "Singapore", "Hong Kong", "Shanghai",
-    "Beijing", "Dubai", "Bangkok", "Lucknow", "Taipei", "Chongqing",
-    "Wuhan", "Shenzhen", "Kuala Lumpur", "Guangzhou", "Qingdao", "Manila",
-    "Chengdu", "Karachi", "Jeddah", "Tel Aviv",
-    # Південна Америка (3)
+    "Beijing", "Dubai", "Bangkok", "Lucknow", "Chengdu", "Karachi", "Jeddah",
+    # Південна Америка (4)
     "Buenos Aires", "Sao Paulo", "Santiago", "Lima",
     # Африка (2)
     "Cape Town", "Lagos",
-    # Океанія (5)
+    # Океанія (6)
     "Sydney", "Melbourne", "Brisbane", "Perth", "Auckland", "Wellington",
 ]
 
