@@ -99,7 +99,7 @@ def detect_whales(condition_id: str, question: str) -> List[WhaleAlert]:
     for trade in trades:
         try:
             size = float(trade.get("size", 0)) * float(trade.get("price", 0))
-            if size < config.WHALE_THRESHOLD_USD:
+            if size < 2000.0:
                 continue
 
             # Парсинг дати
@@ -116,7 +116,7 @@ def detect_whales(condition_id: str, question: str) -> List[WhaleAlert]:
             side = "YES" if trade.get("outcome", "").upper() == "YES" else "NO"
             price = float(trade.get("price", 0))
 
-            is_insider = wallet.lower() in {w.lower() for w in config.KNOWN_WHALE_WALLETS}
+            is_insider = False
 
             alert = WhaleAlert(
                 wallet=wallet,
@@ -184,7 +184,7 @@ def detect_insider_anomaly(condition_id: str, question: str) -> Optional[Insider
         concentration = wallet_total / total_volume
 
         # Аномалія: один гаманець > 40% обсягу за 6 годин
-        if concentration > 0.40 and wallet_total > config.WHALE_THRESHOLD_USD:
+        if concentration > 0.40 and wallet_total > 2000.0:
             anomaly_score = min(0.99, concentration)
             avg_price = sum(sizes[i] * prices[i] for i in range(len(sizes))) / (wallet_total + 1e-6)
 

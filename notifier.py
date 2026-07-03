@@ -84,7 +84,7 @@ def notify_startup(dry_run, capital):
     mode = "DRY-RUN" if dry_run else "РЕАЛЬНА ТОРГІВЛЯ"
     _send_email(
         "[PolyBot] Бот запущено",
-        f"Режим: {mode}\nКапітал: ${capital:.2f}\nEdge мін: {config.MIN_EDGE_ENTRY:.0%}\n"
+        f"Режим: {mode}\nКапітал: ${capital:.2f}\nEdge YES: {getattr(config, 'MIN_EDGE_YES', 0.20):.0%}\nEdge NO: {getattr(config, 'MIN_EDGE_NO', 0.20):.0%}\n"
     )
 
 
