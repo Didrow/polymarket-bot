@@ -29,8 +29,19 @@ def _cache_get(key: str):
     return None
 
 
-def _cache_set(key: str, val):
-    _cache[key] = (time.time(), val)
+def _request_with_retry(url, params=None, timeout=10, headers=None, retries=3, backoff=2):
+    for attempt in range(retries):
+        try:
+            r = _request_with_retry(url, params=params, timeout=timeout, headers=headers)
+            r.raise_for_status()
+            return r
+        except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
+            if attempt == retries - 1:
+                raise e
+            wait_time = backoff ** (attempt + 1)
+            logger.warning(f"Request failed (attempt {attempt + 1}/{retries}). Retrying in {wait_time}s... Error: {e}")
+            time.sleep(wait_time)
+    return None
 
 
 # ─────────────────────────────────────────────
@@ -345,20 +356,24 @@ def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float,
     if cached:
         return cached
     try:
-        r = requests.get(
+        r = _request_with_retry(
             "https://geocoding-api.open-meteo.com/v1/search",
             params={"name": city, "count": 1, "language": "en"},
             timeout=8
         )
-        r.raise_for_status()
-        results = r.json().get("results", [])
-        if results:
-            coords = (results[0]["latitude"], results[0]["longitude"])
-            _cache_set(key, coords)
-            return coords
+        if r:
+            r.raise_for_status()
+            results = r.json().get("results", [])
+            if results:
+                coords = (results[0]["latitude"], results[0]["longitude"])
+                _cache_set(key, coords)
+                return coords
     except Exception:
         pass
     return None
+
+
+
 
 
 # ─────────────────────────────────────────────
@@ -384,7 +399,7 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, targ
 
     lat, lon = coords
     try:
-        r = requests.get(
+        r = _request_with_retry(
             "https://ensemble-api.open-meteo.com/v1/ensemble",
             params={
                 "latitude": lat,
@@ -396,8 +411,12 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, targ
             },
             timeout=10
         )
+        if not r:
+            return None
         r.raise_for_status()
         daily = r.json().get("daily", {})
+
+
         
         high_m, low_m = [], []
         for i in range(1, 32):
@@ -458,16 +477,23 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0, target_dat
 
     lat, lon = coords
     try:
-        r = requests.get(
+        r = _request_with_retry(
             f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}",
             timeout=10,
             headers={"User-Agent": "PolymarketWeatherBot/GridEdition"}
         )
+        if not r:
+            return None
         r.raise_for_status()
         forecast_url = r.json()["properties"]["forecast"]
 
-        r2 = requests.get(forecast_url, timeout=10,
-                           headers={"User-Agent": "PolymarketWeatherBot/GridEdition"})
+        r2 = _request_with_retry(
+            forecast_url,
+            timeout=10,
+            headers={"User-Agent": "PolymarketWeatherBot/GridEdition"}
+        )
+        if not r2:
+            return None
         r2.raise_for_status()
         periods = r2.json()["properties"]["periods"]
 
@@ -538,7 +564,7 @@ def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[W
         end_dt   = datetime.now(timezone.utc)
         start_dt = end_dt - timedelta(days=10)
         
-        r = requests.get(
+        r = _request_with_retry(
             "https://power.larc.nasa.gov/api/temporal/daily/point",
             params={
                 "parameters": "T2M_MAX,T2M_MIN,PRECTOTCORR",
@@ -597,7 +623,7 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
 
     lat, lon = coords
     try:
-        r = requests.get(
+        r = _request_with_retry(
             f"https://api.open-meteo.com/v1/{model}",
             params={
                 "latitude":   lat,
@@ -722,7 +748,7 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
 
     try:
         # Використовуємо aviationweather.gov JSON API
-        r = requests.get(
+        r = _request_with_retry(
             "https://aviationweather.gov/api/data/metar",
             params={"ids": icao, "format": "json", "hours": 1},
             timeout=8,
@@ -777,7 +803,7 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
 
     lat, lon = coords
     try:
-        r = requests.get(
+        r = _request_with_retry(
             "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": lat,
@@ -1001,7 +1027,7 @@ def fetch_historical_extreme(city: str, date) -> Optional[Tuple[float, float]]:
 
     try:
         # Спочатку пробуємо архівний API (точні дані для минулих днів)
-        r = requests.get(
+        r = _request_with_retry(
             "https://archive-api.open-meteo.com/v1/archive",
             params={
                 "latitude": lat,
@@ -1023,7 +1049,7 @@ def fetch_historical_extreme(city: str, date) -> Optional[Tuple[float, float]]:
             except (ValueError, TypeError):
                 days_ago = 1
             if 0 < days_ago <= 5:
-                r = requests.get(
+                r = _request_with_retry(
                     "https://api.open-meteo.com/v1/forecast",
                     params={
                         "latitude": lat,
@@ -1036,7 +1062,7 @@ def fetch_historical_extreme(city: str, date) -> Optional[Tuple[float, float]]:
                 )
             else:
                 # Fallback 2: forecast API з start_date/end_date (короткий архів)
-                r = requests.get(
+                r = _request_with_retry(
                     "https://api.open-meteo.com/v1/forecast",
                     params={
                         "latitude": lat,
