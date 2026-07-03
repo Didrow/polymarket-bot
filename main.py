@@ -347,7 +347,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 "status": _strategy,
                 "strategy": _strategy,
                 "dry_run": config.DRY_RUN,
-                "time_decay_factor": edge_result.time_decay_factor
+                "time_decay_factor": 1.0
             })
             
             notifier.notify_trade_open(
