@@ -344,4 +344,161 @@ Render PostgreSQL expire 25.06.2026. Варіанти:
 - Dynamic TP забере прибуток на старих позиціях (≥0.75-0.85)
 - Ціль: win rate 40-55%, ROI позитивний за 7 днів DRY_RUN
 
+## v15-v19 — METAR ARBITRAGE SNIPER (29.06.2026 — 01.07.2026)
+
+### Стратегічний півот на METAR Arbitrage
+Після невдачі v9-v14 (0% win rate на forecast-bets, дешевих хвостах та сітках), стратегія повністю переписана на **METAR Arbitrage Sniper** — купівля YES коли ФАКТИЧНА спостережена температура вже підтверджує напрямок ринку, але ринок ще не переоцінив ціну.
+
+### v15 — Базовий METAR Arb (29.06.2026)
+1. ✅ **METAR_ARB_ENABLED=True** — нова стратегія замість Grid/Sniper
+2. ✅ `METAR_ARB_REQUIRE_METAR=True` — тільки METAR-підтверджені угоди
+3. ✅ `METAR_ARB_KINDS_ONLY=["above","below","range","categorical"]` — всі типи
+4. ✅ `METAR_ARB_MIN_ASK=0.08`, `MAX_ASK=0.70` — ліквідні ринки
+5. ✅ `METAR_ARB_MIN_EDGE=0.04`, `MIN_PROB=0.45`, `MIN_PROB_RANGE=0.15`
+6. ✅ `PROB_RATIO_MAX_METAR=12.0`, `PROB_RATIO_MAX_NO_METAR=6.0`
+7. ✅ `MARKET_ANCHOR_WEIGHT=0.10` — мінімальне згасання edge
+8. ✅ `MAX_ACTIVE_POSITIONS=5`, `MAX_OPEN_PER_CYCLE=1`
+9. ✅ `_check_metar_confirmation()` — нова функція в edge_calculator.py
+10. ✅ `_climate_sanity_check()` — 22-місний кліматичний довідник
+11. ✅ `MIN_RESOLUTION_HOURS=1.0`, `MAX_RESOLUTION_HOURS=12`
+12. ✅ `STOP_LOSS_MIN_HOLD_HOURS=0.5` — SL не працює першу півгодини
+
+### v16 — ROOT-CAUSE AUDIT (29.06.2026, пізніше)
+**Проблема:** `get_best_forecast()` змішував METAR поточну температуру у weighted average для **денної максимальної** температури з вагою 40-60%. METAR = ранкова температура аеропорту (~19.6°C), а ринки резолвляться по **daily high** (~24°C). → всі ринки виглядали без edge → `none=493`.
+
+**Фікс 1 (data_fetcher.py:838-879):** METAR повністю видалено з weighted forecast. Тільки для confirmation через `_check_metar_confirmation`. Нові ваги:
+- ≤8h: ensemble 50%, GFS 25%, ECMWF 15%, NOAA 10%
+- ≤12h: ensemble 45%, GFS 25%, ECMWF 15%, NOAA 15%
+- >12h: ensemble 45%, NOAA 25%, GFS 15%, ECMWF 10%, NASA 5%
+
+**Фікс 2 (edge_calculator.py:618-628):** Market anchor пропускається при високій впевненості (METAR+OBSERVED або ENSEMBLE source).
+
+**Фікс 3 (edge_calculator.py:677-686):** PHANTOM filter дозволяє угоди при `metar_confirmed=True`.
+
+**Фікс 4 (config.py:58-59):** `PROB_RATIO_MAX_METAR: 7.0→12.0`, `PROB_RATIO_MAX_NO_METAR: 3.0→6.0`.
+
+### v17 — FORECAST-BET BUG FIX (01.07.2026)
+**Проблема:** `_check_metar_confirmation()` для range використовував `best_evidence = max(metar_temp, obs_high, fc_high)`. Коли день ще не досяг піку, `fc_high` ставав найбільшим і хибно "підтверджував" вхід — перетворюючи METAR-arb на forecast-bet (який вже провалився в v14).
+
+**Доведено 2 збитковими угодами:**
+- Houston 96-97°F: obs_hi=34.3°C (BELOW bucket), fc_high=35.9°C (IN bucket) → max=35.9 → "confirmed" → LOSS
+- LA 72-73°F: obs_hi=21.5°C (BELOW bucket), fc_high=22.0°C (IN bucket) → max=22.0 → "confirmed" → LOSS
+
+**Фікс (edge_calculator.py):** `fc_high`/`fc_low` видалено з `candidates` для ВСІХ kind (above/below/range/categorical). Тепер тільки `max(metar_temp, obs_high)` — фізична істина, не прогноз.
+
+### v18 — STRICT METAR ARBITRAGE + LOG REDUCTION (01.07.2026)
+**Проблема:** v17 фікс був недостатній — `buffer_c=1.2°C` симетрично до lower bound range все ще дозволяв forecast-bets. Math: LA obs=21.5°C, range_low=22.22, (22.22-1.2)=21.02 ≤ 21.5 → TRUE → confirmed → LOSS.
+
+**Фікс 1 (edge_calculator.py) — STRICT METAR-арбітраж:**
+- **above**: `confirmed = best_evidence >= threshold_c` (без buffer)
+- **below**: `confirmed = best_evidence_cold <= threshold_c` (без buffer)
+- **range**: `confirmed = range_low_c <= best_evidence <= range_high_c` (НІ buffer знизу, НІ зверху — obs вище range_high = ринок вже програв)
+- **categorical**: залишив buffer (точкове значення потребує толерансу), тільки METAR/observed
+
+**Фікс 2 (trader.py) — timezone fix для DRY-RUN resolution:**
+- `get_target_date()` повертає LOCAL calendar date. Було: `day_completed = datetime(target_date, UTC) + 26h` — для LA (UTC-7) резолвився о 02:00 UTC, а день LA закінчується о 07:00 UTC = 5h завчасно.
+- Стало: `day_completed = datetime(next_day, UTC) - timezone_offset + 3h_buffer`. Додано `_CITY_TZ_OFFSETS` dict.
+- Тест: LA резолвиться о 10:00 UTC July 1 (correct), Tokyo о 18:00 UTC June 30 (correct).
+
+**Фікс 3 — LOG REDUCTION (3 файли):**
+
+*edge_calculator.py:*
+- Видалено `METAR NOT CONFIRMED` debug (~500/цикл)
+- Видалено `PHANTOM (no METAR)` debug
+- Видалено `PROB-RATIO exceeded` debug
+- `EDGE: {question}` → INFO тільки для tradeable edges (було ~600/цикл)
+- Залишено `PHANTOM+METAR` INFO (рідкісне, важливе)
+- Залишено всі forecast-bet rejected логи (above/below/range/categorical)
+- Залишено scan summary: `Edge scan: N tradeable / M ринків | skip: ...`
+
+*trader.py:*
+- Додано `_suppressed_logs: set` — повторювані повідомлення логуються 1 раз за позицію
+- `Market is still OPEN`, `SL deferred`, `Resolution чекає end_date`, `MTM: no price` — всі suppressed після першого логу
+- Автоочищення при >200 записів
+
+*main.py:*
+- `Дублікат по питанням` → консолідований лічильник (1 рядок/цикл)
+- `Ліміт міста` → консолідований лічильник
+- **Виправлено баг**: `min(300, hours*300)` → `min(3600, max(300, hours*300))` (пропорційний сон)
+- Прогресивний сон: 3-5 порожніх → 600s, 6-11 → 900s, 12+ → 1800s
+
+### v19 — RECOMMENDATION ACCEPTED + METAR-CONFIRMED DISTANCE BYPASS (01.07.2026)
+
+**Лог 09:55 UTC показав:** 0 tradeable, 13 збитків (0/13 win rate), ROI -7.1%. v18 strict правильно відхиляв forecast-bets (SF range: `obs_hi=12.4°C outside [22.2, 22.8]`), але бот не знаходив ЖОДНОЇ прибуткової угоди. `none=452` з 627 ринків.
+
+**Прийнято рекомендацію користувача (Recomend.md) — 2 зміни в config.py:**
+```python
+METAR_ARB_MIN_PROB: float = 0.35       # was 0.45
+METAR_ARB_KINDS_ONLY: ["above", "below"]  # was + range, categorical
+```
+
+**Чому погодився:**
+1. Обидва збитки (Houston, LA) були **range**-ринки → прибираємо range назавжди
+2. З v18 strict, range потребує `obs in bucket` (температура ВЖЕ в бакеті) — рідкісно, бо бот сканує коли день ще не пік
+3. above/below легше підтвердити: `obs >= threshold` або `obs <= threshold` — перетин порогу, не влучання у вузький бакет
+4. MIN_PROB 0.45→0.35 розблокує легітимні METAR-підтверджені ринки де our_prob помірний (0.35-0.44)
+
+**Додаткова зміна (edge_calculator.py:706) — METAR-confirmed distance bypass:**
+```python
+# Було:
+and distance_c <= max_dist
+# Стало:
+and (metar_confirmed or distance_c <= max_dist)
+```
+**Чому:** `distance_c` — відстань ПРОГНОЗУ від порогу. METAR-підтверджена угода — фізична істина, не потребує прогнозної близькості. Без цього фікс навіть METAR-confirmed above ринок міг бути відхилений через `distance_c > 5.0`.
+
+### Стан бота після v19 (01.07.2026 09:55 UTC)
+- DRY-RUN, капітал $92.85, ROI -7.1%, drawdown 7.5%
+- 13 resolved trades: 0 wins, 13 losses (всі були forecast-bets до v17/v18 фіксів)
+- 0 active positions, 11 порожніх циклів поспіль
+- PostgreSQL active (Neon), стан відновлено
+- Очікування: 0-3 tradeable edges/cycle (above/below METAR-confirmed)
+- Потенційний WR 50%+ (фізична істина > прогноз)
+
+### Ключові файли v19 (для ручного пушу на GitHub → Render)
+1. `config.py` — METAR_ARB_MIN_PROB=0.35, METAR_ARB_KINDS_ONLY=["above","below"]
+2. `edge_calculator.py` — strict METAR v18 + log reduction + distance bypass
+3. `trader.py` — timezone DRY-RUN fix + _suppressed_logs
+4. `main.py` — consolidated counters + progressive sleep + min/max bug fix
+
+### Deployment notes
+- **GitHub = MANUAL PUSH** (підтверджено 2026-06-04). НЕ використовувати git commit/push/gh.
+- **Render: RESET_POSITIONS=false** (зберегти капітал $92.85, 0 позицій)
+- Бот на Render.com free tier, DRY-RUN
+- `METAR_ARB_TEMP_CONFIRM_C=1.2` ще в config.py, тепер ТІЛЬКИ для categorical branch
+
+### Наступні кроки
+1. Зачекати 25-30 resolved trades з v19 для статистичної валідації (95% CI для 0/12 = 0-26%, недостатньо)
+2. Якщо WR < 40% → знизити MIN_PROB до 0.30
+3. Якщо WR > 50% → готовий до LIVE з $20
+4. Запустити `calibrate_model.py` (з SQL JOIN OPEN+CLOSE) після 20+ trades
+
+### Архітектура v19 (ключові функції)
+- `edge_calculator.py:326` — `_check_metar_confirmation()` (v18 strict, без forecast в candidates)
+- `edge_calculator.py:452` — `_boost_prob_from_metar()` (METAR boost +8-10%)
+- `edge_calculator.py:489` — `_climate_sanity_check()` (22-місний довідник)
+- `edge_calculator.py:575` — `calculate_edge()` (головний розрахунок edge)
+- `edge_calculator.py:647` — market anchor skip при high confidence
+- `edge_calculator.py:660` — METAR confirmation call
+- `edge_calculator.py:706` — distance bypass для METAR-confirmed (v19)
+- `edge_calculator.py:760` — `scan_all_edges()` з skip counters
+- `edge_calculator.py:809` — scan summary log
+- `data_fetcher.py:84` — `raw_prob_above_temp_c()` (30% empirical + 70% parametric)
+- `data_fetcher.py:829` — `get_best_forecast()` (METAR removed from weights v16)
+- `data_fetcher.py:763` — `_fetch_observed_daily_extremes()` (Open-Meteo hourly)
+- `data_fetcher.py:980` — `fetch_historical_extreme()` (archive API для DRY-RUN resolution)
+- `trader.py:153` — `check_market_resolved()` (timezone fix v18)
+- `trader.py:352` — `place_trade()` (Kelly quarter-scale)
+- `trader.py:612` — `check_and_close_positions()` (SL, trailing, TP, forecast-shift)
+- `main.py:220` — `run_scan_cycle()` (duplicates/city counters v18)
+- `main.py:468` — main loop
+- `main.py:517` — adaptive sleep (progressive v18)
+
+
+
+## ���������� ����������� (03.07.2026 � Critical recursion bug fix)
+1. ? **�������� ���������� ������ � _request_with_retry (data_fetcher.py)**:
+   - **��������**: ������� _request_with_retry ��������� ���� ���� ������ equests.get, �� ���������� �� RecursionError �� ������� '���� ��������' ��� ��� ���.
+   - **�����������**: ������� ����������� ������ �� ������ ������ equests.get.
+   - **���������**: ��� ����� ������ ������ ���� � ��� ������ (Ensemble, METAR, NOAA, NASA, GFS, ECMWF).
 

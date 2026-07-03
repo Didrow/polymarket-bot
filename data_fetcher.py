@@ -32,7 +32,7 @@ def _cache_get(key: str):
 def _request_with_retry(url, params=None, timeout=10, headers=None, retries=3, backoff=2):
     for attempt in range(retries):
         try:
-            r = _request_with_retry(url, params=params, timeout=timeout, headers=headers)
+            r = requests.get(url, params=params, timeout=timeout, headers=headers)
             r.raise_for_status()
             return r
         except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
