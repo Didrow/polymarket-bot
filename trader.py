@@ -212,8 +212,8 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                 is_low = 'lowest' in position.question.lower()
                 tc = obs_low if is_low else obs_high
 
-                from edge_calculator import _parse_range_or_threshold
-                kind, val_min, val_max, unit = _parse_range_or_threshold(position.question)
+                from edge_calculator import _parse_threshold
+                kind, val_min, _, unit = _parse_threshold(position.question)
 
                 tc_c = tc
                 resolved_yes = None
@@ -334,46 +334,21 @@ def _get_market_vol(price: float) -> float:
     return math.sqrt(p * (1.0 - p))
 
 def decide_position_size(edge_result: EdgeResult, current_capital: float) -> float:
-    market = edge_result.market
-    direction = edge_result.edge_direction
-    entry_price = market.best_ask_yes if direction == "BUY_YES" else (1 - market.best_bid_yes)
-
-    vol = _get_market_vol(entry_price)
-    target_dv = current_capital * config.TARGET_PORTFOLIO_VOL
-    vol_size = min(target_dv / vol, current_capital * config.MAX_POSITION_PCT)
-
-    # Confidence впливає на РОЗМІР, а не на edge-фільтрацію
+    entry_price = edge_result.market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else max(0.01, 1 - edge_result.market.midpoint_yes)
     confidence = edge_result.confidence
 
-    if config.ENABLE_COMPOUND:
-        if config.USE_KELLY:
-            kelly_prob_cap = getattr(config, "KELLY_PROB_CAP", 0.60)
-            p = min(edge_result.estimated_prob, kelly_prob_cap)
-            q = 1.0 - p
-            b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
-            kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-            kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
-            kelly_size = current_capital * kelly_raw * kelly_scale * confidence
-            final = min(vol_size, kelly_size)
-        else:
-            fixed_pct_size = current_capital * config.COMPOUND_RISK_PCT * confidence
-            final = min(vol_size, fixed_pct_size)
-    else:
-        kelly_prob_cap = getattr(config, "KELLY_PROB_CAP", 0.60)
-        p = min(edge_result.estimated_prob, kelly_prob_cap)
+    if getattr(config, "USE_KELLY", True):
+        p = min(edge_result.estimated_prob, 0.80)
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-        kelly_size = current_capital * kelly_raw * 0.25 * confidence
-        final = min(vol_size, kelly_size)
-        final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, 4.0))
-
-    if direction == "BUY_YES" and market.best_ask_yes <= config.EXTREME_TAIL_MAX_ASK_YES:
-        final = min(final, config.EXTREME_TAIL_MAX_SIZE_USD)
+        kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
+        kelly_size = current_capital * kelly_raw * kelly_scale * confidence
+        final = kelly_size
+    else:
+        final = current_capital * 0.03 * confidence
 
     final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * config.MAX_POSITION_PCT))
-    if edge_result.size_usd > 0:
-        final = min(final, edge_result.size_usd)
     return round(final, 2)
 
 
@@ -531,39 +506,7 @@ def cleanup_stale_positions() -> List[Position]:
     return removed
 
 
-def _check_forecast_shift_close(pos: "Position") -> bool:
-    if pos.forecast_at_entry_c == 0.0 or pos.threshold_at_entry_c == 0.0:
-        return False
-    if pos.city not in getattr(config, "CITY_WHITELIST", []):
-        return False
-    try:
-        from data_fetcher import get_best_forecast
-        from market_scanner import get_target_date
-        t_date = get_target_date(pos.question, pos.end_date, pos.city)
-        hours_left = max(1.0, (pos.end_date - datetime.now(timezone.utc)).total_seconds() / 3600) if pos.end_date else 12.0
-        fc = get_best_forecast(pos.city, hours_to_resolution=hours_left, target_date=t_date)
-        if not fc:
-            return False
-        is_low = 'lowest' in pos.question.lower()
-        current_fc = fc.temp_low_c if is_low else fc.temp_high_c
-        shift = abs(current_fc - pos.forecast_at_entry_c)
-        if shift >= getattr(config, "FORECAST_SHIFT_CLOSE_C", 2.0):
-            dist_to_bucket = abs(current_fc - pos.threshold_at_entry_c)
-            original_dist = abs(pos.forecast_at_entry_c - pos.threshold_at_entry_c)
-            if dist_to_bucket > original_dist * 1.3:
-                logger.info(
-                    f"🌡️ Forecast-shift: {pos.city} forecast {pos.forecast_at_entry_c:.1f}→{current_fc:.1f}°C "
-                    f"(shift={shift:.1f}°C) — bucket {pos.threshold_at_entry_c:.0f}°C moving away"
-                )
-                return True
-    except Exception as e:
-        logger.debug(f"Forecast-shift check error: {e}")
-    return False
-
-
 def _check_trailing_stop(pos: "Position") -> bool:
-    if not getattr(config, "TRAILING_STOP_ENABLED", True):
-        return False
     if pos.trailing_stop_activated:
         if pos.current_price < pos.entry_price:
             logger.info(
@@ -583,24 +526,7 @@ def _check_trailing_stop(pos: "Position") -> bool:
     return False
 
 
-def _check_dynamic_take_profit(pos: "Position") -> bool:
-    if not getattr(config, "DYNAMIC_TAKE_PROFIT_ENABLED", True):
-        return False
-    age_hours = (datetime.now(timezone.utc) - pos.entry_time).total_seconds() / 3600
-    tp_price = 1.0
-    if age_hours >= getattr(config, "DTP_HOLD_HOURS_LONG", 48):
-        tp_price = getattr(config, "DTP_PRICE_LONG", 0.75)
-    elif age_hours >= getattr(config, "DTP_HOLD_HOURS_MID", 24):
-        tp_price = getattr(config, "DTP_PRICE_MID", 0.85)
-    else:
-        return False
-    if pos.current_price >= tp_price:
-        logger.info(
-            f"💰 Dynamic TP: {pos.question[:50]} | price={pos.current_price:.4f} >= "
-            f"tp={tp_price:.2f} | age={age_hours:.0f}h"
-        )
-        return True
-    return False
+
 
 
 def _record_sigma_on_resolution(pos: "Position", resolved_yes: bool, actual_temp_c: float = 0.0):
@@ -734,7 +660,7 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
 
         # Hard stop-loss: emergency exit regardless of hold time
-        hard_sl_base = getattr(config, "HARD_STOP_LOSS_PCT", 0.30)
+        hard_sl_base = 0.30
         hard_sl = 0.50 if pos.entry_price < 0.05 else hard_sl_base
         if pos.pnl_pct <= -hard_sl and pos.entry_price > hard_sl * 0.5:
             logger.info(f"🔴 HARD Stop-loss: {pos.question[:50]} | entry={pos.entry_price:.4f} cur={pos.current_price:.4f} pnl={pos.pnl_pct:.0%} age={age_hours:.1f}h threshold={hard_sl:.0%}")
@@ -763,20 +689,6 @@ def check_and_close_positions(clob_client) -> List[Position]:
 
         if _check_trailing_stop(pos):
             pos.status = "TRAILING_STOP"
-            closed.append(pos)
-            del _active_positions[cid]
-            _recently_closed[cid] = now
-            continue
-
-        if _check_dynamic_take_profit(pos):
-            pos.status = "TAKE_PROFIT"
-            closed.append(pos)
-            del _active_positions[cid]
-            _recently_closed[cid] = now
-            continue
-
-        if _check_forecast_shift_close(pos):
-            pos.status = "FORECAST_SHIFT"
             closed.append(pos)
             del _active_positions[cid]
             _recently_closed[cid] = now

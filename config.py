@@ -1,14 +1,12 @@
 """
-config.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
+config.py — Weather Prediction Bot v20 (CLEAN ENSEMBLE STRATEGY)
 
- Стратегія: арбітраж запізнілого ринку (neobrother-style)
- - Above/below + range/categorical ринки (мета: range бакети "between X-Y°F")
- - Тільки коли METAR підтверджує напрямок (вимагається обов'язково)
- - Ринки ≤12h до resolution (ринок ще не оновив ціну)
- - Ціна входу 15-70¢ (реальна ліквідність, ринок ще не на 90¢+)
- - Edge ≥4% (знижений поріг для DRY-RUN валідації)
- - Climate sanity filter: reject impossible temperature ranges
- - DRY-RUN validation gates must pass before LIVE trading is allowed.
+Стратегія: чиста ensemble-прогнозна модель без METAR arb.
+- Використовуємо тільки Open-Meteo ENSEMBLE (31 member GFS)
+- Купуємо YES коли ensemble ймовірність > ринкова ціна + edge
+- Купуємо NO  коли ринкова ціна > ensemble ймовірність + edge
+- Без METAR (aviationweather.gov timeout на Render)
+- Без range/categorical ринків (тільки above/below)
 """
 
 from typing import List
@@ -22,181 +20,74 @@ CLOB_URL: str = "https://clob.polymarket.com"
 GAMMA_URL: str = "https://gamma-api.polymarket.com"
 CHAIN_ID: int = 137
 
-# ── CAPITAL AND RISK MANAGEMENT ───────────────────────────────
+# ── CAPITAL & RISK ──────────────────────────────────────────
 INITIAL_CAPITAL: float = 100.0
-MAX_POSITION_PCT: float = 0.05
+MAX_POSITION_PCT: float = 0.04
 MIN_POSITION_USD: float = 2.0
-BASE_POSITION_USD: float = 2.5
-MAX_ACTIVE_POSITIONS: int = 5
-MAX_OPEN_PER_CYCLE: int = 1
-RESERVED_FAST_SLOTS: int = 2
-FAST_SLOT_THRESHOLD_HOURS: float = 8.0
-MAX_POSITIONS_PER_CITY: int = 2
-MAX_DRAWDOWN_PCT: float = 0.30
-STOP_LOSS_PCT: float = 0.15
-STOP_LOSS_MIN_HOLD_HOURS: float = 0.5
-HARD_STOP_LOSS_PCT: float = 0.30
 MAX_POSITION_USD: float = 5.0
+MAX_ACTIVE_POSITIONS: int = 3
+MAX_OPEN_PER_CYCLE: int = 1
+MAX_POSITIONS_PER_CITY: int = 1
+STOP_LOSS_PCT: float = 0.30
+STOP_LOSS_MIN_HOLD_HOURS: float = 0.5
+MAX_TOTAL_EXPOSURE_PCT: float = 0.30
 MAX_DAILY_LOSS_PCT: float = 0.15
-MAX_DAILY_LOSS_USD: float = 15.0
-MAX_TOTAL_EXPOSURE_PCT: float = 0.35
 
-# ── v15: METAR ARBITRAGE STRATEGY ──────────────────────────────
-METAR_ARB_ENABLED: bool = True
-METAR_ARB_MAX_HOURS: float = 12.0
-METAR_ARB_MIN_HOURS: float = 1.0
-METAR_ARB_MIN_ASK: float = 0.08
-METAR_ARB_MAX_ASK: float = 0.70
-METAR_ARB_MIN_EDGE: float = 0.04
-METAR_ARB_MIN_PROB: float = 0.35  # v19: 0.45→0.35, above/below мають ширше вікно підтвердження ніж вузькі range-бакети
-METAR_ARB_MIN_PROB_RANGE: float = 0.15
-METAR_ARB_REQUIRE_METAR: bool = True
-METAR_ARB_REQUIRE_OBSERVED: bool = True
-METAR_ARB_KINDS_ONLY: List[str] = ["above", "below", "range"]  # v19: added range to increase market volume
-METAR_ARB_MAX_DIST_C: float = 5.0
-METAR_ARB_TEMP_CONFIRM_C: float = 1.2
-CLIMATE_SANITY_ENABLED: bool = True
-PROB_RATIO_MAX_METAR: float = 12.0
-PROB_RATIO_MAX_NO_METAR: float = 6.0
+# ── STRATEGY: ENSEMBLE PREDICTION ──────────────────────────
+# Тільки above/below ринки
+KINDS_ONLY: List[str] = ["above", "below"]
 
-# ── LEGACY GRID (DISABLED — replaced by METAR arb) ────────────
-ENABLE_EXTREME_TAIL_YES: bool = False
-ENABLE_ADJACENT_GRID: bool = False
-SNIPER_GRID_DISTANCE_C: float = 3.0
-SNIPER_GRID_DISTANCE_F: float = 5.4
-SNIPER_GRID_MIN_EDGE: float = 0.08
-SNIPER_GRID_MIN_EDGE_NORMAL: float = 0.08
-SNIPER_GRID_MIN_PROB: float = 0.55
-SNIPER_GRID_MAX_ASK: float = 0.70
-SNIPER_GRID_MIN_ASK: float = 0.15
-SNIPER_GRID_SIZE_USD: float = 2.5
-SNIPER_GRID_MAX_MARKETS_PER_CITY: int = 2
-GRID_FORECAST_STEP_C: float = 1.0
-GRID_FORECAST_SPAN_C: float = 1.5
-EXTREME_TAIL_MAX_ASK_YES: float = 0.70
-EXTREME_TAIL_MIN_ASK_YES: float = 0.15
-EXTREME_TAIL_MAX_SIZE_USD: float = 2.0
-EXTREME_TAIL_MIN_EDGE_YES: float = 0.08
-ADJACENT_GRID_SIZE_USD: float = 1.5
-ADJACENT_GRID_MIN_EDGE: float = 0.08
-ADJACENT_GRID_MIN_PROB: float = 0.55
-ADJACENT_GRID_MAX_ASK: float = 0.70
+# Мінімальний edge для входу
+MIN_EDGE_YES: float = 0.20   # buy YES: our_prob > market + 20%
+MIN_EDGE_NO: float = 0.20    # buy NO:  market > our_prob + 20%
+MIN_PROB_ENTRY: float = 0.10
 
-# ── STANDARD EDGE ─────────────────────────────────────────────
-MIN_EDGE_ENTRY: float = 0.08
-MIN_EDGE_HOLD: float = 0.03
-MIN_PROB_ENTRY: float = 0.55
-
-# ── MARKETS ТА ФІЛЬТРИ ────────────────────────────────────────
-MAX_RESOLUTION_HOURS: int = 12
-MIN_RESOLUTION_HOURS: float = 1.0
+MAX_RESOLUTION_HOURS: int = 48
+MIN_RESOLUTION_HOURS: float = 0.5
 MIN_MARKET_VOLUME_USD: float = 500.0
-SCAN_INTERVAL_SEC: int = 600
-OSINT_SCAN_INTERVAL_SEC: int = 300
-MAX_VOL_NO_TRADE: float = 0.60
-TARGET_PORTFOLIO_VOL: float = 0.10
+SCAN_INTERVAL_SEC: int = 300
 
-# ── COMPOUNDING ────────────────────────────────────────────────
-ENABLE_COMPOUND: bool = True
-COMPOUND_RISK_PCT: float = 0.03
-USE_KELLY: bool = True
-KELLY_SCALE: float = 0.25
-KELLY_MAX_POSITION_USD: float = 5.0
-KELLY_PROB_CAP: float = 0.70
+# ── PROBABILITY CALIBRATION ────────────────────────────────
+# Систематична похибка: модель переоцінює → множимо на bias
+PROB_BIAS: float = 0.75  # calibrate: multiply prob by 0.75
 
-# ── DRY-RUN VALIDATION GATES BEFORE LIVE ───────────────────────
-VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
-VALIDATION_MIN_RESOLVED_TRADES: int = 30
-VALIDATION_MIN_DRY_RUN_HOURS: int = 168
-VALIDATION_MIN_WIN_RATE: float = 0.45
-VALIDATION_MIN_ROI: float = 0.00
-VALIDATION_MIN_EQUITY: float = 0.00
-
-# ── ТЕХНІЧНЕ ТА ШЛЯХИ ────────────────────────────────────────
-DATA_DIR: str = "data"
-LOGS_DIR: str = "logs"
-CACHE_DIR: str = "cache"
-MAX_USDC_APPROVAL: float = 1000.0
-
-# ── EMAIL АЛЕРТИ ──────────────────────────────────────────────
-EMAIL_ENABLED: bool = False
-EMAIL_SENDER: str = os.getenv("EMAIL_SENDER", "")
-EMAIL_RECIPIENT: str = os.getenv("EMAIL_RECIPIENT", "")
-
-# ── WHITELIST МІСТ (тільки з METAR/ICAO) ──────────────────────
-# Розширено 03.07.2026 — тільки міста з ICAO в CITY_TO_ICAO (data_fetcher.py)
-# Видалено 10 міст без ICAO: Milan, Taipei, Chongqing, Wuhan, Shenzhen, Kuala Lumpur, Guangzhou, Qingdao, Manila, Tel Aviv
-CITY_WHITELIST: List[str] = [
-    # USA (23) — найбільше ринків, надійний METAR
-    "NYC", "New York", "Chicago", "Los Angeles", "Miami", "Dallas",
-    "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
-    "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
-    "Portland", "Nashville", "Charlotte", "Orlando", "LA",
-    # Європа (13) — всі мають ICAO
-    "London", "Paris", "Berlin", "Munich", "Amsterdam", "Rome",
-    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague", "Moscow", "Ankara",
-    # Азія (9) — тільки з ICAO
-    "Tokyo", "Seoul", "Busan", "Singapore", "Hong Kong", "Shanghai",
-    "Beijing", "Dubai", "Bangkok", "Lucknow", "Chengdu", "Karachi", "Jeddah",
-    # Південна Америка (4)
-    "Buenos Aires", "Sao Paulo", "Santiago", "Lima",
-    # Африка (2)
-    "Cape Town", "Lagos",
-    # Океанія (6)
-    "Sydney", "Melbourne", "Brisbane", "Perth", "Auckland", "Wellington",
-]
-
-KNOWN_WHALE_WALLETS: List[str] = []
-EXTREME_TAIL_CITIES: List[str] = CITY_WHITELIST
-
-# ── СУМІСНІСТЬ ────────────────────────────────────────────────
-MIN_DATA_POINTS_FALLBACK: int = 5
-WHALE_THRESHOLD_USD: float = 2000.0
-
-# ── PROBABILITY CALIBRATION (conservative for above/below) ────
-PROBABILITY_CALIBRATION_ENABLED: bool = True
-PROB_THRESHOLD_CALIBRATION_SCALE: float = 0.95
-PROB_EXACT_CALIBRATION_SCALE: float = 0.80
-PROB_RANGE_CALIBRATION_SCALE: float = 0.80
-PROB_DISTANCE_SCALE_C: float = 3.0
-PROB_DISTANCE_SCALE_F: float = 4.5
-PROB_DISTANCE_POWER: float = 0.50
-PROB_CONFIDENCE_WEIGHT: float = 0.15
-PROB_TIME_DECAY_SHORT: float = 1.00
-PROB_TIME_DECAY_MID: float = 0.95
-PROB_TIME_DECAY_LONG: float = 0.90
-
-PROB_CAP_ABOVE_SHORT: float = 0.85
-PROB_CAP_ABOVE_MID: float = 0.75
-PROB_CAP_ABOVE_LONG: float = 0.65
-
-PROB_CAP_EXACT_SHORT: float = 0.70
-PROB_CAP_EXACT_MID: float = 0.58
-PROB_CAP_EXACT_LONG: float = 0.48
+# Для above/below:
+CAP_SHORT: float = 0.85   # ≤6h
+CAP_MID: float = 0.75     # ≤18h
+CAP_LONG: float = 0.65    # >18h
 
 MAX_EDGE_CAP: float = 0.50
 
-# ── v15: ENHANCED MARKET ANCHORING ─────────────────────────────
-MARKET_ANCHOR_WEIGHT: float = 0.10
-MARKET_ANCHOR_THRESHOLD: float = 0.50
+# ── KELLY ──────────────────────────────────────────────────
+USE_KELLY: bool = True
+KELLY_SCALE: float = 0.25
+KELLY_MAX_POSITION_USD: float = 5.0
 
-# ── Self-calibrating sigma ────────────────────────────────────
-SIGMA_CAL_ENABLED: bool = True
-SIGMA_CAL_MIN_SAMPLES: int = 5
-SIGMA_CAL_MAX_SAMPLES: int = 50
-SIGMA_CAL_BLEND_WEIGHT: float = 0.6
+# ── MISC ───────────────────────────────────────────────────
+DATA_DIR: str = "data"
+LOGS_DIR: str = "logs"
+CACHE_DIR: str = "cache"
+EMAIL_ENABLED: bool = False
 
-# ── Trailing stop (tighter for arb trades) ────────────────────
-TRAILING_STOP_ENABLED: bool = True
-TRAILING_STOP_ACTIVATION_PCT: float = 0.15
+# ── CITIES ─────────────────────────────────────────────────
+CITY_WHITELIST: List[str] = [
+    "NYC", "New York", "Chicago", "Los Angeles", "Miami", "Dallas",
+    "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
+    "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
+    "Portland", "Nashville", "Charlotte", "Orlando",
+    "London", "Paris", "Berlin", "Munich", "Amsterdam", "Rome",
+    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague", "Moscow", "Ankara",
+    "Tokyo", "Seoul", "Busan", "Singapore", "Hong Kong", "Shanghai",
+    "Beijing", "Dubai", "Bangkok", "Lucknow", "Chengdu", "Karachi", "Jeddah",
+    "Buenos Aires", "Sao Paulo", "Santiago", "Lima",
+    "Cape Town", "Lagos",
+    "Sydney", "Melbourne", "Brisbane", "Perth", "Auckland", "Wellington",
+]
 
-# ── Forecast-shift close ──────────────────────────────────────
-FORECAST_SHIFT_CLOSE_ENABLED: bool = True
-FORECAST_SHIFT_CLOSE_C: float = 2.5
-
-# ── Dynamic take-profit ────────────────────────────────────────
-DYNAMIC_TAKE_PROFIT_ENABLED: bool = True
-DTP_HOLD_HOURS_MID: int = 6
-DTP_HOLD_HOURS_LONG: int = 12
-DTP_PRICE_MID: float = 0.85
-DTP_PRICE_LONG: float = 0.80
+# ── DRY-RUN VALIDATION GATES ───────────────────────────────
+VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
+VALIDATION_MIN_RESOLVED_TRADES: int = 30
+VALIDATION_MIN_DRY_RUN_HOURS: int = 168
+VALIDATION_MIN_WIN_RATE: float = 0.40
+VALIDATION_MIN_ROI: float = 0.00
+VALIDATION_MIN_EQUITY: float = 0.00

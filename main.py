@@ -23,6 +23,7 @@ import notifier
 from safeguards import SafeguardManager, reset_pg_reconnect_counter
 from market_scanner import fetch_weather_markets
 from edge_calculator import scan_all_edges
+from data_fetcher import test_all_apis
 from trader import place_trade, check_and_close_positions, get_portfolio_summary, get_active_positions, cleanup_stale_positions, startup_cleanup
 import trader as _trader
 from osint_module import scan_all_osint
@@ -314,9 +315,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if city and hasattr(config, 'MAX_POSITIONS_PER_CITY'):
             city_count = _trader.get_positions_count_by_city(city)
             city_count += city_counts_this_cycle.get(city, 0)
-            grid_limit = getattr(config, "SNIPER_GRID_MAX_MARKETS_PER_CITY", config.MAX_POSITIONS_PER_CITY)
-            is_grid = "GRID" in edge_result.reason
-            if city_count >= (grid_limit if is_grid else config.MAX_POSITIONS_PER_CITY):
+            if city_count >= config.MAX_POSITIONS_PER_CITY:
                 city_limit_count += 1
                 continue
         if not safeguard.check_hourly_trade_limit():
@@ -345,7 +344,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "METAR_ARB" if "METAR" in edge_result.reason else "SNIPER"
+            _strategy = "ENSEMBLE"
             log_trade_to_pg({
                 "cycle": cycle_count,
                 "action": "OPEN",
@@ -385,28 +384,29 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v15  🌤️")
-    logger.info("  🎯 METAR ARBITRAGE SNIPER")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v20  🌤️")
+    logger.info("  🎯 CLEAN ENSEMBLE PREDICTION STRATEGY")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
-    logger.info(f"  Компаунд: {'✅ увімкнено' if config.ENABLE_COMPOUND else '❌ вимкнено'}")
-    if config.ENABLE_COMPOUND:
-        if config.USE_KELLY:
-            logger.info(f"  Розмір:   Quarter-Kelly (адаптивний)")
-        else:
-            logger.info(f"  Розмір:   {config.COMPOUND_RISK_PCT:.1%} від капіталу")
+    logger.info(f"  Kelly:    {'✅' if config.USE_KELLY else '❌'} (scale={config.KELLY_SCALE})")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
-    logger.info(f"  Стратегія:  METAR-арбітраж (above/below/range/categorical)")
-    logger.info(f"  Горизонт:   {config.METAR_ARB_MIN_HOURS:.1f}-{config.METAR_ARB_MAX_HOURS:.0f}h до resolution")
-    logger.info(f"  Вхід:       {config.METAR_ARB_MIN_ASK:.0%}-{config.METAR_ARB_MAX_ASK:.0%} (ask)")
-    logger.info(f"  Edge min:   {config.METAR_ARB_MIN_EDGE:.0%}")
+    logger.info(f"  Стратегія:  ENSEMBLE prediction (above/below)")
+    logger.info(f"  Горизонт:   {config.MIN_RESOLUTION_HOURS:.0f}-{config.MAX_RESOLUTION_HOURS}h")
+    logger.info(f"  Edge YES:   {getattr(config, 'MIN_EDGE_YES', 0.20):.0%} | Edge NO: {getattr(config, 'MIN_EDGE_NO', 0.20):.0%}")
+    logger.info(f"  Prob bias:  {getattr(config, 'PROB_BIAS', 0.75):.0%}")
     logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
-    logger.info(f"  Adjacent:   ВИМКНЕНО (v15 — only METAR arb above/below/range/categorical)")
-    logger.info(f"  METAR req:  {'✅ обовʼязковий' if config.METAR_ARB_REQUIRE_METAR else '❌ optional (high-prob fallback ≥70%)'}")
-    logger.info(f"  Правило:   лише weather ринки ≤ {config.MAX_RESOLUTION_HOURS}h")
     logger.info("=" * 60)
     logger.info("")
+
+    logger.info("🔍 Тестування API джерел...")
+    api_results = test_all_apis()
+    working = sum(1 for v in api_results.values() if v)
+    total = len(api_results)
+    logger.info(f"📊 API діагностика: {working}/{total} працюють")
+    for name, ok in api_results.items():
+        if not ok:
+            logger.warning(f"  ❌ {name} — НЕ ДОСТУПНИЙ")
 
     sec_ok = security.run_security_checks()
     if not sec_ok and not config.DRY_RUN:

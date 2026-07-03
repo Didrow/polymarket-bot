@@ -494,11 +494,44 @@ and (metar_confirmed or distance_c <= max_dist)
 - `main.py:468` — main loop
 - `main.py:517` — adaptive sleep (progressive v18)
 
+## v20 — CLEAN ENSEMBLE PREDICTION STRATEGY (03.07.2026)
 
+### Проблеми (лог 03.07):
+1. **"Немає прогнозу для {city}"** для ВСІХ міст — всі API повертають None, помилки на DEBUG рівні невидимі
+2. **0% win rate (0/14 resolved, 14 losses)** — METAR arb стратегія концептуально неспроможна (0% WR, ROI -8.4%)
+3. **Aviationweather.gov timeout** — METAR API недоступний з Render
 
-## ���������� ����������� (03.07.2026 � Critical recursion bug fix)
-1. ? **�������� ���������� ������ � _request_with_retry (data_fetcher.py)**:
-   - **��������**: ������� _request_with_retry ��������� ���� ���� ������ equests.get, �� ���������� �� RecursionError �� ������� '���� ��������' ��� ��� ���.
-   - **�����������**: ������� ����������� ������ �� ������ ������ equests.get.
-   - **���������**: ��� ����� ������ ������ ���� � ��� ������ (Ensemble, METAR, NOAA, NASA, GFS, ECMWF).
+### Зміни:
+
+#### config.py — повна переробка:
+- Видалено ВСІ v15-v19 параметри: METAR_ARB_*, ENABLE_COMPOUND, COMPOUND_RISK_PCT, TRAILING_STOP_*, FORECAST_SHIFT_*, DYNAMIC_TP_*, PROBABILITY_CALIBRATION_*, MARKET_ANCHOR_*, SNIPER_GRID_*, EXTREME_TAIL_*, ADJACENT_GRID_*, SIGMA_CAL_*
+- Нова стратегія: ENSEMBLE prediction (above/below only)
+- Додані: MIN_EDGE_YES=0.20, MIN_EDGE_NO=0.20, PROB_BIAS=0.75, CAP_SHORT/MID/LONG, KINDS_ONLY
+- 202 рядки → 75 рядків
+
+#### data_fetcher.py:
+- Всі logger.debug API помилки → logger.warning (тепер видимі з LOG_LEVEL=INFO)
+- Додано test_all_apis() — діагностика всіх джерел при старті
+
+#### edge_calculator.py — повна переробка:
+- Видалено: _check_metar_confirmation(), _boost_prob_from_metar(), _climate_sanity_check(), _apply_probability_calibration()
+- Нова calculate() — чиста ensemble ймовірність + calibration bias 0.75
+- Підтримка BUY_NO (edge_no = market_prob - our_prob)
+- Тільки above/below ринки (без range/categorical)
+
+#### trader.py:
+- Видалено: _check_dynamic_take_profit(), _check_forecast_shift_close()
+- Спрощено decide_position_size() — тільки Kelly flat 25%
+- Замінено _parse_range_or_threshold → _parse_threshold для resolution
+
+#### main.py:
+- Додано API тест при старті (test_all_apis)
+- Оновлено банер v20
+- Видалено ENABLE_COMPOUND/COMPOUND_RISK refs
+
+### Файли для ручного пушу:
+- config.py, data_fetcher.py, edge_calculator.py, trader.py, main.py
+
+### Render: RESET_POSITIONS=true (чистий старт, нова стратегія)
+### Очікування: 25-30 resolved trades для валідації WR 40%+
 

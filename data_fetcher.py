@@ -125,11 +125,11 @@ class WeatherForecast:
         
         # Кап з config.py (змінювати там)
         if hours <= 6.0:
-            max_cap = config.PROB_CAP_ABOVE_SHORT
+            max_cap = getattr(config, 'CAP_SHORT', 0.85)
         elif hours <= 18.0:
-            max_cap = config.PROB_CAP_ABOVE_MID
+            max_cap = getattr(config, 'CAP_MID', 0.75)
         else:
-            max_cap = config.PROB_CAP_ABOVE_LONG
+            max_cap = getattr(config, 'CAP_LONG', 0.65)
 
         return max(0.01, min(max_cap, round(raw_p, 4)))
 
@@ -138,11 +138,11 @@ class WeatherForecast:
         
         # Кап з config.py (змінювати там)
         if hours <= 6.0:
-            max_cap = config.PROB_CAP_ABOVE_SHORT
+            max_cap = getattr(config, 'CAP_SHORT', 0.85)
         elif hours <= 18.0:
-            max_cap = config.PROB_CAP_ABOVE_MID
+            max_cap = getattr(config, 'CAP_MID', 0.75)
         else:
-            max_cap = config.PROB_CAP_ABOVE_LONG
+            max_cap = getattr(config, 'CAP_LONG', 0.65)
 
         return max(0.01, min(max_cap, round(raw_p, 4)))
 
@@ -151,11 +151,11 @@ class WeatherForecast:
 
         # Кап з config.py (змінювати там)
         if hours <= 6.0:
-            max_cap = config.PROB_CAP_EXACT_SHORT
+            max_cap = getattr(config, 'CAP_SHORT', 0.85)
         elif hours <= 18.0:
-            max_cap = config.PROB_CAP_EXACT_MID
+            max_cap = getattr(config, 'CAP_MID', 0.75)
         else:
-            max_cap = config.PROB_CAP_EXACT_LONG
+            max_cap = getattr(config, 'CAP_LONG', 0.65)
 
         if members and len(members) >= 5:
             # Емпіричний підрахунок: скільки members потрапляють у бакет
@@ -447,7 +447,7 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, targ
         logger.debug(f"⛅ ENSEMBLE {city}: {len(high_m)} members, day_index={day_index} (mean: {avg_high:.1f}°C)")
         return fc
     except Exception as e:
-        logger.debug(f"Ensemble error {city}: {e}")
+        logger.warning(f"Ensemble error {city}: {e}")
         return None
 
 
@@ -543,7 +543,7 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0, target_dat
         _cache_set(key, fc)
         return fc
     except Exception as e:
-        logger.debug(f"NOAA error {city}: {e}")
+        logger.warning(f"NOAA error {city}: {e}")
         return None
 
 
@@ -599,7 +599,7 @@ def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[W
         _cache_set(key, fc)
         return fc
     except Exception as e:
-        logger.debug(f"NASA POWER error {city}: {e}")
+        logger.warning(f"NASA POWER error {city}: {e}")
         return None
 
 
@@ -654,7 +654,7 @@ def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: fl
         _cache_set(key, fc)
         return fc
     except Exception as e:
-        logger.debug(f"Open-Meteo/{model} error {city}: {e}")
+        logger.warning(f"Open-Meteo/{model} error {city}: {e}")
         return None
 
 
@@ -782,7 +782,7 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
         logger.debug(f"🛬 METAR {city} ({icao}): {temp_c}°C")
         return fc
     except Exception as e:
-        logger.debug(f"METAR error {city} ({icao}): {e}")
+        logger.warning(f"METAR error {city} ({icao}): {e}")
         return None
 
 
@@ -844,13 +844,42 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
         logger.debug(f"📊 Observed today {city}: min={result[0]:.1f}°C, max={result[1]:.1f}°C ({len(today_temps)} hours)")
         return result
     except Exception as e:
-        logger.debug(f"Observed today error {city}: {e}")
+        logger.warning(f"Observed today error {city}: {e}")
         return None
 
 
 # ─────────────────────────────────────────────
 # 6. CONSENSUS (ЗЛИТТЯ ПРОГНОЗІВ З ПРІОРИТЕТОМ METAR ДЛЯ БЛИЗЬКИХ ГОДИН)
 # ─────────────────────────────────────────────
+
+def test_all_apis() -> Dict[str, bool]:
+    """Тестує всі API джерела при старті, повертає статус кожного."""
+    test_city = "London"
+    results = {}
+    for name, func in [
+        ("ENSEMBLE", lambda: fetch_open_meteo_ensemble(test_city, 12.0)),
+        ("Open-Meteo/GFS", lambda: fetch_open_meteo(test_city, "gfs", 12.0)),
+        ("Open-Meteo/ECMWF", lambda: fetch_open_meteo(test_city, "ecmwf", 12.0)),
+        ("Open-Meteo/forecast", lambda: _request_with_retry("https://api.open-meteo.com/v1/forecast", params={"latitude": 51.5, "longitude": -0.13, "daily": "temperature_2m_max", "timezone": "auto", "forecast_days": 1})),
+        ("METAR/aviationweather", lambda: _request_with_retry("https://aviationweather.gov/api/data/metar", params={"ids": "EGLL", "format": "json", "hours": 1})),
+        ("Historical/archive", lambda: _request_with_retry("https://archive-api.open-meteo.com/v1/archive", params={"latitude": 51.5, "longitude": -0.13, "start_date": "2026-07-02", "end_date": "2026-07-02", "daily": "temperature_2m_max", "timezone": "auto"})),
+    ]:
+        try:
+            r = func()
+            if isinstance(r, WeatherForecast):
+                results[name] = True
+                logger.info(f"✅ API test {name}: OK (temp={r.temp_high_c:.1f}°C)")
+            elif r is not None:
+                results[name] = True
+                logger.info(f"✅ API test {name}: OK (HTTP {r.status_code})")
+            else:
+                results[name] = False
+                logger.warning(f"❌ API test {name}: повернув None")
+        except Exception as e:
+            results[name] = False
+            logger.warning(f"❌ API test {name}: {e}")
+    return results
+
 
 def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
     """
