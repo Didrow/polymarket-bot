@@ -688,8 +688,8 @@ class SafeguardManager:
 
         daily_loss = max(0.0, self.state.last_daily_capital - equity)
         daily_loss_pct = daily_loss / self.state.last_daily_capital if self.state.last_daily_capital else 0.0
-        max_usd = getattr(config, "MAX_DAILY_LOSS_USD", 0.0)
-        max_pct = getattr(config, "MAX_DAILY_LOSS_PCT", 0.0)
+        max_usd = float(getattr(config, "MAX_DAILY_LOSS_USD", float("inf")))
+        max_pct = float(getattr(config, "MAX_DAILY_LOSS_PCT", 1.0))
         logger.debug(f"Daily loss check: equity={equity:.2f} USD, cash={cash:.2f} USD, portfolio_value={portfolio_value:.2f} USD, unrealized_pnl={unrealized_pnl:.2f} USD, daily_loss={daily_loss:.2f} USD ({daily_loss_pct:.1%}), limits={max_usd:.2f}/{max_pct:.1%}")
         if daily_loss >= max_usd or daily_loss_pct >= max_pct:
             if config.DRY_RUN:

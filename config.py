@@ -32,6 +32,7 @@ STOP_LOSS_PCT: float = 0.30
 STOP_LOSS_MIN_HOLD_HOURS: float = 0.5
 MAX_TOTAL_EXPOSURE_PCT: float = 0.30
 MAX_DAILY_LOSS_PCT: float = 0.15
+MAX_DAILY_LOSS_USD: float = 20.0
 
 # ── STRATEGY: ENSEMBLE PREDICTION ──────────────────────────
 # Тільки above/below ринки
