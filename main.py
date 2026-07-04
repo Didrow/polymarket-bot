@@ -12,6 +12,7 @@ import logging.handlers
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -62,55 +63,17 @@ class _HealthHandler(BaseHTTPRequestHandler):
     safeguard_manager = None
 
     def do_GET(self):
-        if self.path == "/reset-stats-9922":
-            try:
-                manager = _HealthHandler.safeguard_manager
-                if manager is not None:
-                    active_positions_count = len(manager.state.open_positions or {})
-                    manager.state.initial_capital = config.INITIAL_CAPITAL
-                    manager.state.current_capital = config.INITIAL_CAPITAL
-                    manager.state.peak_capital = config.INITIAL_CAPITAL
-                    manager.state.peak_equity = config.INITIAL_CAPITAL
-                    manager.state.last_daily_capital = config.INITIAL_CAPITAL
-                    manager.state.last_daily_reset = datetime.now(timezone.utc).date().isoformat()
-                    manager.state.total_trades = active_positions_count
-                    manager.state.winning_trades = 0
-                    manager.state.losing_trades = 0
-                    manager.state.total_pnl = 0.0
-                    manager.state.is_halted = False
-                    manager.state.halt_reason = ""
-                    manager.state.start_time = datetime.now(timezone.utc).isoformat()
-                    manager.state.last_update = datetime.now(timezone.utc).isoformat()
-                    manager.save_state()
-                    summary = (
-                        f"Statistics successfully reset in running memory and JSONBin!\n"
-                        f"New State:\n"
-                        f"  - Total Trades: {manager.state.total_trades} (representing active positions)\n"
-                        f"  - Winning Trades: 0\n"
-                        f"  - Losing Trades: 0\n"
-                        f"  - Total PnL: $0.00\n"
-                        f"  - Active Open Positions kept: {active_positions_count}"
-                    )
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(f"SUCCESS!\n\n{summary}".encode("utf-8"))
-                else:
-                    from reset_stats import reset_statistics_api
-                    summary = reset_statistics_api()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.end_headers()
-                    self.wfile.write(f"SUCCESS (Fallback/Off-line)!\n\n{summary}".encode("utf-8"))
-            except Exception as e:
-                self.send_response(500)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(f"ERROR: {e}".encode("utf-8"))
-        else:
+        parsed = urlparse(self.path)
+        if parsed.path == "/" or parsed.path == "/health":
             self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
             self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"NOT FOUND")
     def log_message(self, *args):
         pass
 

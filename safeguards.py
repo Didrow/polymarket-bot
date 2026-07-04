@@ -462,9 +462,11 @@ class SafeguardManager:
     def _load_state(self) -> BotState:
         os.makedirs(config.DATA_DIR, exist_ok=True)
 
-        # RESET_POSITIONS=true → примусово чистий старт (знімає заморожені позиції)
+        # RESET_POSITIONS=true — ручний скид через Render Environment Variables.
+        # Ставиш вручну в Render Dashboard → рестарт → чистий стан.
+        # Прибираєш (або false) — нормальне завантаження з PostgreSQL.
         if os.environ.get("RESET_POSITIONS", "").lower() == "true":
-            logger.warning("🔄 RESET_POSITIONS=true → починаємо з чистого аркуша")
+            logger.warning("🔄 RESET_POSITIONS=true → ручний скид стану")
             return BotState()
 
         # PRIMARY: PostgreSQL (персистентний на Render)
