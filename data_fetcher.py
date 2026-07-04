@@ -908,6 +908,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
     fc_noaa = fetch_noaa_forecast(city, hours_to_resolution, target_date)
     fc_nasa = fetch_nasa_power(city, hours_to_resolution)
     fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution, target_date)
+    time.sleep(1)
     fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution, target_date)
 
     # v16: Pure forecast models only — METAR is for confirmation, not prediction
