@@ -1,7 +1,7 @@
 """
-data_fetcher.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
-Джерела: METAR + OBSERVED (перший пріоритет для ≤12h) + Open-Meteo ENSEMBLE + NOAA + NASA POWER + GFS/ECMWF
-v15: METAR = основа стратегії (не 10% побічне джерело), observed = фізичний floor
+data_fetcher.py — Polymarket Weather Bot v17 (CLEAN ENSEMBLE)
+Джерела: Open-Meteo ENSEMBLE (primary) + NOAA + NASA POWER + METAR (confirmation) + OBSERVED (physical floor)
+v17: GFS/ECMWF видалено — 100% 429 на api.open-meteo.com. ENSEMBLE 31-member достатньо.
 """
 
 import math
@@ -606,59 +606,7 @@ def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[W
         return None
 
 
-# ─────────────────────────────────────────────
-# 4. Open-Meteo Single (GFS / ECMWF)
-# ─────────────────────────────────────────────
-
-def fetch_open_meteo(city: str, model: str = "forecast", hours_to_resolution: float = 24.0, target_date: Optional[datetime.date] = None) -> Optional[WeatherForecast]:
-    coords = _get_coords(city, prefer_airport=True)
-    if not coords: return None
-
-    if target_date:
-        day_index = min(max((target_date - datetime.now(timezone.utc).date()).days, 0), 4)
-    else:
-        target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
-
-    key = f"om_{model}_{city}_{day_index}"
-    cached = _cache_get(key)
-    if cached: return cached
-
-    lat, lon = coords
-    try:
-        r = _request_with_retry(
-            f"https://api.open-meteo.com/v1/{model}",
-            params={
-                "latitude":   lat,
-                "longitude":  lon,
-                "daily":      ["temperature_2m_max", "temperature_2m_min",
-                               "precipitation_probability_max", "precipitation_sum"],
-                "timezone":   "auto",
-                "forecast_days": 5,
-            },
-            timeout=10
-        )
-        r.raise_for_status()
-        daily = r.json().get("daily", {})
-        if not daily: return None
-
-        high_c     = daily["temperature_2m_max"][day_index] if len(daily.get("temperature_2m_max", [])) > day_index else daily["temperature_2m_max"][0]
-        low_c      = daily["temperature_2m_min"][day_index] if len(daily.get("temperature_2m_min", [])) > day_index else daily["temperature_2m_min"][0]
-        rain_probs = daily.get("precipitation_probability_max", [0])
-        rain_prob  = (rain_probs[day_index] if len(rain_probs) > day_index else rain_probs[0] if rain_probs else 0) or 0
-        rain_prob  = rain_prob / 100.0
-
-        fc = WeatherForecast(
-            city=city, timestamp=datetime.now(timezone.utc),
-            temp_high_c=round(high_c, 1), temp_low_c=round(low_c, 1),
-            prob_rain=rain_prob, prob_snow=0.0,
-            sources_used=[f"Open-Meteo_{model.upper()}"]
-        )
-        _cache_set(key, fc)
-        return fc
-    except Exception as e:
-        logger.warning(f"Open-Meteo/{model} error {city}: {e}")
-        return None
+    # NOTE: fetch_open_meteo() видалено в v17 — використовувалась тільки для gfs/ecmwf, які мали 100% 429.
 
 
 # ─────────────────────────────────────────────
@@ -861,8 +809,6 @@ def test_all_apis() -> Dict[str, bool]:
     results = {}
     for name, func in [
         ("ENSEMBLE", lambda: fetch_open_meteo_ensemble(test_city, 12.0)),
-        ("Open-Meteo/GFS", lambda: fetch_open_meteo(test_city, "gfs", 12.0)),
-        ("Open-Meteo/ECMWF", lambda: fetch_open_meteo(test_city, "ecmwf", 12.0)),
         ("Open-Meteo/forecast", lambda: _request_with_retry("https://api.open-meteo.com/v1/forecast", params={"latitude": 51.5, "longitude": -0.13, "daily": "temperature_2m_max", "timezone": "auto", "forecast_days": 1})),
         ("METAR/aviationweather", lambda: _request_with_retry("https://aviationweather.gov/api/data/metar", params={"ids": "EGLL", "format": "json", "hours": 1})),
         ("Historical/archive", lambda: _request_with_retry("https://archive-api.open-meteo.com/v1/archive", params={"latitude": 51.5, "longitude": -0.13, "start_date": "2026-07-02", "end_date": "2026-07-02", "daily": "temperature_2m_max", "timezone": "auto"})),
@@ -907,39 +853,23 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
     fc_ensemble = fetch_open_meteo_ensemble(city, hours_to_resolution, target_date)
     fc_noaa = fetch_noaa_forecast(city, hours_to_resolution, target_date)
     fc_nasa = fetch_nasa_power(city, hours_to_resolution)
-    fc_gfs = fetch_open_meteo(city, "gfs", hours_to_resolution, target_date)
-    time.sleep(1)
-    fc_ecmwf = fetch_open_meteo(city, "ecmwf", hours_to_resolution, target_date)
 
-    # v16: Pure forecast models only — METAR is for confirmation, not prediction
+    # v17: Pure ENSEMBLE + NOAA — GFS/ECMWF removed (100% 429 on api.open-meteo.com)
     if hours_to_resolution <= 8.0:
         if fc_ensemble:
-            forecasts_w.append((fc_ensemble, 0.50))
-        if fc_gfs:
-            forecasts_w.append((fc_gfs, 0.25))
-        if fc_ecmwf:
-            forecasts_w.append((fc_ecmwf, 0.15))
-        if fc_noaa:
-            forecasts_w.append((fc_noaa, 0.10))
-    elif hours_to_resolution <= 12.0:
-        if fc_ensemble:
-            forecasts_w.append((fc_ensemble, 0.45))
-        if fc_gfs:
-            forecasts_w.append((fc_gfs, 0.25))
-        if fc_ecmwf:
-            forecasts_w.append((fc_ecmwf, 0.15))
-        if fc_noaa:
-            forecasts_w.append((fc_noaa, 0.15))
-    else:
-        # Довгі (>12h): ансамбль + NOAA домінують
-        if fc_ensemble:
-            forecasts_w.append((fc_ensemble, 0.45))
+            forecasts_w.append((fc_ensemble, 0.75))
         if fc_noaa:
             forecasts_w.append((fc_noaa, 0.25))
-        if fc_gfs:
-            forecasts_w.append((fc_gfs, 0.15))
-        if fc_ecmwf:
-            forecasts_w.append((fc_ecmwf, 0.10))
+    elif hours_to_resolution <= 12.0:
+        if fc_ensemble:
+            forecasts_w.append((fc_ensemble, 0.70))
+        if fc_noaa:
+            forecasts_w.append((fc_noaa, 0.30))
+    else:
+        if fc_ensemble:
+            forecasts_w.append((fc_ensemble, 0.60))
+        if fc_noaa:
+            forecasts_w.append((fc_noaa, 0.35))
         if fc_nasa:
             forecasts_w.append((fc_nasa, 0.05))
 
