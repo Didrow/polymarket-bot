@@ -754,7 +754,7 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
 
     lat, lon = coords
     try:
-        r = _request_with_retry(
+        r = requests.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": lat,
@@ -794,8 +794,8 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
         _cache_set(key, result)
         logger.debug(f"📊 Observed today {city}: min={result[0]:.1f}°C, max={result[1]:.1f}°C ({len(today_temps)} hours)")
         return result
-    except Exception as e:
-        logger.warning(f"Observed today error {city}: {e}")
+    except Exception:
+        logger.debug(f"Observed today error {city}: single-request failed (likely 429, expected on Render free tier)")
         return None
 
 
@@ -809,7 +809,7 @@ def test_all_apis() -> Dict[str, bool]:
     results = {}
     for name, func in [
         ("ENSEMBLE", lambda: fetch_open_meteo_ensemble(test_city, 12.0)),
-        ("Open-Meteo/forecast", lambda: _request_with_retry("https://api.open-meteo.com/v1/forecast", params={"latitude": 51.5, "longitude": -0.13, "daily": "temperature_2m_max", "timezone": "auto", "forecast_days": 1})),
+        ("Open-Meteo/forecast", lambda: requests.get("https://api.open-meteo.com/v1/forecast", params={"latitude": 51.5, "longitude": -0.13, "daily": "temperature_2m_max", "timezone": "auto", "forecast_days": 1}, timeout=10)),
         ("METAR/aviationweather", lambda: _request_with_retry("https://aviationweather.gov/api/data/metar", params={"ids": "EGLL", "format": "json", "hours": 1})),
         ("Historical/archive", lambda: _request_with_retry("https://archive-api.open-meteo.com/v1/archive", params={"latitude": 51.5, "longitude": -0.13, "start_date": "2026-07-02", "end_date": "2026-07-02", "daily": "temperature_2m_max", "timezone": "auto"})),
     ]:
