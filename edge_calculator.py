@@ -148,9 +148,9 @@ def calculate_our_probability(forecast: WeatherForecast, threshold_c: float, kin
             raw = 0.5 * (1 + math.erf((threshold_c - mean_c) / (sigma * math.sqrt(2))))
 
     cap = _get_cap(hours)
-    bias = getattr(config, 'PROB_BIAS', 0.75)
-    p = raw * bias
-    return max(0.01, min(cap, round(p, 4)))
+    if raw < 0.02:
+        logger.warning(f"our_prob floor territory: raw={raw:.4f} kind={kind} sigma={sigma:.1f}°C")
+    return max(0.01, min(cap, round(raw, 4)))
 
 
 def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
@@ -218,6 +218,16 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         forecast, threshold_c, kind, is_low, market.hours_to_resolution
     )
 
+    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
+    distance_c = abs(fc_temp - threshold_c)
+
+    # Sanity check: якщо наша prob < 5% і forecast занадто далеко від threshold,
+    # ми в хвості розподілу де Gaussian неточний — пропускаємо
+    sigma_edge = forecast._get_sigma(market.hours_to_resolution)
+    if our_prob < 0.05 and distance_c > 3.5 * sigma_edge:
+        logger.debug(f"⏭️ SKIP: our_prob={our_prob:.3f} at dist={distance_c:.1f}°C > 3.5σ={3.5*sigma_edge:.1f}°C")
+        return None
+
     # Ринкова ціна
     market_prob = market.best_ask_yes
 
@@ -231,9 +241,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     if market_prob <= 0.001 or market_prob >= 0.99:
         return None
-
-    fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
-    distance_c = abs(fc_temp - threshold_c)
 
     # Розраховуємо edge для YES та NO
     edge_yes = our_prob - market_prob

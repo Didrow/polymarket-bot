@@ -50,7 +50,7 @@ SCAN_INTERVAL_SEC: int = 300
 
 # ── PROBABILITY CALIBRATION ────────────────────────────────
 # Систематична похибка: модель переоцінює → множимо на bias
-PROB_BIAS: float = 0.75  # calibrate: multiply prob by 0.75
+PROB_BIAS: float = 1.0  # sigma вже кодує uncertainty, bias = double-discount
 
 # Для above/below:
 CAP_SHORT: float = 0.85   # ≤6h
