@@ -75,9 +75,7 @@ class WeatherForecast:
         return [m + bias for m in members]
 
     def _get_base_sigma(self) -> float:
-        # Fallback — тільки коли ensemble members недоступні.
-        # Реальний ensemble spread (stdev 31 членів) типовий 0.5-2.0°C.
-        return 2.0
+        return 3.5
 
     def _get_sigma(self, hours: float = 24.0) -> float:
         # Обчислюємо sigma з actual ensemble spread (stdev членів)
@@ -90,12 +88,14 @@ class WeatherForecast:
                 break
 
         # Мінімальний sigma floor за горизонтом прогнозу
+        # 3/3.5/4.5°C — історично відкалібровані значення реальної forecast error.
+        # Ensemble spread (stdev) може тільки підняти sigma вище, ніколи не знизити.
         if hours <= 6.0:
-            sigma_floor = 0.5
+            sigma_floor = 3.0
         elif hours <= 18.0:
-            sigma_floor = 1.0
+            sigma_floor = 3.5
         else:
-            sigma_floor = 1.5
+            sigma_floor = 4.5
 
         if stdev is not None:
             hour_factor = 1.0 + 0.015 * max(0, hours - 6)
