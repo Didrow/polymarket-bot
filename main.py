@@ -499,8 +499,10 @@ def main():
                         _debug_auto_revert_cycle = cycle_count + 5
                         root_logger.setLevel(logging.DEBUG)
                         logger.info("🔧 LOG_LEVEL → DEBUG (перший активний цикл, автовернення через 5 циклів)")
+                sleep_time = min(sleep_time, config.SCAN_MAX_SLEEP_SEC)
                 logger.info(f"💤 Адаптивний сон (немає угод): {sleep_time}s ({empty_cycles} порожніх циклів поспіль)...\n")
             else:
+                sleep_time = min(sleep_time, config.SCAN_MAX_SLEEP_SEC)
                 logger.info(f"💤 Сплю {sleep_time}s...\n")
             time.sleep(sleep_time)
 

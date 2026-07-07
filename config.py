@@ -47,6 +47,7 @@ MAX_RESOLUTION_HOURS: int = 48
 MIN_RESOLUTION_HOURS: float = 0.5
 MIN_MARKET_VOLUME_USD: float = 500.0
 SCAN_INTERVAL_SEC: int = 300
+SCAN_MAX_SLEEP_SEC: int = 600
 
 # ── PROBABILITY CALIBRATION ────────────────────────────────
 # Систематична похибка: модель переоцінює → множимо на bias
