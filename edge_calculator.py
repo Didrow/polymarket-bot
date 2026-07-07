@@ -148,8 +148,16 @@ def calculate_our_probability(forecast: WeatherForecast, threshold_c: float, kin
             raw = 0.5 * (1 + math.erf((threshold_c - mean_c) / (sigma * math.sqrt(2))))
 
     cap = _get_cap(hours)
-    if raw < 0.02:
-        logger.warning(f"our_prob floor territory: raw={raw:.4f} kind={kind} sigma={sigma:.1f}°C")
+
+    # Прозорість: spread у debug-лог
+    spread_str = ""
+    if members and len(members) >= 5:
+        m_mean = sum(members) / len(members)
+        m_var = sum((m - m_mean) ** 2 for m in members) / len(members)
+        spread_str = f" spread={math.sqrt(m_var):.2f}°C"
+    if raw < 0.01:
+        logger.info(f"our_prob raw={raw:.4f} kind={kind} sigma={sigma:.1f}°C{spread_str}")
+
     return max(0.01, min(cap, round(raw, 4)))
 
 

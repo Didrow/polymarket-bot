@@ -75,25 +75,41 @@ class WeatherForecast:
         return [m + bias for m in members]
 
     def _get_base_sigma(self) -> float:
-        # v20: збільшено з 0.7-1.4 до 3.0-4.5 (реальні GFS ensemble errors 5-10°C)
-        return {
-            "Lucknow": 4.5, "Miami": 4.0, "Singapore": 4.5, "Dubai": 4.5,
-            "Cape Town": 3.5, "Sao Paulo": 3.5, "Sydney": 3.5,
-            "Buenos Aires": 3.5, "London": 3.5, "Paris": 3.5,
-            "Tokyo": 3.5, "Berlin": 4.0, "Busan": 3.5, "Munich": 4.0,
-            "Seoul": 4.0, "NYC": 3.5, "Seattle": 3.0, "Los Angeles": 3.0,
-            "Dallas": 4.0, "Chicago": 4.0,
-        }.get(self.city, 3.5)
+        # Fallback — тільки коли ensemble members недоступні.
+        # Реальний ensemble spread (stdev 31 членів) типовий 0.5-2.0°C.
+        return 2.0
 
     def _get_sigma(self, hours: float = 24.0) -> float:
-        base = self._get_base_sigma()
+        # Обчислюємо sigma з actual ensemble spread (stdev членів)
+        stdev = None
+        for member_list in [self.temp_high_members, self.temp_low_members]:
+            if member_list and len(member_list) >= 5:
+                m_mean = sum(member_list) / len(member_list)
+                m_var = sum((m - m_mean) ** 2 for m in member_list) / len(member_list)
+                stdev = math.sqrt(m_var)
+                break
+
+        # Мінімальний sigma floor за горизонтом прогнозу
+        if hours <= 6.0:
+            sigma_floor = 0.5
+        elif hours <= 18.0:
+            sigma_floor = 1.0
+        else:
+            sigma_floor = 1.5
+
+        if stdev is not None:
+            hour_factor = 1.0 + 0.015 * max(0, hours - 6)
+            sigma_value = max(sigma_floor, stdev * min(hour_factor, 1.5))
+        else:
+            sigma_value = max(sigma_floor, self._get_base_sigma())
+
+        # Адаптивне калібрування з історичних помилок
         try:
             from sigma_calibrator import get_adaptive_sigma
             source = "+".join(self.sources_used) if self.sources_used else "SINGLE"
-            return get_adaptive_sigma(self.city, source, base, hours)
+            return get_adaptive_sigma(self.city, source, sigma_value, hours)
         except Exception:
-            hour_factor = 1.0 + 0.015 * max(0, hours - 6)
-            return base * min(hour_factor, 1.5)
+            return round(sigma_value, 3)
 
     def raw_prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         members = self._get_adjusted_members(is_low)
@@ -199,37 +215,70 @@ class WeatherForecast:
 # ─────────────────────────────────────────────
 
 AIRPORT_COORDS: Dict[str, Tuple[float, float]] = {
-    "NYC":           (40.6413, -73.7781),
-    "New York":      (40.6413, -73.7781),
-    "Chicago":       (41.9742, -87.9073),
-    "Los Angeles":   (33.9425, -118.4081),
-    "San Francisco": (37.6213, -122.3790),
-    "Miami":         (25.7959, -80.2870),
-    "Dallas":        (32.8998, -97.0403),
-    "Seattle":       (47.4502, -122.3088),
-    "Boston":        (42.3656, -71.0096),
-    "Denver":        (39.8561, -104.6737),
-    "Atlanta":       (33.6407, -84.4277),
-    "London":        (51.4775, -0.4614),
-    "Paris":         (49.0097, 2.5479),
-    "Berlin":        (52.3667, 13.5033),
-    "Madrid":        (40.4936, -3.5668),
-    "Amsterdam":     (52.3086, 4.7639),
-    "Rome":          (41.8003, 12.2389),
-    "Istanbul":      (40.9769, 28.8146),
-    "Tokyo":         (35.5494, 139.7798),
-    "Seoul":         (37.4602, 126.4407),
-    "Singapore":     (1.3644, 103.9915),
-    "Dubai":         (25.2532, 55.3657),
-    "Bangkok":       (13.6811, 100.7472),
-    "Sydney":        (-33.9399, 151.1753),
-    "Toronto":       (43.6777, -79.6248),
-    "Buenos Aires":  (-34.8222, -58.5358),
-    "Cape Town":     (-33.9715, 18.6021),
-    "Busan":         (35.1795, 128.9381),
-    "Lucknow":       (26.7606, 80.8893),   # VILK — Chaudhary Charan Singh International
-    "Sao Paulo":     (-23.4356, -46.4731),  # SBGR — Guarulhos
+    # ── USA ──
+    "NYC":           (40.7769, -73.8740),   # KLGA — LaGuardia (NOT JFK)
+    "New York":      (40.7769, -73.8740),   # KLGA — LaGuardia
+    "Chicago":       (41.9742, -87.9073),   # KORD — O'Hare
+    "Los Angeles":   (33.9425, -118.4081),  # KLAX — LAX
+    "San Francisco": (37.6213, -122.3790),  # KSFO — SFO
+    "Miami":         (25.7959, -80.2870),   # KMIA — Miami Intl
+    "Dallas":        (32.8481, -96.8512),   # KDAL — Love Field (NOT DFW)
+    "Seattle":       (47.4502, -122.3088),  # KSEA — Sea-Tac
+    "Boston":        (42.3656, -71.0096),   # KBOS — Logan
+    "Denver":        (39.7017, -104.7517),  # KBKF — Buckley SFB (NOT KDEN)
+    "Atlanta":       (33.6407, -84.4277),   # KATL — Hartsfield-Jackson
+    "Houston":       (29.6456, -95.2789),   # KHOU — Hobby (NOT KIAH)
+    "Austin":        (30.1974, -97.6664),   # KAUS — Bergstrom
+    "Phoenix":       (33.4342, -112.0117),  # KPHX — Sky Harbor
+    "Las Vegas":     (36.0800, -115.1522),  # KLAS — Harry Reid
+    "Minneapolis":   (44.8830, -93.2108),   # KMSP — MSP
+    "Portland":      (45.5887, -122.5975),  # KPDX — Portland Intl
+    "Nashville":     (36.1244, -86.6782),   # KBNA — Nashville Intl
+    "Charlotte":     (35.2140, -80.9431),   # KCLT — Charlotte Douglas
+    "Orlando":       (28.4294, -81.3089),   # KMCO — Orlando Intl
+    # ── Europe ──
+    "London":        (51.5053,   0.0554),   # EGLC — London City (NOT Heathrow)
+    "Paris":         (48.9694,   2.4414),   # LFPB — Le Bourget (NOT CDG)
+    "Berlin":        (52.3667,  13.5033),   # EDDB — Brandenburg
     "Munich":        (48.3537,  11.7750),   # EDDM — Munich Airport
+    "Amsterdam":     (52.3086,   4.7639),   # EHAM — Schiphol
+    "Rome":          (41.8003,  12.2389),   # LIRF — Fiumicino
+    "Madrid":        (40.4936,  -3.5668),   # LEMD — Barajas
+    "Dublin":        (53.4213,  -6.2701),   # EIDW — Dublin
+    "Warsaw":        (52.1657,  20.9671),   # EPWA — Chopin
+    "Vienna":        (48.1103,  16.5700),   # LOWW — Vienna Intl
+    "Prague":        (50.1008,  14.2600),   # LKPR — Vaclav Havel
+    "Moscow":        (55.5917,  37.2615),   # UUWW — Vnukovo (NOT Domodedovo)
+    "Ankara":        (40.1281,  32.9951),   # LTAC — Esenboga
+    # ── Asia ──
+    "Tokyo":         (35.5494, 139.7798),   # RJTT — Haneda
+    "Seoul":         (37.4602, 126.4407),   # RKSI — Incheon
+    "Busan":         (35.1795, 128.9381),   # RKPK — Gimhae
+    "Shanghai":      (31.1434, 121.8053),   # ZSPD — Pudong (NOT Hongqiao)
+    "Beijing":       (40.0799, 116.6031),   # ZBAA — Capital
+    "Chengdu":       (30.5785, 103.9471),   # ZUUU — Shuangliu
+    "Hong Kong":     (22.3193, 114.1694),   # VHHH — HKG (HKO data)
+    "Singapore":     ( 1.3644, 103.9915),   # WSSS — Changi
+    "Bangkok":       (13.6811, 100.7472),   # VTBS — Suvarnabhumi
+    "Dubai":         (25.2532,  55.3657),   # OMDB — Dubai Intl
+    "Jeddah":        (21.6786,  39.1575),   # OEJN — King Abdulaziz
+    "Lucknow":       (26.7606,  80.8893),   # VILK — Chaudhary Charan Singh
+    "Karachi":       (24.9075,  67.1612),   # OPKC — Jinnah Intl
+    # ── South America ──
+    "Buenos Aires":  (-34.8222, -58.5358),  # SAEZ — Ezeiza
+    "Sao Paulo":     (-23.4356, -46.4731),  # SBGR — Guarulhos
+    "Santiago":      (-33.3930, -70.7858),  # SCEL — Arturo Benitez
+    "Lima":          (-12.0231, -77.1081),  # SPJC — Jorge Chavez
+    # ── Africa ──
+    "Cape Town":     (-33.9715,  18.6021),  # FACT — Cape Town Intl
+    "Lagos":         ( 6.5774,   3.3211),   # DNMM — Murtala Muhammed
+    # ── Australia / NZ ──
+    "Sydney":        (-33.9399, 151.1753),  # YSSY — Kingsford Smith
+    "Melbourne":     (-37.6733, 144.8435),  # YMML — Tullamarine
+    "Brisbane":      (-27.3842, 153.1175),  # YBBN — Brisbane
+    "Perth":         (-31.9403, 115.9668),  # YPPH — Perth
+    "Auckland":      (-37.0081, 174.7919),  # NZAA — Auckland
+    "Wellington":    (-41.3278, 174.8083),  # NZWN — Wellington
 }
 
 CITY_COORDS: Dict[str, Tuple[float, float]] = {
@@ -616,17 +665,17 @@ def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[W
 # Розширений словник CITY -> ICAO (ключові аеропорти для ColdMath)
 CITY_TO_ICAO: Dict[str, str] = {
     # USA
-    "NYC": "KJFK", "New York": "KJFK",
+    "NYC": "KLGA", "New York": "KLGA",
     "Chicago": "KORD",
     "Los Angeles": "KLAX", "LA": "KLAX", "Los Angeles CA": "KLAX",
     "San Francisco": "KSFO",
     "Miami": "KMIA",
-    "Dallas": "KDFW", "Dallas/Fort Worth": "KDFW",
+    "Dallas": "KDAL",
     "Seattle": "KSEA",
     "Boston": "KBOS",
-    "Denver": "KDEN",
+    "Denver": "KBKF",
     "Atlanta": "KATL",
-    "Houston": "KIAH",
+    "Houston": "KHOU",
     "Phoenix": "KPHX",
     "Las Vegas": "KLAS",
     "Austin": "KAUS",
@@ -636,8 +685,8 @@ CITY_TO_ICAO: Dict[str, str] = {
     "Charlotte": "KCLT",
     "Orlando": "KMCO",
     # Europe
-    "London": "EGLL", "London Heathrow": "EGLL",
-    "Paris": "LFPG", "Paris Charles de Gaulle": "LFPG",
+    "London": "EGLC", "London City": "EGLC",
+    "Paris": "LFPB", "Paris Le Bourget": "LFPB",
     "Berlin": "EDDB", "Berlin Brandenburg": "EDDB",
     "Munich": "EDDM", "Munich International": "EDDM",
     "Amsterdam": "EHAM",
@@ -651,7 +700,7 @@ CITY_TO_ICAO: Dict[str, str] = {
     "Tokyo": "RJTT", "Tokyo Haneda": "RJTT",
     "Seoul": "RKSI", "Seoul Incheon": "RKSI",
     "Busan": "RKPK", "Busan Gimhae": "RKPK",
-    "Shanghai": "ZSSS", "Shanghai Hongqiao": "ZSSS",
+    "Shanghai": "ZSPD", "Shanghai Pudong": "ZSPD",
     "Beijing": "ZBAA", "Beijing Capital": "ZBAA",
     "Chengdu": "ZUUU", "Chengdu Shuangliu": "ZUUU",
     "Hong Kong": "VHHH", "Hong Kong International": "VHHH",
@@ -662,7 +711,7 @@ CITY_TO_ICAO: Dict[str, str] = {
     "Ankara": "LTAC", "Ankara Esenboga": "LTAC",
     "Lucknow": "VILK", "Lucknow Amausi": "VILK",
     "Karachi": "OPKC", "Karachi Jinnah": "OPKC",
-    "Moscow": "UUDD", "Moscow Domodedovo": "UUDD",
+    "Moscow": "UUWW", "Moscow Vnukovo": "UUWW",
     # South America
     "Buenos Aires": "SAEZ", "Buenos Aires Ezeiza": "SAEZ",
     "Sao Paulo": "SBGR", "Sao Paulo Guarulhos": "SBGR",
@@ -810,7 +859,7 @@ def test_all_apis() -> Dict[str, bool]:
     for name, func in [
         ("ENSEMBLE", lambda: fetch_open_meteo_ensemble(test_city, 12.0)),
         ("Open-Meteo/forecast", lambda: requests.get("https://api.open-meteo.com/v1/forecast", params={"latitude": 51.5, "longitude": -0.13, "daily": "temperature_2m_max", "timezone": "auto", "forecast_days": 1}, timeout=10)),
-        ("METAR/aviationweather", lambda: _request_with_retry("https://aviationweather.gov/api/data/metar", params={"ids": "EGLL", "format": "json", "hours": 1})),
+        ("METAR/aviationweather", lambda: _request_with_retry("https://aviationweather.gov/api/data/metar", params={"ids": "EGLC", "format": "json", "hours": 1})),
         ("Historical/archive", lambda: _request_with_retry("https://archive-api.open-meteo.com/v1/archive", params={"latitude": 51.5, "longitude": -0.13, "start_date": "2026-07-02", "end_date": "2026-07-02", "daily": "temperature_2m_max", "timezone": "auto"})),
     ]:
         try:
