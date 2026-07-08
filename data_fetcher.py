@@ -1,5 +1,5 @@
 """
-data_fetcher.py — Polymarket Weather Bot v17 (CLEAN ENSEMBLE)
+data_fetcher.py — Polymarket Weather Bot v22 (RATE-LIMITED)
 Джерела: Open-Meteo ENSEMBLE (primary) + NOAA + NASA POWER + METAR (confirmation) + OBSERVED (physical floor)
 v17: GFS/ECMWF видалено — 100% 429 на api.open-meteo.com. ENSEMBLE 31-member достатньо.
 """
@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 _cache: Dict[str, Tuple[float, any]] = {}
 CACHE_TTL = 900  # 15 хвилин
 
+# Глобальний throttling для Open-Meteo (безкоштовний tier ~60 req/min)
+_last_request_time: float = 0.0
+MIN_REQUEST_INTERVAL: float = 0.25  # 250ms між запитами (≤240 req/min)
+
 
 def _cache_set(key: str, val):
     _cache[key] = (time.time(), val)
@@ -32,10 +36,23 @@ def _cache_get(key: str):
     return None
 
 
+def _throttle():
+    global _last_request_time
+    elapsed = time.time() - _last_request_time
+    if elapsed < MIN_REQUEST_INTERVAL:
+        time.sleep(MIN_REQUEST_INTERVAL - elapsed)
+    _last_request_time = time.time()
+
+
 def _request_with_retry(url, params=None, timeout=10, headers=None, retries=3, backoff=2):
     for attempt in range(retries):
+        _throttle()
         try:
             r = requests.get(url, params=params, timeout=timeout, headers=headers)
+            if r.status_code == 429:
+                logger.warning(f"429 rate-limited, waiting 3s... ({url[:60]}...)")
+                time.sleep(3)
+                continue
             r.raise_for_status()
             return r
         except (requests.exceptions.RequestException, requests.exceptions.Timeout) as e:
