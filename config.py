@@ -51,9 +51,8 @@ SCAN_INTERVAL_SEC: int = 300
 SCAN_MAX_SLEEP_SEC: int = 600
 
 # ── PROBABILITY CALIBRATION ────────────────────────────────
-# Систематична похибка: модель переоцінює → множимо на bias
-# 0.85 = 15% systematic overconfidence discount
-PROB_BIAS: float = 0.85
+# sigma вже кодує uncertainty. bias=1.0 = без double-discount.
+PROB_BIAS: float = 1.0
 
 # Для above/below (max cap for Gaussian probability)
 CAP_SHORT: float = 0.85   # ≤6h
@@ -64,7 +63,7 @@ MAX_EDGE_CAP: float = 0.50
 
 # ── SIGMA (ENSEMBLE SPREAD) ────────────────────────────────
 # sigma = max(ensemble_stdev * SIGMA_SPREAD_FACTOR, SIGMA_MIN)
-SIGMA_MIN: float = 1.5
+SIGMA_MIN: float = 4.5
 SIGMA_SPREAD_FACTOR: float = 1.30
 
 # ── EMPIRICAL BLENDING ────────────────────────────────────

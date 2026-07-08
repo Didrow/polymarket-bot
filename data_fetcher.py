@@ -109,10 +109,7 @@ class WeatherForecast:
 
     def prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         raw_p = self.raw_prob_above_temp_c(threshold_c, is_low, hours)
-        
-        # PROB_BIAS: систематична похибка моделі
-        prob_bias = getattr(config, 'PROB_BIAS', 1.0)
-        biased = raw_p * prob_bias
+        biased = raw_p
         
         if hours <= 6.0:
             max_cap = getattr(config, 'CAP_SHORT', 0.85)
@@ -125,10 +122,7 @@ class WeatherForecast:
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         raw_p = 1.0 - self.raw_prob_above_temp_c(threshold_c, is_low, hours)
-        
-        # PROB_BIAS: systematic bias discount
-        prob_bias = getattr(config, 'PROB_BIAS', 1.0)
-        biased = raw_p * prob_bias
+        biased = raw_p
         
         if hours <= 6.0:
             max_cap = getattr(config, 'CAP_SHORT', 0.85)
