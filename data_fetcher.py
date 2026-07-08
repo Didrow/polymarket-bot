@@ -65,20 +65,17 @@ class WeatherForecast:
     temp_low_members: List[float] = field(default_factory=list)
 
     def _get_adjusted_members(self, is_low: bool = False) -> List[float]:
-        """Повертає зміщені члени ансамблю, середнє значення яких дорівнює консенсусному."""
+        """Повертає RAW (незміщені) члени ансамблю для підрахунку spread."""
         members = self.temp_low_members if is_low else self.temp_high_members
         if not members or len(members) < 5:
             return []
-        consensus_mean = self.temp_low_c if is_low else self.temp_high_c
-        gfs_mean = sum(members) / len(members)
-        bias = consensus_mean - gfs_mean
-        return [m + bias for m in members]
+        return members
 
     def _get_base_sigma(self) -> float:
         return 3.5
 
     def _get_sigma(self, hours: float = 24.0) -> float:
-        # Обчислюємо sigma з actual ensemble spread (stdev членів)
+        # sigma = max(ensemble_stdev * SIGMA_SPREAD_FACTOR, SIGMA_MIN)
         stdev = None
         for member_list in [self.temp_high_members, self.temp_low_members]:
             if member_list and len(member_list) >= 5:
@@ -87,21 +84,13 @@ class WeatherForecast:
                 stdev = math.sqrt(m_var)
                 break
 
-        # Мінімальний sigma floor за горизонтом прогнозу
-        # 3/3.5/4.5°C — історично відкалібровані значення реальної forecast error.
-        # Ensemble spread (stdev) може тільки підняти sigma вище, ніколи не знизити.
-        if hours <= 6.0:
-            sigma_floor = 3.0
-        elif hours <= 18.0:
-            sigma_floor = 3.5
-        else:
-            sigma_floor = 4.5
+        spread_factor = getattr(config, 'SIGMA_SPREAD_FACTOR', 1.30)
+        sigma_min = getattr(config, 'SIGMA_MIN', 1.5)
 
-        if stdev is not None:
-            hour_factor = 1.0 + 0.015 * max(0, hours - 6)
-            sigma_value = max(sigma_floor, stdev * min(hour_factor, 1.5))
+        if stdev is not None and stdev > 0:
+            sigma_value = max(sigma_min, stdev * spread_factor)
         else:
-            sigma_value = max(sigma_floor, self._get_base_sigma())
+            sigma_value = max(sigma_min, self._get_base_sigma())
 
         # Адаптивне калібрування з історичних помилок
         try:
@@ -112,37 +101,19 @@ class WeatherForecast:
             return round(sigma_value, 3)
 
     def raw_prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
-        members = self._get_adjusted_members(is_low)
+        # PURE GAUSSIAN: використовуємо тільки parametric (без empirical blending)
         sigma = self._get_sigma(hours)
-
-        # Якщо є дані ансамблю (31 модель) — використовуємо ЕМПІРИЧНИЙ підрахунок
-        if members and len(members) >= 5:
-            # Емпірична частка members вище порогу
-            count_above = sum(1 for m in members if m > threshold_c)
-            prob_empirical = count_above / len(members)
-            
-            # Параметрична оцінка (Gaussian через erf)
-            mean = self.temp_low_c if is_low else self.temp_high_c
-            prob_parametric = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
-            
-            # v13: збільшено вагу емпірики до 30% (з 20%)
-            # GFS 31 member корелюють, але 0.20 було занадто консервативно.
-            # Реалістичний баланс: 0.30 емпірика + 0.70 параметрика.
-            prob = prob_empirical * 0.30 + prob_parametric * 0.70
-            return prob
-        
-        # Fallback до одного значення, якщо ансамбль недоступний
-        tc = self.temp_low_c if is_low else self.temp_high_c
-        if tc == 0.0:
-            return 0.50
-        diff = tc - threshold_c
-        prob = 0.5 * (1 + math.erf(diff / (sigma * math.sqrt(2))))
+        mean = self.temp_low_c if is_low else self.temp_high_c
+        prob = 0.5 * (1 + math.erf((mean - threshold_c) / (sigma * math.sqrt(2))))
         return prob
 
     def prob_above_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         raw_p = self.raw_prob_above_temp_c(threshold_c, is_low, hours)
         
-        # Кап з config.py (змінювати там)
+        # PROB_BIAS: систематична похибка моделі
+        prob_bias = getattr(config, 'PROB_BIAS', 1.0)
+        biased = raw_p * prob_bias
+        
         if hours <= 6.0:
             max_cap = getattr(config, 'CAP_SHORT', 0.85)
         elif hours <= 18.0:
@@ -150,12 +121,15 @@ class WeatherForecast:
         else:
             max_cap = getattr(config, 'CAP_LONG', 0.65)
 
-        return max(0.01, min(max_cap, round(raw_p, 4)))
+        return max(0.01, min(max_cap, round(biased, 4)))
 
     def prob_below_temp_c(self, threshold_c: float, is_low: bool = False, hours: float = 24.0) -> float:
         raw_p = 1.0 - self.raw_prob_above_temp_c(threshold_c, is_low, hours)
         
-        # Кап з config.py (змінювати там)
+        # PROB_BIAS: systematic bias discount
+        prob_bias = getattr(config, 'PROB_BIAS', 1.0)
+        biased = raw_p * prob_bias
+        
         if hours <= 6.0:
             max_cap = getattr(config, 'CAP_SHORT', 0.85)
         elif hours <= 18.0:
@@ -163,7 +137,7 @@ class WeatherForecast:
         else:
             max_cap = getattr(config, 'CAP_LONG', 0.65)
 
-        return max(0.01, min(max_cap, round(raw_p, 4)))
+        return max(0.01, min(max_cap, round(biased, 4)))
 
     def prob_exact_temp_c(self, threshold_c: float, is_low: bool = False, half_width: float = 0.5, hours: float = 24.0) -> float:
         members = self._get_adjusted_members(is_low)
@@ -973,20 +947,6 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
         # НЕ додаємо окрему 10% корекцію — це вже враховано у зважуванні вище.
         if metar_fc and "METAR" not in result.sources_used:
             result.sources_used.append("METAR")
-
-    # v14.6: City-specific season bias correction
-    # ENSEMBLE систематично занижує температуру для US міст у літній сезон
-    bias = _get_season_bias_c(city)
-    if bias != 0.0:
-        is_low_forecast = any(w in city.lower() for w in ["buenos", "sao paulo", "cape", "sydney"])
-        if not is_low_forecast:
-            result.temp_high_c = round(result.temp_high_c + bias, 1)
-            result.temp_low_c = round(result.temp_low_c + bias * 0.3, 1)
-            if "BIAS_CORR" not in result.sources_used:
-                result.sources_used.append("BIAS_CORR")
-            logger.info(
-                f"🌡️ BIAS_CORR {city}: +{bias:.1f}°C → temp_high={result.temp_high_c:.1f}°C"
-            )
 
     _cache_set(key, result)
     logger.info(

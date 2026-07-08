@@ -118,45 +118,25 @@ def _get_cap(hours: float) -> float:
 def calculate_our_probability(forecast: WeatherForecast, threshold_c: float, kind: str,
                               is_low: bool, hours: float) -> float:
     """
-    Розраховує ймовірність на основі ensemble forecast.
-    Використовує емпіричний підрахунок (count members above/below threshold)
-    змішаний з Gaussian parametric.
+    PURE GAUSSIAN: обчислює ймовірність через erf (без empirical blending).
     """
-    members = forecast._get_adjusted_members(is_low)
     sigma = forecast._get_sigma(hours)
     mean_c = forecast.temp_low_c if is_low else forecast.temp_high_c
 
-    if members and len(members) >= 5:
-        if kind == "above":
-            count = sum(1 for m in members if m > threshold_c)
-        else:
-            count = sum(1 for m in members if m < threshold_c)
-        prob_empirical = count / len(members)
-
-        if kind == "above":
-            prob_parametric = 0.5 * (1 + math.erf((mean_c - threshold_c) / (sigma * math.sqrt(2))))
-        else:
-            prob_parametric = 0.5 * (1 + math.erf((threshold_c - mean_c) / (sigma * math.sqrt(2))))
-
-        emp_w = getattr(config, 'EMPRICIAL_WEIGHT', 0.30)
-        par_w = getattr(config, 'ENSEMBLE_WEIGHT', 0.70)
-        raw = prob_empirical * emp_w + prob_parametric * par_w
+    if kind == "above":
+        raw = 0.5 * (1 + math.erf((mean_c - threshold_c) / (sigma * math.sqrt(2))))
     else:
-        if kind == "above":
-            raw = 0.5 * (1 + math.erf((mean_c - threshold_c) / (sigma * math.sqrt(2))))
-        else:
-            raw = 0.5 * (1 + math.erf((threshold_c - mean_c) / (sigma * math.sqrt(2))))
+        raw = 0.5 * (1 + math.erf((threshold_c - mean_c) / (sigma * math.sqrt(2))))
+
+    # PROB_BIAS correction
+    prob_bias = getattr(config, 'PROB_BIAS', 1.0)
+    raw = raw * prob_bias
 
     cap = _get_cap(hours)
 
-    # Прозорість: spread у debug-лог
-    spread_str = ""
-    if members and len(members) >= 5:
-        m_mean = sum(members) / len(members)
-        m_var = sum((m - m_mean) ** 2 for m in members) / len(members)
-        spread_str = f" spread={math.sqrt(m_var):.2f}°C"
+    sigma_str = f"sigma={sigma:.1f}°C"
     if raw < 0.01:
-        logger.info(f"our_prob raw={raw:.4f} kind={kind} sigma={sigma:.1f}°C{spread_str}")
+        logger.info(f"our_prob raw={raw:.4f} kind={kind} {sigma_str}")
 
     return max(0.01, min(cap, round(raw, 4)))
 
@@ -229,11 +209,11 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
     distance_c = abs(fc_temp - threshold_c)
 
-    # Sanity check: якщо наша prob < 5% і forecast занадто далеко від threshold,
-    # ми в хвості розподілу де Gaussian неточний — пропускаємо
+    # Sanity check: якщо forecast занадто далеко від threshold у хвості розподілу
+    max_dist_sigma = getattr(config, 'MAX_DISTANCE_SIGMA', 3.5)
     sigma_edge = forecast._get_sigma(market.hours_to_resolution)
-    if our_prob < 0.05 and distance_c > 3.5 * sigma_edge:
-        logger.debug(f"⏭️ SKIP: our_prob={our_prob:.3f} at dist={distance_c:.1f}°C > 3.5σ={3.5*sigma_edge:.1f}°C")
+    if distance_c > max_dist_sigma * sigma_edge and our_prob > 0.50:
+        logger.debug(f"⏭️ TAIL CHASE SKIP: our_prob={our_prob:.3f} at dist={distance_c:.1f}°C > {max_dist_sigma}σ={max_dist_sigma*sigma_edge:.1f}°C")
         return None
 
     # Ринкова ціна

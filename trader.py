@@ -333,23 +333,49 @@ def _get_market_vol(price: float) -> float:
     p = max(0.01, min(0.99, price))
     return math.sqrt(p * (1.0 - p))
 
+def _get_equity_drawdown(current_capital: float) -> float:
+    """Повертає поточну просадку: 0 = без просадки, 0.20 = 20% просадка."""
+    initial = getattr(config, 'INITIAL_CAPITAL', 100.0)
+    if initial <= 0:
+        return 0.0
+    return max(0.0, (initial - current_capital) / initial)
+
+
 def decide_position_size(edge_result: EdgeResult, current_capital: float) -> float:
+    drawdown = _get_equity_drawdown(current_capital)
+    dd_limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
+    if drawdown >= dd_limit:
+        logger.warning(f"⛔ Drawdown {drawdown:.1%} >= {dd_limit:.0%} limit — NO NEW TRADES")
+        return 0.0
+
     entry_price = edge_result.market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else max(0.01, 1 - edge_result.market.midpoint_yes)
     confidence = edge_result.confidence
 
     if getattr(config, "USE_KELLY", True):
-        p = min(edge_result.estimated_prob, 0.80)
+        p = edge_result.estimated_prob
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
-        kelly_scale = getattr(config, "KELLY_SCALE", 0.25)
-        kelly_size = current_capital * kelly_raw * kelly_scale * confidence
+        kelly_scale = getattr(config, "KELLY_SCALE", 0.20)
+        # Зменшуємо Kelly пропорційно просадці
+        dd_factor = 1.0 - min(drawdown * 2.0, 0.50)
+        kelly_size = current_capital * kelly_raw * kelly_scale * confidence * dd_factor
         final = kelly_size
     else:
         final = current_capital * 0.03 * confidence
 
     final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * config.MAX_POSITION_PCT))
     return round(final, 2)
+
+
+def check_drawdown_stop(current_capital: float) -> bool:
+    """True = треба зупинити торгівлю через просадку."""
+    dd = _get_equity_drawdown(current_capital)
+    limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
+    if dd >= limit:
+        logger.critical(f"🛑 ДОСЯГНУТО ЛІМІТУ ПРОСАДКИ: {dd:.1%} >= {limit:.0%}. ЗУПИНКА ТОРГІВЛІ.")
+        return True
+    return False
 
 
 def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) -> Optional[Position]:

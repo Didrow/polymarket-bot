@@ -1,12 +1,12 @@
 """
-config.py — Weather Prediction Bot v20 (CLEAN ENSEMBLE STRATEGY)
+config.py — Weather Prediction Bot v21 (PURE GAUSSIAN ENSEMBLE)
 
-Стратегія: чиста ensemble-прогнозна модель без METAR arb.
-- Використовуємо тільки Open-Meteo ENSEMBLE (31 member GFS)
-- Купуємо YES коли ensemble ймовірність > ринкова ціна + edge
-- Купуємо NO  коли ринкова ціна > ensemble ймовірність + edge
-- Без METAR (aviationweather.gov timeout на Render)
-- Без range/categorical ринків (тільки above/below)
+Стратегія: чиста Gaussian-ймовірність з ensemble forecast.
+- Купуємо YES коли P(above/below) > market price + edge
+- Купуємо NO  коли market price > our_prob + edge
+- Pure Gaussian (erf), NO empirical blending
+- Системна похибка PROB_BIAS (0.85) прибирає overconfidence
+- Ensemble spread = sigma (без 3°C+ floor)
 """
 
 from typing import List
@@ -25,7 +25,7 @@ INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.04
 MIN_POSITION_USD: float = 2.0
 MAX_POSITION_USD: float = 5.0
-MAX_ACTIVE_POSITIONS: int = 6
+MAX_ACTIVE_POSITIONS: int = 10
 MAX_OPEN_PER_CYCLE: int = 1
 MAX_POSITIONS_PER_CITY: int = 1
 STOP_LOSS_PCT: float = 0.30
@@ -33,14 +33,15 @@ STOP_LOSS_MIN_HOLD_HOURS: float = 0.5
 MAX_TOTAL_EXPOSURE_PCT: float = 0.30
 MAX_DAILY_LOSS_PCT: float = 0.15
 MAX_DAILY_LOSS_USD: float = 20.0
+DRAWDOWN_LIMIT: float = 0.25    # зупинка торгівлі якщо equity < (1 - DRAWDOWN_LIMIT) * capital
 
 # ── STRATEGY: ENSEMBLE PREDICTION ──────────────────────────
 # Тільки above/below ринки
 KINDS_ONLY: List[str] = ["above", "below"]
 
 # Мінімальний edge для входу
-MIN_EDGE_YES: float = 0.20   # buy YES: our_prob > market + 20%
-MIN_EDGE_NO: float = 0.20    # buy NO:  market > our_prob + 20%
+MIN_EDGE_YES: float = 0.25   # buy YES: our_prob > market + 25%
+MIN_EDGE_NO: float = 0.25    # buy NO:  market > our_prob + 25%
 MIN_PROB_ENTRY: float = 0.10
 
 MAX_RESOLUTION_HOURS: int = 48
@@ -51,19 +52,33 @@ SCAN_MAX_SLEEP_SEC: int = 600
 
 # ── PROBABILITY CALIBRATION ────────────────────────────────
 # Систематична похибка: модель переоцінює → множимо на bias
-PROB_BIAS: float = 1.0  # sigma вже кодує uncertainty, bias = double-discount
+# 0.85 = 15% systematic overconfidence discount
+PROB_BIAS: float = 0.85
 
-# Для above/below:
+# Для above/below (max cap for Gaussian probability)
 CAP_SHORT: float = 0.85   # ≤6h
 CAP_MID: float = 0.75     # ≤18h
 CAP_LONG: float = 0.65    # >18h
 
 MAX_EDGE_CAP: float = 0.50
 
+# ── SIGMA (ENSEMBLE SPREAD) ────────────────────────────────
+# sigma = max(ensemble_stdev * SIGMA_SPREAD_FACTOR, SIGMA_MIN)
+SIGMA_MIN: float = 1.5
+SIGMA_SPREAD_FACTOR: float = 1.30
+
+# ── EMPIRICAL BLENDING ────────────────────────────────────
+# DISABLED (pure Gaussian). Set > 0 to partially re-enable.
+EMPRICIAL_WEIGHT: float = 0.0
+ENSEMBLE_WEIGHT: float = 1.0
+
 # ── KELLY ──────────────────────────────────────────────────
 USE_KELLY: bool = True
-KELLY_SCALE: float = 0.25
+KELLY_SCALE: float = 0.20
 KELLY_MAX_POSITION_USD: float = 5.0
+
+# ── SANITY CHECKS ─────────────────────────────────────────
+MAX_DISTANCE_SIGMA: float = 3.5   # skip if distance_c > this * sigma AND our_prob > 0.50
 
 # ── MISC ───────────────────────────────────────────────────
 DATA_DIR: str = "data"
