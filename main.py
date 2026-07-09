@@ -182,6 +182,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     portfolio = get_portfolio_summary()
     safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
+    current_capital = safeguard.state.current_capital
     current_equity = safeguard.state.equity
     # Drawdown check (equity-based, NOT cash-only)
     initial_cap = getattr(config, 'INITIAL_CAPITAL', 100.0)
