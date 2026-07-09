@@ -357,6 +357,7 @@ US_CITIES = {
 }
 
 CITY_SEASON_BIAS_C: Dict[str, Dict[str, float]] = {
+    # ── US cities ───────────────────────────────────────────
     "Miami": {"summer": 1.7, "winter": 0.0, "shoulder": 0.5},
     "Dallas": {"summer": 1.2, "winter": 0.0, "shoulder": 0.3},
     "Chicago": {"summer": 0.8, "winter": 0.0, "shoulder": 0.2},
@@ -368,6 +369,58 @@ CITY_SEASON_BIAS_C: Dict[str, Dict[str, float]] = {
     "Seattle": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
     "Denver": {"summer": 0.4, "winter": 0.0, "shoulder": 0.1},
     "Boston": {"summer": 0.6, "winter": 0.0, "shoulder": 0.2},
+    "Austin": {"summer": 1.0, "winter": 0.0, "shoulder": 0.3},
+    "San Francisco": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Phoenix": {"summer": 1.2, "winter": 0.0, "shoulder": 0.3},
+    "Las Vegas": {"summer": 1.0, "winter": 0.0, "shoulder": 0.3},
+    "Minneapolis": {"summer": 0.6, "winter": 0.0, "shoulder": 0.2},
+    "Portland": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Nashville": {"summer": 0.7, "winter": 0.0, "shoulder": 0.2},
+    "Charlotte": {"summer": 0.7, "winter": 0.0, "shoulder": 0.2},
+    "Orlando": {"summer": 1.5, "winter": 0.0, "shoulder": 0.4},
+    # ── Europe ──────────────────────────────────────────────
+    "London": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Paris": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Berlin": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Munich": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Amsterdam": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Rome": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Madrid": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Dublin": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Warsaw": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Vienna": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Prague": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Moscow": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Ankara": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    # ── Asia ────────────────────────────────────────────────
+    "Tokyo": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Seoul": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Busan": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Singapore": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Hong Kong": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Shanghai": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Beijing": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Dubai": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Bangkok": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Lucknow": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Chengdu": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Karachi": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Jeddah": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    # ── South America ───────────────────────────────────────
+    "Buenos Aires": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Sao Paulo": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Santiago": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Lima": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    # ── Africa ──────────────────────────────────────────────
+    "Cape Town": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Lagos": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    # ── Oceania ─────────────────────────────────────────────
+    "Sydney": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Melbourne": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Brisbane": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Perth": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Auckland": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
+    "Wellington": {"summer": 0.3, "winter": 0.0, "shoulder": 0.1},
 }
 
 
