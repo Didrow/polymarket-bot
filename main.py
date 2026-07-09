@@ -182,11 +182,11 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
 
     portfolio = get_portfolio_summary()
     safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
-    current_capital = safeguard.state.current_capital
-    # Drawdown check
+    current_equity = safeguard.state.equity
+    # Drawdown check (equity-based, NOT cash-only)
     initial_cap = getattr(config, 'INITIAL_CAPITAL', 100.0)
     if initial_cap > 0:
-        dd = max(0.0, (initial_cap - current_capital) / initial_cap)
+        dd = max(0.0, (initial_cap - current_equity) / initial_cap)
         dd_limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
         if dd >= dd_limit:
             logger.critical(f"🛑 ДОСЯГНУТО ЛІМІТУ ПРОСАДКИ: {dd:.1%} >= {dd_limit:.0%}. ЗУПИНКА ТОРГІВЛІ.")

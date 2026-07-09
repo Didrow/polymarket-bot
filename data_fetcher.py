@@ -424,12 +424,12 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, targ
         return None
 
     if target_date:
-        day_index = min(max((target_date - datetime.now(timezone.utc).date()).days, 0), 4)
+        target_date_str = target_date.isoformat()
     else:
         target_dt = datetime.now(timezone.utc) + timedelta(hours=hours_to_resolution)
-        day_index = min(max((target_dt.date() - datetime.now(timezone.utc).date()).days, 0), 4)
+        target_date_str = target_dt.date().isoformat()
 
-    key = f"ensemble_{city}_{day_index}"
+    key = f"ensemble_{city}_{target_date_str}"
     cached = _cache_get(key)
     if cached:
         return cached
@@ -453,8 +453,12 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, targ
         r.raise_for_status()
         daily = r.json().get("daily", {})
 
+        # Resolve correct day_index from API's local-time indexed array
+        daily_times = daily.get("time", [])
+        day_index = 0
+        if daily_times and target_date_str in daily_times:
+            day_index = daily_times.index(target_date_str)
 
-        
         high_m, low_m = [], []
         for i in range(1, 32):
             k_high = f"temperature_2m_max_member{i:02d}"
