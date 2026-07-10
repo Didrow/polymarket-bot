@@ -797,7 +797,15 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
             headers={"User-Agent": "PolymarketWeatherBot/ColdMath"}
         )
         r.raise_for_status()
-        data = r.json()
+        ctype = r.headers.get("content-type", "")
+        if "json" not in ctype and not r.text.strip().startswith(("[", "{")):
+            logger.debug(f"METAR {city} ({icao}): не-JSON відповідь (content-type={ctype[:30]})")
+            return None
+        try:
+            data = r.json()
+        except Exception:
+            logger.debug(f"METAR {city} ({icao}): r.json() не зміг розпарсити")
+            return None
         if not data or not isinstance(data, list):
             return None
 
@@ -824,7 +832,7 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
         logger.debug(f"🛬 METAR {city} ({icao}): {temp_c}°C")
         return fc
     except Exception as e:
-        logger.warning(f"METAR error {city} ({icao}): {e}")
+        logger.debug(f"METAR {city} ({icao}) skip: {e}")
         return None
 
 
