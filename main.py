@@ -301,7 +301,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "ENSEMBLE"
+            _strategy = "SNIPER_GRID"
             log_trade_to_pg({
                 "cycle": cycle_count,
                 "action": "OPEN",
@@ -341,18 +341,20 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v20  🌤️")
-    logger.info("  🎯 CLEAN ENSEMBLE PREDICTION STRATEGY")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v23  🌤️")
+    logger.info("  🎯 SNIPER GRID (coldmath-style forecast buckets)")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
     logger.info(f"  Kelly:    {'✅' if config.USE_KELLY else '❌'} (scale={config.KELLY_SCALE})")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
-    logger.info(f"  Стратегія:  ENSEMBLE prediction (above/below)")
+    kinds = "/".join(getattr(config, 'KINDS_ONLY', ['above','below']))
+    logger.info(f"  Стратегія:  SNIPER GRID ({kinds})")
     logger.info(f"  Горизонт:   {config.MIN_RESOLUTION_HOURS:.0f}-{config.MAX_RESOLUTION_HOURS}h")
-    logger.info(f"  Edge YES:   {getattr(config, 'MIN_EDGE_YES', 0.20):.0%} | Edge NO: {getattr(config, 'MIN_EDGE_NO', 0.20):.0%}")
-    logger.info(f"  Prob bias:  {getattr(config, 'PROB_BIAS', 0.75):.0%}")
-    logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots")
+    logger.info(f"  Grid edge:  {getattr(config, 'SNIPER_GRID_MIN_EDGE', 0.04):.0%} YES | {getattr(config, 'SNIPER_GRID_MIN_EDGE_NO', 0.10):.0%} NO | Trend {getattr(config, 'MIN_EDGE_YES', 0.20):.0%}")
+    logger.info(f"  Categ disc: {getattr(config, 'CATEGORICAL_DISCOUNT', 0.75):.0%} | Empirical: {getattr(config, 'EMPRICICAL_WEIGHT', 0.30):.0%}")
+    logger.info(f"  Sigma min:  {config.SIGMA_MIN:.1f}°C | Prob bias: {getattr(config, 'PROB_BIAS', 1.0):.2f}")
+    logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots, {getattr(config, 'MAX_POSITIONS_PER_CITY', 1)}/city")
     logger.info("=" * 60)
     logger.info("")
 
