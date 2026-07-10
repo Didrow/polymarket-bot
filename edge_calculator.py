@@ -461,7 +461,27 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results = []
     skip_vol = skip_city = skip_hours = skip_none = skip_spread = skip_kind = 0
 
-    for market in markets:
+    # ── PREFETCH: зігріваємо кеш forecast для всіх унікальних міст ──
+    # Це замість 1166 викликів get_best_forecast (кожен з яких міг би робити 5 HTTP запитів),
+    # робимо ~57 prefetch (по одному на місто з whitelist), а calculate_edge потім бере з кешу.
+    unique_cities = set()
+    for m in markets:
+        if m.detected_city and m.detected_city in getattr(config, 'CITY_WHITELIST', []):
+            unique_cities.add(m.detected_city)
+    if unique_cities:
+        logger.info(f"🌤️ Prefetch forecast для {len(unique_cities)} міст...")
+        for i, city in enumerate(sorted(unique_cities), 1):
+            try:
+                get_best_forecast(city, hours_to_resolution=24.0, target_date=None)
+            except Exception as e:
+                logger.debug(f"Prefetch {city} skip: {e}")
+            if i % 10 == 0:
+                logger.info(f"  prefetch: {i}/{len(unique_cities)} міст done")
+        logger.info(f"  prefetch завершено ({len(unique_cities)} міст)")
+
+    for idx, market in enumerate(markets):
+        if len(markets) > 400 and idx % 200 == 0 and idx > 0:
+            logger.info(f"  scan progress: {idx}/{len(markets)} processed, {len(results)} tradeable so far")
         if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
             skip_vol += 1
             continue

@@ -46,8 +46,8 @@ def _throttle():
 
 
 def _request_with_retry(url, params=None, timeout=10, headers=None, retries=3, backoff=2):
-    # 429 progressive backoff: 3s → 10s → 30s
-    _429_WAIT = [3, 10, 30]
+    # 429 progressive backoff: 3s → 8s → 15s
+    _429_WAIT = [3, 8, 15]
     for attempt in range(retries):
         _throttle()
         try:
