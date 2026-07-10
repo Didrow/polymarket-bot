@@ -116,17 +116,11 @@ EMAIL_ENABLED: bool = False
 
 # ── CITIES ─────────────────────────────────────────────────
 CITY_WHITELIST: List[str] = [
+    # 20 US міст — NOAA path стабільний (без 429 на ensemble-api.open-meteo.com)
     "NYC", "New York", "Chicago", "Los Angeles", "Miami", "Dallas",
     "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
     "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
     "Portland", "Nashville", "Charlotte", "Orlando",
-    "London", "Paris", "Berlin", "Munich", "Amsterdam", "Rome",
-    "Madrid", "Dublin", "Warsaw", "Vienna", "Prague", "Moscow", "Ankara",
-    "Tokyo", "Seoul", "Busan", "Singapore", "Hong Kong", "Shanghai",
-    "Beijing", "Dubai", "Bangkok", "Lucknow", "Chengdu", "Karachi", "Jeddah",
-    "Buenos Aires", "Sao Paulo", "Santiago", "Lima",
-    "Cape Town", "Lagos",
-    "Sydney", "Melbourne", "Brisbane", "Perth", "Auckland", "Wellington",
 ]
 
 # ── DRY-RUN VALIDATION GATES ───────────────────────────────
