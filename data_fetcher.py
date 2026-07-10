@@ -18,11 +18,12 @@ logger = logging.getLogger(__name__)
 
 # TTL кеш
 _cache: Dict[str, Tuple[float, any]] = {}
-CACHE_TTL = 900  # 15 хвилин
+CACHE_TTL = 1800  # 30 хвилин (прогноз на день не змінюється швидше)
 
-# Глобальний throttling для Open-Meteo (безкоштовний tier ~60 req/min)
+# Глобальний throttling для Open-Meteo (безкошвний tier ~60 req/min);
+# 600ms = ~100 req/min — безпечно, залишає запас.
 _last_request_time: float = 0.0
-MIN_REQUEST_INTERVAL: float = 0.25  # 250ms між запитами (≤240 req/min)
+MIN_REQUEST_INTERVAL: float = 0.6  # 600ms між запитами
 
 
 def _cache_set(key: str, val):
@@ -45,13 +46,16 @@ def _throttle():
 
 
 def _request_with_retry(url, params=None, timeout=10, headers=None, retries=3, backoff=2):
+    # 429 progressive backoff: 3s → 10s → 30s
+    _429_WAIT = [3, 10, 30]
     for attempt in range(retries):
         _throttle()
         try:
             r = requests.get(url, params=params, timeout=timeout, headers=headers)
             if r.status_code == 429:
-                logger.warning(f"429 rate-limited, waiting 3s... ({url[:60]}...)")
-                time.sleep(3)
+                wait = _429_WAIT[min(attempt, len(_429_WAIT) - 1)]
+                logger.debug(f"429 rate-limited, waiting {wait}s... ({url[:60]}...)")
+                time.sleep(wait)
                 continue
             r.raise_for_status()
             return r
@@ -977,7 +981,7 @@ def get_best_forecast(city: str, hours_to_resolution: float = 24.0, target_date:
         if fc_ensemble:
             _cache_set(key, fc_ensemble)
             return fc_ensemble
-        logger.warning(f"Немає прогнозу для {city}")
+        logger.debug(f"Немає прогнозу для {city}")
         return None
 
     # Розрахунок зваженого середнього
