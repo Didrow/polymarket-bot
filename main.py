@@ -1,5 +1,5 @@
 """
-main.py — Polymarket Weather Bot v15 (METAR ARBITRAGE SNIPER)
+main.py — Polymarket Weather Bot v23b (SNIPER GRID)
 """
 
 import os
@@ -184,15 +184,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     safeguard.update_portfolio_value(portfolio.get("total_value", 0.0), portfolio.get("total_pnl", 0.0))
     current_capital = safeguard.state.current_capital
     current_equity = safeguard.state.equity
-    # Drawdown check (equity-based, NOT cash-only)
-    initial_cap = getattr(config, 'INITIAL_CAPITAL', 100.0)
-    if initial_cap > 0:
-        dd = max(0.0, (initial_cap - current_equity) / initial_cap)
-        dd_limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
-        if dd >= dd_limit:
-            logger.critical(f"🛑 ДОСЯГНУТО ЛІМІТУ ПРОСАДКИ: {dd:.1%} >= {dd_limit:.0%}. ЗУПИНКА ТОРГІВЛІ.")
-            time.sleep(config.SCAN_INTERVAL_SEC)
-            return 0
+    # Drawdown check — use safeguards manager (peak_equity based), NOT separate check
     if not safeguard.can_trade():
         return 0
 
@@ -284,7 +276,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         size = max(config.MIN_POSITION_USD, min(_raw_size, config.MAX_POSITION_USD))
         logger.debug(f"💰 Size: ${size:.2f} для {edge_result.market.question[:50]} (raw={_raw_size:.2f}, edge={edge_result.edge:.1%})")
         projected_exposure = portfolio.get("total_value", 0.0) + size
-        if projected_exposure > current_capital * getattr(config, "MAX_TOTAL_EXPOSURE_PCT", 0.35):
+        exposure_base = getattr(config, 'INITIAL_CAPITAL', 100.0)
+        if projected_exposure > exposure_base * getattr(config, "MAX_TOTAL_EXPOSURE_PCT", 0.50):
             logger.info("Ліміт сумарної експозиції досягнуто — пропускаємо")
             continue
         if not safeguard.pre_trade_check(size, current_capital):
@@ -308,7 +301,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
                 "direction": position.direction,
                 "market_question": position.question,
                 "city": position.city,
-                "forecast_c": getattr(edge_result.forecast, "temp_high_c", 0.0) if edge_result.forecast else 0.0,
+                "forecast_c": getattr(edge_result.forecast, "temp_low_c" if "lowest" in position.question.lower() else "temp_high_c", 0.0) if edge_result.forecast else 0.0,
                 "threshold_c": getattr(edge_result, "threshold_c", 0.0),
                 "our_prob": edge_result.estimated_prob,
                 "market_prob": edge_result.market_prob,

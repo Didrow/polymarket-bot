@@ -201,8 +201,10 @@ def _prob_exact_gauss(forecast: WeatherForecast, low_c: float, high_c: float,
             prob_emp = count_in / len(members)
             raw = (1 - emp_weight) * raw + emp_weight * prob_emp
 
-    # categorical discrвount — ансамбль members korlelującі, тому знижжуємо
-    discount = getattr(config, 'CATEGORICAL_DISCOUNT', 0.75)
+    # categorical discount — slight reduction for ensemble member correlation
+    # v23b: 0.75 was too aggressive, making our_prob systematically too low
+    # → bot only found extreme tails that rarely hit (0% WR over 11 trades)
+    discount = getattr(config, 'CATEGORICAL_DISCOUNT', 0.90)
     raw *= discount
 
     cap = _get_cap_exact(hours)

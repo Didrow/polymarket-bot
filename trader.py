@@ -1,5 +1,5 @@
 """
-trader.py — Polymarket Weather Bot 2026 (FIXED RESOLUTION)
+trader.py — Polymarket Weather Bot v23b (SNIPER GRID — FIXED RESOLUTION)
 """
 
 import math
@@ -212,21 +212,25 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                 is_low = 'lowest' in position.question.lower()
                 tc = obs_low if is_low else obs_high
 
-                from edge_calculator import _parse_threshold
-                kind, val_min, _, unit = _parse_threshold(position.question)
+                from edge_calculator import _parse_threshold, _parse_range, _unit_from_question, _f_to_c
+                parsed = _parse_threshold(position.question)
+                kind = parsed[0]
+                threshold_value = parsed[1]
+                unit = parsed[2] or _unit_from_question(position.question)
 
                 tc_c = tc
                 resolved_yes = None
                 if kind == "range":
-                    if unit == 'F':
-                        tc_f = tc * 9/5 + 32  # Конвертуємо спостережену темп. в F
-                        resolved_yes = (val_min - 0.5) <= tc_f < (val_max + 0.5)
+                    range_c = _parse_range(position.question, unit)
+                    if range_c is not None:
+                        low_c, high_c = range_c
+                        # _parse_range already converts F→C, so compare in C
+                        resolved_yes = (low_c - 0.5) <= tc < (high_c + 0.5)
                     else:
-                        resolved_yes = (val_min - 0.5) <= tc < (val_max + 0.5)
-                elif val_min is not None:
-                    threshold_c = val_min
+                        logger.warning(f"⚠️ DRY-RUN: range parse failed for {position.question[:60]}")
+                elif threshold_value is not None:
+                    threshold_c = threshold_value
                     if unit == 'F':
-                        from edge_calculator import _f_to_c
                         threshold_c = _f_to_c(threshold_c)
 
                     if kind == "above":
@@ -333,16 +337,19 @@ def _get_market_vol(price: float) -> float:
     p = max(0.01, min(0.99, price))
     return math.sqrt(p * (1.0 - p))
 
-def _get_equity_drawdown(current_capital: float) -> float:
-    """Повертає поточну просадку: 0 = без просадки, 0.20 = 20% просадка."""
+def _get_equity_drawdown(current_capital: float, portfolio_value: float = 0.0) -> float:
+    """Повертає поточну просадку від peak equity: 0 = без просади, 0.20 = 20% просадка."""
     initial = getattr(config, 'INITIAL_CAPITAL', 100.0)
-    if initial <= 0:
+    equity = current_capital + portfolio_value
+    # Використовуємо max(initial, equity) як peak — бо peak_equity зберігається в safeguards
+    peak = max(initial, equity)
+    if peak <= 0:
         return 0.0
-    return max(0.0, (initial - current_capital) / initial)
+    return max(0.0, (peak - equity) / peak)
 
 
-def decide_position_size(edge_result: EdgeResult, current_capital: float) -> float:
-    drawdown = _get_equity_drawdown(current_capital)
+def decide_position_size(edge_result: EdgeResult, current_capital: float, portfolio_value: float = 0.0) -> float:
+    drawdown = _get_equity_drawdown(current_capital, portfolio_value)
     dd_limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
     if drawdown >= dd_limit:
         logger.warning(f"⛔ Drawdown {drawdown:.1%} >= {dd_limit:.0%} limit — NO NEW TRADES")
@@ -368,9 +375,9 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float) -> flo
     return round(final, 2)
 
 
-def check_drawdown_stop(current_capital: float) -> bool:
+def check_drawdown_stop(current_capital: float, portfolio_value: float = 0.0) -> bool:
     """True = треба зупинити торгівлю через просадку."""
-    dd = _get_equity_drawdown(current_capital)
+    dd = _get_equity_drawdown(current_capital, portfolio_value)
     limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
     if dd >= limit:
         logger.critical(f"🛑 ДОСЯГНУТО ЛІМІТУ ПРОСАДКИ: {dd:.1%} >= {limit:.0%}. ЗУПИНКА ТОРГІВЛІ.")
@@ -408,7 +415,8 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         price = no_price
 
     price = max(price, 0.001)
-    size_usd = decide_position_size(edge_result, current_capital)
+    portfolio_value = sum(p.shares * p.current_price for p in _active_positions.values())
+    size_usd = decide_position_size(edge_result, current_capital, portfolio_value)
     token_id = market.token_yes_id if edge_result.edge_direction == "BUY_YES" else market.token_no_id
 
     pos = Position(
@@ -426,7 +434,7 @@ def place_trade(edge_result: EdgeResult, current_capital: float, clob_client) ->
         market_type=market.market_type,
         end_date=market.end_date,
         peak_price=price,
-        forecast_at_entry_c=getattr(edge_result.forecast, "temp_high_c", 0.0) if edge_result.forecast else 0.0,
+        forecast_at_entry_c=getattr(edge_result.forecast, "temp_low_c" if "lowest" in market.question.lower() else "temp_high_c", 0.0) if edge_result.forecast else 0.0,
         threshold_at_entry_c=edge_result.threshold_c,
     )
 

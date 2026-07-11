@@ -729,8 +729,9 @@ class SafeguardManager:
 
     def check_drawdown(self) -> bool:
         dd = self.state.drawdown_pct
-        if dd >= 0.30:
-            self._halt(f"Просадка {dd:.1%} >= ліміт 30%")
+        dd_limit = float(getattr(config, 'DRAWDOWN_LIMIT', 0.30))
+        if dd >= dd_limit:
+            self._halt(f"Просадка {dd:.1%} >= ліміт {dd_limit:.0%}")
             return False
         return True
 

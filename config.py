@@ -37,7 +37,7 @@ MAX_OPEN_PER_CYCLE: int = 3           # відкриваємо до 3 бакет
 MAX_POSITIONS_PER_CITY: int = 5       # ladder з 5 бакетів на місто (16.8/16.9/17.0/17.1/17.2)
 STOP_LOSS_PCT: float = 0.30           # сітка має час — даємо дихати
 STOP_LOSS_MIN_HOLD_HOURS: float = 2.0 # SL не працює перші 2 години (дапустимо втратити ранню поз)
-MAX_TOTAL_EXPOSURE_PCT: float = 0.50  # сітка потребує більше експозиції
+MAX_TOTAL_EXPOSURE_PCT: float = 0.80  # сітка потребує більше експозиції (0.50 блокувало нові угоди)
 MAX_DAILY_LOSS_PCT: float = 0.15
 MAX_DAILY_LOSS_USD: float = 20.0
 DRAWDOWN_LIMIT: float = 0.30          # tolerant для сітки (logbest мав drawdown 24.5% з ROI +105%)
@@ -74,9 +74,10 @@ TREND_MIN_NO_MARKET: float = 0.30      # NO від 30¢
 # sigma кодує uncertainty (4.5°C min — v22 урок)
 PROB_BIAS: float = 1.0
 
-# Categorical discount — v11/v13 прибутковий = 0.75
-# НЕ 0.30 (v9 вбитий) | НЕ 0.55 (v17 over-correct)
-CATEGORICAL_DISCOUNT: float = 0.75
+# Categorical discount — v23b: 0.75→0.90
+# 0.75 was too aggressive: Gaussian CDF already conservative, extra 25% cut
+# made our_prob systematically too low → bot only found extreme tails → 0% WR
+CATEGORICAL_DISCOUNT: float = 0.90
 
 # caps для бакетів (categorical/range) — conservative для точкового прогнозу
 CAP_EXACT_SHORT: float = 0.60   # ≤6h
