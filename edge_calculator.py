@@ -461,16 +461,24 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results = []
     skip_vol = skip_city = skip_hours = skip_none = skip_spread = skip_kind = 0
 
-    # ── PREFETCH: зігріваємо кеш forecast для всіх унікальних міст ──
-    # Це замість 1166 викликів get_best_forecast (кожен з яких міг би робити 5 HTTP запитів),
-    # робимо ~57 prefetch (по одному на місто з whitelist), а calculate_edge потім бере з кешу.
-    unique_cities = set()
+    # ── PREFETCH: зігріваємо кеш forecast для унікальних міст ──
+    # Беремо тільки міста з whitelist, сортуємо за кількістю ринків
+    # (проксі ліквідності) і обрізаємо до MAX_PREFETCH_CITIES — щоб час
+    # скану був ОБМЕЖЕНИЙ незалежно від розміру CITY_WHITELIST (захист від
+    # повільного prefetch non-US міст, що б'ють 429 на ensemble-api).
+    city_market_count: Dict[str, int] = {}
     for m in markets:
-        if m.detected_city and m.detected_city in getattr(config, 'CITY_WHITELIST', []):
-            unique_cities.add(m.detected_city)
-    if unique_cities:
-        logger.info(f"🌤️ Prefetch forecast для {len(unique_cities)} міст...")
-        for i, city in enumerate(sorted(unique_cities), 1):
+        c = m.detected_city
+        if c and c in getattr(config, 'CITY_WHITELIST', []):
+            city_market_count[c] = city_market_count.get(c, 0) + 1
+    max_prefetch = getattr(config, 'MAX_PREFETCH_CITIES', 24)
+    unique_cities = [c for c, _ in sorted(city_market_count.items(), key=lambda x: -x[1])[:max_prefetch]]
+    if city_market_count:
+        logger.info(
+            f"🌤️ Prefetch forecast для {len(unique_cities)}/{len(city_market_count)} міст "
+            f"(cap={max_prefetch}, топ за обсягом)..."
+        )
+        for i, city in enumerate(unique_cities, 1):
             try:
                 get_best_forecast(city, hours_to_resolution=24.0, target_date=None)
             except Exception as e:

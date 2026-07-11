@@ -91,8 +91,11 @@ CAP_LONG: float = 0.65    # >18h
 MAX_EDGE_CAP: float = 0.50
 
 # ── SIGMA (ENSEMBLE SPREAD) ────────────────────────────────
-# v22 lesson: SIGMA_MIN=4.5 — documented GEFS error (5-10°C daily max/min)
-SIGMA_MIN: float = 4.5
+# 11.07.2026 (фокус B): SIGMA_MIN 4.5 → 2.5. При 4.5°C наші our_prob для
+# бакетів були вдвічі меншими (2-12% замість 5-30% як у logbest), тому бот
+# знаходив лише екстремальні хвости. 2.5°C — компроміс: вище за 1.5°C (v21
+# провал, our_prob=0.0000), але достатньо низько для реалістичних бакетів.
+SIGMA_MIN: float = 2.5
 SIGMA_SPREAD_FACTOR: float = 1.30
 
 # ── EMPIRICAL BLENDING ────────────────────────────────────
@@ -115,13 +118,28 @@ CACHE_DIR: str = "cache"
 EMAIL_ENABLED: bool = False
 
 # ── CITIES ─────────────────────────────────────────────────
+# ОПТИМІЗОВАНО (11.07.2026): 20 US (швидкі, без 429) + 8 куратованих
+# non-US, що РЕАЛЬНО генерували прибуток у logbest.md (London, Paris,
+# Sao Paulo, Buenos Aires, Busan) + високоліквідні (Tokyo, Singapore, Sydney).
+# НЕ всі 58 міст — бо non-US б'ють 429 на ensemble-api.open-meteo.com
+# (~26с backoff/місто), що вбиває 5-хв скан. Prefetch обмежено
+# MAX_PREFETCH_CITIES (див. нижче) — сканується тільки топ за обсягом.
 CITY_WHITELIST: List[str] = [
-    # 20 US міст — NOAA path стабільний (без 429 на ensemble-api.open-meteo.com)
+    # ── 20 US міст (без 429, надійні) ──
     "NYC", "New York", "Chicago", "Los Angeles", "Miami", "Dallas",
     "Seattle", "Denver", "Atlanta", "Boston", "Houston", "Austin",
     "San Francisco", "Phoenix", "Las Vegas", "Minneapolis",
     "Portland", "Nashville", "Charlotte", "Orlando",
+    # ── 8 non-US (logbest-proven + високоліквідні) ──
+    "London", "Paris", "Tokyo", "Singapore", "Sydney",
+    "Sao Paulo", "Buenos Aires", "Busan",
 ]
+
+# Ліміт prefetch прогнозів за цикл (захист від повільного скану).
+# Унікальні міста з ринків сортуються за кількістю ринків (проксі ліквідності)
+# і prefetch-ться тільки топ-N. Скан НІКОЛИ не перевищить цей ліміт,
+# незалежно від розміру CITY_WHITELIST.
+MAX_PREFETCH_CITIES: int = 24
 
 # ── DRY-RUN VALIDATION GATES ───────────────────────────────
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
