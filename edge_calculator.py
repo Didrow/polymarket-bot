@@ -341,6 +341,28 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         if distance_c > max_dist_sigma * sigma_edge and our_prob > 0.50:
             return None
 
+    # ── v24 TAIL FILTERS ──────────────────────────────────────
+    # (B) distance×prob: далеко від прогнозу + низька ймовірність = tail gamble
+    max_tail_dist = getattr(config, 'MAX_TAIL_DIST_C', 1.5)
+    max_tail_prob = getattr(config, 'MAX_TAIL_COMBINED_PROB', 0.12)
+    if distance_c > max_tail_dist and our_prob < max_tail_prob:
+        logger.info(
+            f"🚫 TAIL-FILTER (B): skip {market.question[:40]} | "
+            f"dist={distance_c:.1f}°C > {max_tail_dist} & our_prob={our_prob:.0%} < {max_tail_prob:.0%}"
+        )
+        return None
+
+    # (D) MAX_TAIL_PROB — забороняємо BUY_YES коли our_prob занадто низька
+    # (незалежно від edge%, бо наші our_prob=5-12% на дешевих YES — майже 0% WR)
+    # Цей фільтр застосовується до BUY_YES; BUY_NO не потребує (NO завжди має високу our_prob)
+    max_tail_yes_prob = getattr(config, 'MAX_TAIL_PROB', 0.20)
+    if kind in ("categorical", "range") and our_prob < max_tail_yes_prob:
+        logger.info(
+            f"🚫 TAIL-FILTER (D): skip BUY_YES {market.question[:40]} | "
+            f"our_prob={our_prob:.0%} < MAX_TAIL_PROB={max_tail_yes_prob:.0%}"
+        )
+        return None
+
     # Ринкова ціна
     market_prob = market.best_ask_yes
     if market_prob is None or market_prob < 0.01:

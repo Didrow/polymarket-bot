@@ -58,7 +58,7 @@ SCAN_INTERVAL_SEC: int = 300          # 5 хв (logbest: 300s)
 SCAN_MAX_SLEEP_SEC: int = 600
 
 # ── SNIPER GRID PARAMETERS (головне — для categorical + range) ──
-SNIPER_GRID_MIN_EDGE: float = 0.04      # дешеві хвости із 4% edge (logbest: 2.4%-22.3%)
+SNIPER_GRID_MIN_EDGE: float = 0.07      # v24: 0.04→0.07 — фільтр tail-gambling (0% WR при 0.04)
 SNIPER_GRID_MIN_EDGE_NO: float = 0.10  # NO — консервативніший
 SNIPER_GRID_MIN_ASK: float = 0.01      # дозволяємо дешеві хвости до 1¢ (logbest: 1¢ YES)
 SNIPER_GRID_MAX_ASK: float = 0.50      # верхня межа для grid YES
@@ -91,12 +91,26 @@ CAP_LONG: float = 0.65    # >18h
 
 MAX_EDGE_CAP: float = 0.50
 
+# ── TAIL GAMBLING FILTER (v24) ─────────────────────────────
+# Бот купував YES tails по 1-3¢ з our_prob 5-12% — майже ніколи не виграш.
+# Тепер відкидаємо BUY_YES коли our_prob < MAX_TAIL_PROB (20%).
+# Компроміс: ми пропускаємо деякі дешеві хвости з великим edge% (edge розрахунковий),
+# але our_prob < 20% фактично = довгий шанс, що згідно з 0% WR — не materialize.
+MAX_TAIL_PROB: float = 0.20
+
+# ── DISTANCE×PROB FILTER (v24) ────────────────────────────
+# Коли forecast далеко від бакета (dist > 1.5°C) И our_prob < 12% → skip.
+# Такі ринки — tail gamble, що рідко матеріалізується (Dallas 100-101°F, SF 77-78°F
+# — обидва втратили через forecast занадто далеко від бакета).
+MAX_TAIL_DIST_C: float = 1.5
+MAX_TAIL_COMBINED_PROB: float = 0.12
+
 # ── SIGMA (ENSEMBLE SPREAD) ────────────────────────────────
-# 11.07.2026 (фокус B): SIGMA_MIN 4.5 → 2.5. При 4.5°C наші our_prob для
-# бакетів були вдвічі меншими (2-12% замість 5-30% як у logbest), тому бот
-# знаходив лише екстремальні хвости. 2.5°C — компроміс: вище за 1.5°C (v21
-# провал, our_prob=0.0000), але достатньо низько для реалістичних бакетів.
-SIGMA_MIN: float = 2.5
+# 11.07.2026: SIGMA_MIN 4.5 → 2.5 (v23b). 12.07.2026: 2.5 → 3.0 (v24).
+# При 2.5°C our_prob для бакетів все ще занадто висока для tail-ринків → 0% WR.
+# 3.0°C — більш консервативний: our_prob для in-brackets знижується ~20-25%,
+# що відсіює найгірші tail-gambles (разом з MAX_TAIL_PROB=0.20 фільтром).
+SIGMA_MIN: float = 3.0
 SIGMA_SPREAD_FACTOR: float = 1.30
 
 # ── EMPIRICAL BLENDING ────────────────────────────────────
