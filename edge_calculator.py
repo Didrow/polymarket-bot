@@ -193,7 +193,7 @@ def _prob_exact_gauss(forecast: WeatherForecast, low_c: float, high_c: float,
 
     # empirical blend (beween 0-30%, common v13 value):
     # if adj_members available, mix in count-based prob
-    emp_weight = getattr(config, 'EMPRICICAL_WEIGHT', 0.30)
+    emp_weight = getattr(config, 'EMPIRICAL_WEIGHT', 0.30)
     if emp_weight > 0:
         members = forecast._get_adjusted_members(is_low)
         if members and len(members) >= 5:

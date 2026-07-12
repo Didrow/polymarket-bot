@@ -101,7 +101,7 @@ SIGMA_SPREAD_FACTOR: float = 1.30
 
 # ── EMPIRICAL BLENDING ────────────────────────────────────
 # 30% empirical count + 70% parametric Gaussian (v13 config)
-EMPRICICAL_WEIGHT: float = 0.30
+EMPIRICAL_WEIGHT: float = 0.30
 ENSEMBLE_WEIGHT: float = 0.70
 
 # ── KELLY ──────────────────────────────────────────────────

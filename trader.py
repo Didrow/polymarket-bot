@@ -213,33 +213,38 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
                 tc = obs_low if is_low else obs_high
 
                 from edge_calculator import _parse_threshold, _parse_range, _unit_from_question, _f_to_c
-                parsed = _parse_threshold(position.question)
-                kind = parsed[0]
-                threshold_value = parsed[1]
-                unit = parsed[2] or _unit_from_question(position.question)
+                unit = _unit_from_question(position.question)
 
                 tc_c = tc
                 resolved_yes = None
-                if kind == "range":
-                    range_c = _parse_range(position.question, unit)
-                    if range_c is not None:
-                        low_c, high_c = range_c
-                        # _parse_range already converts F→C, so compare in C
-                        resolved_yes = (low_c - 0.5) <= tc < (high_c + 0.5)
-                    else:
-                        logger.warning(f"⚠️ DRY-RUN: range parse failed for {position.question[:60]}")
-                elif threshold_value is not None:
-                    threshold_c = threshold_value
-                    if unit == 'F':
-                        threshold_c = _f_to_c(threshold_c)
 
-                    if kind == "above":
-                        resolved_yes = tc > threshold_c
-                    elif kind == "below":
-                        resolved_yes = tc <= threshold_c
-                    else:
-                        half_width = 0.2778 if unit == 'F' else 0.5
-                        resolved_yes = (threshold_c - half_width) <= tc < (threshold_c + half_width)
+                # Спочатку перевіряємо range (between X-Y) — бо _parse_threshold
+                # повертає kind="categorical" для range ринків, що дає wrong resolution.
+                range_c = _parse_range(position.question, unit)
+                if range_c is not None:
+                    low_c, high_c = range_c
+                    # _parse_range already converts F→C, so compare in C
+                    # half-width tolerance: 0.5°C для C, 0.278°C (0.5°F) для F
+                    half = 0.2778 if unit == 'F' else 0.5
+                    resolved_yes = (low_c - half) <= tc_c < (high_c + half)
+                else:
+                    parsed = _parse_threshold(position.question)
+                    kind = parsed[0]
+                    threshold_value = parsed[1]
+                    punit = parsed[2] or unit
+
+                    if threshold_value is not None:
+                        threshold_c = threshold_value
+                        if punit == 'F':
+                            threshold_c = _f_to_c(threshold_c)
+
+                        if kind == "above":
+                            resolved_yes = tc_c > threshold_c
+                        elif kind == "below":
+                            resolved_yes = tc_c <= threshold_c
+                        else:
+                            half_width = 0.2778 if punit == 'F' else 0.5
+                            resolved_yes = (threshold_c - half_width) <= tc_c < (threshold_c + half_width)
 
                 if resolved_yes is not None:
                     _resolution_cache[clean_id] = (time.time(), resolved_yes)
@@ -278,11 +283,11 @@ def check_market_resolved(condition_id: str, position: Optional["Position"] = No
     except:
         pass
 
-        if not is_closed and not is_resolved:
-            if clean_id not in _suppressed_logs:
-                _suppressed_logs.add(clean_id)
-                logger.debug(f"Market {clean_id[:20]} is still OPEN (end_date={end_date})")
-            return None
+    if not is_closed and not is_resolved:
+        if clean_id not in _suppressed_logs:
+            _suppressed_logs.add(clean_id)
+            logger.debug(f"Market {clean_id[:20]} is still OPEN (end_date={end_date})")
+        return None
 
     # Спробуємо визначити переможця з токенів
     tokens = market_data.get("tokens", [])

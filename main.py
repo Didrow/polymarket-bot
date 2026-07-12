@@ -345,7 +345,7 @@ def main():
     logger.info(f"  Стратегія:  SNIPER GRID ({kinds})")
     logger.info(f"  Горизонт:   {config.MIN_RESOLUTION_HOURS:.0f}-{config.MAX_RESOLUTION_HOURS}h")
     logger.info(f"  Grid edge:  {getattr(config, 'SNIPER_GRID_MIN_EDGE', 0.04):.0%} YES | {getattr(config, 'SNIPER_GRID_MIN_EDGE_NO', 0.10):.0%} NO | Trend {getattr(config, 'MIN_EDGE_YES', 0.20):.0%}")
-    logger.info(f"  Categ disc: {getattr(config, 'CATEGORICAL_DISCOUNT', 0.75):.0%} | Empirical: {getattr(config, 'EMPRICICAL_WEIGHT', 0.30):.0%}")
+    logger.info(f"  Categ disc: {getattr(config, 'CATEGORICAL_DISCOUNT', 0.75):.0%} | Empirical: {getattr(config, 'EMPIRICAL_WEIGHT', 0.30):.0%}")
     logger.info(f"  Sigma min:  {config.SIGMA_MIN:.1f}°C | Prob bias: {getattr(config, 'PROB_BIAS', 1.0):.2f}")
     logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots, {getattr(config, 'MAX_POSITIONS_PER_CITY', 1)}/city")
     logger.info("=" * 60)
