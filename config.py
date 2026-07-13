@@ -58,7 +58,10 @@ SCAN_INTERVAL_SEC: int = 300          # 5 хв (logbest: 300s)
 SCAN_MAX_SLEEP_SEC: int = 600
 
 # ── SNIPER GRID PARAMETERS (головне — для categorical + range) ──
-SNIPER_GRID_MIN_EDGE: float = 0.07      # v24: 0.04→0.07 — фільтр tail-gambling (0% WR при 0.04)
+# v25: 0.07→0.04 — revert v24 overcorrection. v23b bug fixes (trader.py _parse_threshold
+# + range resolution + forecast_at_entry_c) alone restored profitability path. v24 raised
+# threshold before confirming bug fixes worked. A/B test: keep v23b params, observe WR.
+SNIPER_GRID_MIN_EDGE: float = 0.04
 SNIPER_GRID_MIN_EDGE_NO: float = 0.10  # NO — консервативніший
 SNIPER_GRID_MIN_ASK: float = 0.01      # дозволяємо дешеві хвости до 1¢ (logbest: 1¢ YES)
 SNIPER_GRID_MAX_ASK: float = 0.50      # верхня межа для grid YES
@@ -91,26 +94,30 @@ CAP_LONG: float = 0.65    # >18h
 
 MAX_EDGE_CAP: float = 0.50
 
-# ── TAIL GAMBLING FILTER (v24) ─────────────────────────────
-# Бот купував YES tails по 1-3¢ з our_prob 5-12% — майже ніколи не виграш.
-# Тепер відкидаємо BUY_YES коли our_prob < MAX_TAIL_PROB (20%).
-# Компроміс: ми пропускаємо деякі дешеві хвости з великим edge% (edge розрахунковий),
-# але our_prob < 20% фактично = довгий шанс, що згідно з 0% WR — не materialize.
-MAX_TAIL_PROB: float = 0.20
+# ── TAIL GAMBLING FILTER (v24; DISABLED in v25) ────────────
+# v24 introduced MAX_TAIL_PROB=0.20 to block cheap YES with our_prob<20%.
+# v25 REVERTING: v23b bug fixes (trader.py _parse_threshold unpacking + range
+# resolution + forecast_at_entry_c + drawdown on peak_equity + exposure on
+# INITIAL_CAPITAL) were the true root cause of 0% WR — NOT the tail strategy.
+# v24 added tail filter on top of broken state before confirming bug fixes
+# restored profitability.
+# To disable: set threshold to 0.0 (filter checks `our_prob < MAX_TAIL_PROB`).
+MAX_TAIL_PROB: float = 0.0
 
-# ── DISTANCE×PROB FILTER (v24) ────────────────────────────
-# Коли forecast далеко від бакета (dist > 1.5°C) И our_prob < 12% → skip.
-# Такі ринки — tail gamble, що рідко матеріалізується (Dallas 100-101°F, SF 77-78°F
-# — обидва втратили через forecast занадто далеко від бакета).
-MAX_TAIL_DIST_C: float = 1.5
-MAX_TAIL_COMBINED_PROB: float = 0.12
+# ── DISTANCE×PROB FILTER (v24; DISABLED in v25) ────────────
+# Same rationale. Reverting to v23b. Setting HIGH thresholds disables the filter.
+# Note: filter triggers on `dist > MAX_TAIL_DIST_C AND our_prob < MAX_TAIL_COMBINED_PROB`.
+# Setting MAX_TAIL_COMBINED_PROB=1.0 alone DOESN'T disable it (our_prob is always < 1.0).
+# Setting MAX_TAIL_DIST_C to a very high value effectively disables it.
+MAX_TAIL_DIST_C: float = 100.0   # effectively disabled — no forecast dist > 100°C
+MAX_TAIL_COMBINED_PROB: float = 1.0
 
 # ── SIGMA (ENSEMBLE SPREAD) ────────────────────────────────
-# 11.07.2026: SIGMA_MIN 4.5 → 2.5 (v23b). 12.07.2026: 2.5 → 3.0 (v24).
-# При 2.5°C our_prob для бакетів все ще занадто висока для tail-ринків → 0% WR.
-# 3.0°C — більш консервативний: our_prob для in-brackets знижується ~20-25%,
-# що відсіює найгірші tail-gambles (разом з MAX_TAIL_PROB=0.20 фільтром).
-SIGMA_MIN: float = 3.0
+# v23b: 4.5 → 2.5 (v23/v23 використовував 2.5 з CATEGORICAL_DISCOUNT=0.75 успішно).
+# v24: 2.5 → 3.0 (overcorrection — знижував our_prob на tail бакетах ще на ~25%).
+# v25: 3.0 → 2.5 (REVERT to v23b — logbest використовував 1.5-2.0, але 2.5 безпечніше
+# з огляду на GEFS похибку 5-10°C, але дає broader Gaussian = our_prob вищий на хвостах).
+SIGMA_MIN: float = 2.5
 SIGMA_SPREAD_FACTOR: float = 1.30
 
 # ── EMPIRICAL BLENDING ────────────────────────────────────
