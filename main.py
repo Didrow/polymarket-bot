@@ -1,5 +1,6 @@
 """
-main.py — Polymarket Weather Bot v23b (SNIPER GRID)
+main.py — Polymarket Weather Bot v26 (COLDMATH LADDER)
+Forecast-centered YES ladder (neobrother/coldmath style).
 """
 
 import os
@@ -210,7 +211,8 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     if portfolio["active_positions"] > 0:
         logger.info(
             f"📂 Відкриті позиції: {portfolio['active_positions']} | "
-            f"Unrealized PnL: ${portfolio['total_pnl']:+.2f}"
+            f"Unrealized PnL: ${portfolio['total_pnl']:+.2f} "
+            f"(MTM на tail — не довіряти; дивись realized)"
         )
         if cycle_count % 10 == 0:
             for cid, pos in _trader._active_positions.items():
@@ -239,8 +241,20 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         logger.info("Немає ринків з достатнім edge. Чекаємо...")
         return 0
 
-    slow_positions_count = portfolio["active_positions"]
-    _max_slow = config.MAX_ACTIVE_POSITIONS
+    # COLDMATH: peak-first already in scan; boost cities that already have a peak open
+    # so wings complete the ladder (17.0 + 16/18) instead of scattering one-offs.
+    cities_with_open = set()
+    for pos in _trader._active_positions.values():
+        if pos.city:
+            cities_with_open.add(pos.city)
+
+    def _fill_priority(r):
+        city = r.market.detected_city or ""
+        ladder_boost = 1.35 if city in cities_with_open else 1.0
+        # Prefer completing existing city ladders; still respect ladder_rank
+        return getattr(r, "ladder_rank", r.edge) * ladder_boost
+
+    tradeable.sort(key=_fill_priority, reverse=True)
 
     opened_this_cycle = 0
     city_counts_this_cycle = {}
@@ -274,10 +288,15 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if _raw_size <= 0:
             _raw_size = edge_result.edge * current_capital * config.MAX_POSITION_PCT
         size = max(config.MIN_POSITION_USD, min(_raw_size, config.MAX_POSITION_USD))
-        logger.debug(f"💰 Size: ${size:.2f} для {edge_result.market.question[:50]} (raw={_raw_size:.2f}, edge={edge_result.edge:.1%})")
-        projected_exposure = portfolio.get("total_value", 0.0) + size
+        logger.debug(
+            f"💰 Size: ${size:.2f} | dist={getattr(edge_result, 'distance_c', 0):.1f}°C | "
+            f"{edge_result.market.question[:50]} (edge={edge_result.edge:.1%})"
+        )
+        # Exposure = cash deployed in open positions + new size (not MTM portfolio)
+        open_cost = sum(p.size_usd for p in _trader._active_positions.values())
+        projected_exposure = open_cost + size
         exposure_base = getattr(config, 'INITIAL_CAPITAL', 100.0)
-        if projected_exposure > exposure_base * getattr(config, "MAX_TOTAL_EXPOSURE_PCT", 0.50):
+        if projected_exposure > exposure_base * getattr(config, "MAX_TOTAL_EXPOSURE_PCT", 0.70):
             logger.info("Ліміт сумарної експозиції досягнуто — пропускаємо")
             continue
         if not safeguard.pre_trade_check(size, current_capital):
@@ -289,19 +308,28 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if position:
             opened_this_cycle += 1
             city_counts_this_cycle[city] = city_counts_this_cycle.get(city, 0) + 1
+            if city:
+                cities_with_open.add(city)
             active_questions.add(norm_q)
-            logger.info(f"🎯 УГОДА: {edge_result.summary}")
+            logger.info(
+                f"🎯 LADDER: {edge_result.summary} | size=${position.size_usd:.2f} | "
+                f"rank={getattr(edge_result, 'ladder_rank', 0):.2f}"
+            )
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "SNIPER_GRID"
+            _strategy = "COLDMATH_LADDER"
+            _fc = 0.0
+            if edge_result.forecast:
+                _is_low = "lowest" in position.question.lower()
+                _fc = edge_result.forecast.temp_low_c if _is_low else edge_result.forecast.temp_high_c
             log_trade_to_pg({
                 "cycle": cycle_count,
                 "action": "OPEN",
                 "direction": position.direction,
                 "market_question": position.question,
                 "city": position.city,
-                "forecast_c": getattr(edge_result.forecast, "temp_low_c" if "lowest" in position.question.lower() else "temp_high_c", 0.0) if edge_result.forecast else 0.0,
+                "forecast_c": _fc,
                 "threshold_c": getattr(edge_result, "threshold_c", 0.0),
                 "our_prob": edge_result.estimated_prob,
                 "market_prob": edge_result.market_prob,
@@ -334,20 +362,41 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v23  🌤️")
-    logger.info("  🎯 SNIPER GRID (coldmath-style forecast buckets)")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v26  🌤️")
+    logger.info("  🎯 COLDMATH LADDER (neobrother-style forecast grid)")
+    logger.info("  📐 Прогноз 17.0 → сітка YES 16/17/18 (±1.5°C), peak-first")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
     logger.info(f"  Kelly:    {'✅' if config.USE_KELLY else '❌'} (scale={config.KELLY_SCALE})")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
-    kinds = "/".join(getattr(config, 'KINDS_ONLY', ['above','below']))
-    logger.info(f"  Стратегія:  SNIPER GRID ({kinds})")
+    kinds = "/".join(getattr(config, 'KINDS_ONLY', ['categorical', 'range']))
+    logger.info(f"  Стратегія:  COLDMATH LADDER ({kinds})")
     logger.info(f"  Горизонт:   {config.MIN_RESOLUTION_HOURS:.0f}-{config.MAX_RESOLUTION_HOURS}h")
-    logger.info(f"  Grid edge:  {getattr(config, 'SNIPER_GRID_MIN_EDGE', 0.04):.0%} YES | {getattr(config, 'SNIPER_GRID_MIN_EDGE_NO', 0.10):.0%} NO | Trend {getattr(config, 'MIN_EDGE_YES', 0.20):.0%}")
-    logger.info(f"  Categ disc: {getattr(config, 'CATEGORICAL_DISCOUNT', 0.75):.0%} | Empirical: {getattr(config, 'EMPIRICAL_WEIGHT', 0.30):.0%}")
-    logger.info(f"  Sigma min:  {config.SIGMA_MIN:.1f}°C | Prob bias: {getattr(config, 'PROB_BIAS', 1.0):.2f}")
-    logger.info(f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, max {config.MAX_ACTIVE_POSITIONS} slots, {getattr(config, 'MAX_POSITIONS_PER_CITY', 1)}/city")
+    logger.info(
+        f"  Ladder:     dist≤{getattr(config, 'SNIPER_GRID_DISTANCE_C', 1.5):.1f}°C | "
+        f"edge≥{getattr(config, 'SNIPER_GRID_MIN_EDGE', 0.03):.0%} | "
+        f"ask {getattr(config, 'SNIPER_GRID_MIN_ASK', 0.01):.0%}-{getattr(config, 'SNIPER_GRID_MAX_ASK', 0.40):.0%}"
+    )
+    logger.info(
+        f"  Quality:    min_prob peak/near/far="
+        f"{getattr(config, 'MIN_PROB_PEAK', 0.10):.0%}/"
+        f"{getattr(config, 'MIN_PROB_NEAR', 0.12):.0%}/"
+        f"{getattr(config, 'MIN_PROB_FAR', 0.15):.0%} | "
+        f"cheap ratio≥{getattr(config, 'MIN_EDGE_RATIO_CHEAP', 2.2):.1f}x"
+    )
+    logger.info(f"  Sigma min:  {config.SIGMA_MIN:.1f}°C | disc={getattr(config, 'CATEGORICAL_DISCOUNT', 0.92):.0%}")
+    logger.info(
+        f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, "
+        f"max {config.MAX_ACTIVE_POSITIONS} slots, {getattr(config, 'MAX_POSITIONS_PER_CITY', 5)}/city, "
+        f"{config.MAX_OPEN_PER_CYCLE}/cycle"
+    )
+    logger.info(
+        f"  LIVE gate:  {getattr(config, 'VALIDATION_MIN_RESOLVED_TRADES', 30)} trades, "
+        f"{getattr(config, 'VALIDATION_MIN_DRY_RUN_HOURS', 168)}h, "
+        f"WR≥{getattr(config, 'VALIDATION_MIN_WIN_RATE', 0.28):.0%}, "
+        f"ROI≥{getattr(config, 'VALIDATION_MIN_ROI', 0.05):.0%}"
+    )
     logger.info("=" * 60)
     logger.info("")
 

@@ -535,3 +535,50 @@ and (metar_confirmed or distance_c <= max_dist)
 ### Render: RESET_POSITIONS=true (чистий старт, нова стратегія)
 ### Очікування: 25-30 resolved trades для валідації WR 40%+
 
+## v26 — COLDMATH LADDER (13.07.2026)
+
+### Діагноз перед v26 (лог 13.07.2026 ~12:19 UTC)
+- Equity ~$90, ROI −9.3%, **0% WR (0 wins / 8 losses)**, realized −$11
+- 12/12 слотів забиті lottery-хвостами: dist=2.1–3.4°C, our_prob 6–9%, ask 1–3¢
+- v25 вимкнув `MAX_TAIL_PROB` / distance×prob → знову 0% materialize-rate
+- Сортування за raw edge ставило phantom tails (Dallas 94°F+ edge 33%) вище peak ladder
+- Unrealized +$20 на thin books — ілюзія (LESSON: не trust MTM tails)
+
+### Стратегія (coldmath / neobrother)
+Прогноз **17.0°C** → сітка YES на **16 / 17 / 18** (±1.5°C; F-range: сусідні 1°F бакети).
+Малі ставки на крилах, більший size на peak. Один WIN покриває 3–4 LOSS.
+
+### Ключові зміни
+| Файл | Зміна |
+|------|--------|
+| `config.py` | SNIPER_GRID_DISTANCE_C=**1.5**, MAX_TAIL_PROB=**0.08**, cheap ratio≥**2.2×**, min_prob peak/near/far=10/12/15%, peak/wing size mult, MAX_OPEN=5, slots=15 |
+| `edge_calculator.py` | distance-aware quality gates; `_coldmath_rank` (peak-first); per-city ladder cap; `🪜 LADDER` log; size suggestion |
+| `trader.py` | peak/wing Kelly; blend suggested size; lower cap на wings |
+| `main.py` | city ladder completion boost; exposure on open cost not MTM; strategy=`COLDMATH_LADDER`; banner v26 |
+
+### Що свідомо НЕ робимо (уроки)
+- ❌ METAR arb (v15–v19 → 0% WR)
+- ❌ SIGMA_MIN 1.5 (v21) або 4.5 (v22 overcorrection)
+- ❌ dist=4°C + 1¢ lottery (v23–v25)
+- ❌ sort by edge only
+- ❌ trust unrealized PnL on 1–3¢ books
+
+### Smoke test (локально, 13.07)
+- fc=17.0°C → tradeable buckets **{16,17,18}**; 14/15/19/20 blocked
+- Far lottery dist=2.9 blocked
+- RANK peak > phantom tail
+- SIZE peak ≥ wing
+- range parse 100–101°F → never −101 bug
+
+### Deploy
+1. Manual push to GitHub (NO auto git commit/push)
+2. Render: `RESET_POSITIONS=true` один раз (скинути 0% WR junk + drawdown), потім `false`
+3. DRY_RUN=true мінімум **7 днів / 30 resolved**
+4. LIVE тільки якщо WR≥28% і ROI≥+5% (config gates)
+
+### Очікування v26
+- 5–15 tradeable/cycle (якість > кількість)
+- Ladder logs: `🪜 LADDER Tokyo fc=35.0°C: 34C@… | 35C@… | 36C@…`
+- Realized WR 25–40% на ladder; ROI додатній за рахунок cheap peak asymmetry
+
+

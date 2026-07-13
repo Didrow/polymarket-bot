@@ -1,5 +1,6 @@
 """
-trader.py — Polymarket Weather Bot v23b (SNIPER GRID — FIXED RESOLUTION)
+trader.py — Polymarket Weather Bot v26 (COLDMATH LADDER)
+Peak/wing Kelly sizing + fixed DRY-RUN resolution (range-first parse).
 """
 
 import math
@@ -360,23 +361,49 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float, portfo
         logger.warning(f"⛔ Drawdown {drawdown:.1%} >= {dd_limit:.0%} limit — NO NEW TRADES")
         return 0.0
 
+    # Prefer pre-computed ladder size from edge_calculator when present
+    suggested = getattr(edge_result, "size_usd", 0.0) or 0.0
+
     entry_price = edge_result.market.best_ask_yes if edge_result.edge_direction == "BUY_YES" else max(0.01, 1 - edge_result.market.midpoint_yes)
     confidence = edge_result.confidence
+    distance_c = getattr(edge_result, "distance_c", 0.0) or 0.0
+
+    # Peak / wing multiplier (coldmath: peak pays, wings are cheap insurance)
+    peak_d = getattr(config, "PEAK_DIST_C", 0.60)
+    near_d = getattr(config, "NEAR_WING_DIST_C", 1.10)
+    if distance_c <= peak_d:
+        wing_mult = getattr(config, "PEAK_SIZE_MULT", 1.0)
+    elif distance_c <= near_d:
+        wing_mult = getattr(config, "NEAR_WING_SIZE_MULT", 0.60)
+    else:
+        wing_mult = getattr(config, "FAR_WING_SIZE_MULT", 0.40)
 
     if getattr(config, "USE_KELLY", True):
-        p = edge_result.estimated_prob
+        p = min(edge_result.estimated_prob, getattr(config, "KELLY_PROB_CAP", 0.55))
         q = 1.0 - p
         b = (1.0 - max(entry_price, 0.001)) / max(entry_price, 0.001) if entry_price > 0 else 0
         kelly_raw = max(0, (p * b - q) / b) if b > 0 else 0
         kelly_scale = getattr(config, "KELLY_SCALE", 0.20)
-        # Зменшуємо Kelly пропорційно просадці
         dd_factor = 1.0 - min(drawdown * 2.0, 0.50)
-        kelly_size = current_capital * kelly_raw * kelly_scale * confidence * dd_factor
+        kelly_size = current_capital * kelly_raw * kelly_scale * confidence * dd_factor * wing_mult
         final = kelly_size
     else:
-        final = current_capital * 0.03 * confidence
+        final = current_capital * 0.03 * confidence * wing_mult
 
-    final = max(config.MIN_POSITION_USD, min(final, config.MAX_POSITION_USD, current_capital * config.MAX_POSITION_PCT))
+    if suggested > 0:
+        # Blend: 60% suggested ladder size, 40% live Kelly (capital-aware)
+        final = 0.6 * suggested + 0.4 * final
+
+    # Wings: cap lower than peak so one city ladder costs less
+    max_usd = config.MAX_POSITION_USD
+    if distance_c > peak_d:
+        max_usd = min(max_usd, max(config.MIN_POSITION_USD, config.MAX_POSITION_USD * wing_mult + 0.5))
+
+    final = max(
+        config.MIN_POSITION_USD,
+        min(final, max_usd, current_capital * config.MAX_POSITION_PCT,
+            getattr(config, "KELLY_MAX_POSITION_USD", 3.5)),
+    )
     return round(final, 2)
 
 
