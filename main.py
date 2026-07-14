@@ -1,5 +1,5 @@
 """
-main.py — Polymarket Weather Bot v26 (COLDMATH LADDER)
+main.py — Polymarket Weather Bot v27 (PURE SNIPER GRID)
 Forecast-centered YES ladder (neobrother/coldmath style).
 """
 
@@ -318,7 +318,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "COLDMATH_LADDER"
+            _strategy = "PURE_SNIPER_GRID_v27"
             _fc = 0.0
             if edge_result.forecast:
                 _is_low = "lowest" in position.question.lower()
@@ -362,21 +362,23 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v26  🌤️")
-    logger.info("  🎯 COLDMATH LADDER (neobrother-style forecast grid)")
-    logger.info("  📐 Прогноз 17.0 → сітка YES 16/17/18 (±1.5°C), peak-first")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v27  🌤️")
+    logger.info("  🎯 PURE SNIPER GRID (coldmath/neobrother bucket ladder)")
+    logger.info("  📐 Прогноз 17.0 → YES на 16.5/17/17.5 (±1.5°C), peak 3× wing, hold to resolution")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
-    logger.info(f"  Kelly:    {'✅' if config.USE_KELLY else '❌'} (scale={config.KELLY_SCALE})")
+    logger.info(f"  Kelly:    {'✅' if config.USE_KELLY else '❌'} (scale={config.KELLY_SCALE}, cap={getattr(config, 'KELLY_PROB_CAP', 0.85):.0%})")
+    logger.info(f"  Stop-loss: {'✅' if getattr(config, 'STOP_LOSS_PCT', 0) > 0 else '❌ OFF (hold to resolution)'}")
+    logger.info(f"  Trailing:  {'✅' if getattr(config, 'TRAILING_STOP_ACTIVATION_PCT', 0) > 0 else '❌ OFF'}")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
     kinds = "/".join(getattr(config, 'KINDS_ONLY', ['categorical', 'range']))
-    logger.info(f"  Стратегія:  COLDMATH LADDER ({kinds})")
+    logger.info(f"  Стратегія:  PURE SNIPER GRID ({kinds})")
     logger.info(f"  Горизонт:   {config.MIN_RESOLUTION_HOURS:.0f}-{config.MAX_RESOLUTION_HOURS}h")
     logger.info(
         f"  Ladder:     dist≤{getattr(config, 'SNIPER_GRID_DISTANCE_C', 1.5):.1f}°C | "
         f"edge≥{getattr(config, 'SNIPER_GRID_MIN_EDGE', 0.03):.0%} | "
-        f"ask {getattr(config, 'SNIPER_GRID_MIN_ASK', 0.01):.0%}-{getattr(config, 'SNIPER_GRID_MAX_ASK', 0.40):.0%}"
+        f"ask {getattr(config, 'SNIPER_GRID_MIN_ASK', 0.01):.0%}-{getattr(config, 'SNIPER_GRID_MAX_ASK', 0.25):.0%}"
     )
     logger.info(
         f"  Quality:    min_prob peak/near/far="

@@ -1,5 +1,5 @@
 """
-edge_calculator.py — Weather Bot v26 (COLDMATH LADDER)
+edge_calculator.py — Weather Bot v27 (PURE SNIPER GRID)
 
 neobrother / coldmath style:
   Forecast 17.0 → buy YES ladder on nearby buckets (16/17/18 or 16.8…17.2)
@@ -231,23 +231,25 @@ def _confidence_from_forecast(forecast: Optional[WeatherForecast]) -> float:
 
 
 def _min_prob_for_distance(distance_c: float) -> float:
-    peak = getattr(config, 'PEAK_DIST_C', 0.60)
-    near = getattr(config, 'NEAR_WING_DIST_C', 1.10)
+    # v27 ladder: peak 0.5°C, near 1.0°C, far 1.5°C (coldmath tight grid)
+    peak = getattr(config, 'PEAK_DIST_C', 0.50)
+    near = getattr(config, 'NEAR_WING_DIST_C', 1.00)
     if distance_c <= peak:
-        return getattr(config, 'MIN_PROB_PEAK', 0.10)
+        return getattr(config, 'MIN_PROB_PEAK', 0.08)
     if distance_c <= near:
-        return getattr(config, 'MIN_PROB_NEAR', 0.12)
-    return getattr(config, 'MIN_PROB_FAR', 0.15)
+        return getattr(config, 'MIN_PROB_NEAR', 0.10)
+    return getattr(config, 'MIN_PROB_FAR', 0.12)
 
 
 def _ladder_size_mult(distance_c: float) -> float:
-    peak = getattr(config, 'PEAK_DIST_C', 0.60)
-    near = getattr(config, 'NEAR_WING_DIST_C', 1.10)
+    # v27: PEAK earns 3× wing (logbest coldmath weighting)
+    peak = getattr(config, 'PEAK_DIST_C', 0.50)
+    near = getattr(config, 'NEAR_WING_DIST_C', 1.00)
     if distance_c <= peak:
-        return getattr(config, 'PEAK_SIZE_MULT', 1.0)
+        return getattr(config, 'PEAK_SIZE_MULT', 3.0)
     if distance_c <= near:
-        return getattr(config, 'NEAR_WING_SIZE_MULT', 0.60)
-    return getattr(config, 'FAR_WING_SIZE_MULT', 0.40)
+        return getattr(config, 'NEAR_WING_SIZE_MULT', 1.0)
+    return getattr(config, 'FAR_WING_SIZE_MULT', 0.50)
 
 
 def _coldmath_rank(edge: float, our_prob: float, market_prob: float,
@@ -272,18 +274,20 @@ def _suggest_size(our_prob: float, market_prob: float, edge: float,
     if not getattr(config, 'USE_KELLY', True):
         base = config.MIN_POSITION_USD
     else:
-        p = min(our_prob, getattr(config, 'KELLY_PROB_CAP', 0.55))
+        # v27: KELLY_PROB_CAP 0.85 — let high-conf peak buckets size up (was 0.55)
+        p = min(our_prob, getattr(config, 'KELLY_PROB_CAP', 0.85))
         q = 1.0 - p
         price = max(market_prob, 0.01)
         b = (1.0 - price) / price
         kelly_raw = max(0.0, (p * b - q) / b) if b > 0 else 0.0
-        scale = getattr(config, 'KELLY_SCALE', 0.20)
+        scale = getattr(config, 'KELLY_SCALE', 0.25)
         base = config.INITIAL_CAPITAL * kelly_raw * scale * confidence
 
     mult = _ladder_size_mult(distance_c)
     size = base * mult
-    size = max(config.MIN_POSITION_USD, min(size, config.MAX_POSITION_USD,
-                                            getattr(config, 'KELLY_MAX_POSITION_USD', 3.5)))
+    # v27: peak can reach KELLY_MAX_POSITION_USD=4.50; wings capped at MAX_POSITION_USD=3.50
+    max_usd = getattr(config, 'KELLY_MAX_POSITION_USD', 4.50) if mult >= 1.5 else config.MAX_POSITION_USD
+    size = max(config.MIN_POSITION_USD, min(size, max_usd))
     return round(size, 2)
 
 

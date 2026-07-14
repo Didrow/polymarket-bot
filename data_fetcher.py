@@ -429,14 +429,10 @@ CITY_SEASON_BIAS_C: Dict[str, Dict[str, float]] = {
 
 
 def _get_season_bias_c(city: str) -> float:
-    month = datetime.now(timezone.utc).month
-    if month in (6, 7, 8):
-        season = "summer"
-    elif month in (12, 1, 2):
-        season = "winter"
-    else:
-        season = "shoulder"
-    return CITY_SEASON_BIAS_C.get(city, {}).get(season, 0.0)
+    # v27: SEASON BIAS NUKE — pure-forecast strategy (was inflating US hot cities
+    # Miami +1.7°C, Orlando +1.5°C, Dallas +1.2°C → phantom peaks killed v26).
+    # Ensemble+observed are accurate on their own; no manual adjustments.
+    return 0.0
 
 
 def _get_coords(city: str, prefer_airport: bool = True) -> Optional[Tuple[float, float]]:

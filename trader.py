@@ -725,18 +725,16 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 _suppressed_logs.add(mtm_key)
                 logger.debug(f"MTM: no price for {cid[:20]} (token={pos.token_id[:20] if pos.token_id else 'none'})")
 
-        # Hard stop-loss: emergency exit regardless of hold time
-        hard_sl_base = 0.30
-        hard_sl = 0.50 if pos.entry_price < 0.05 else hard_sl_base
-        if pos.pnl_pct <= -hard_sl and pos.entry_price > hard_sl * 0.5:
-            logger.info(f"🔴 HARD Stop-loss: {pos.question[:50]} | entry={pos.entry_price:.4f} cur={pos.current_price:.4f} pnl={pos.pnl_pct:.0%} age={age_hours:.1f}h threshold={hard_sl:.0%}")
-            pos.status = "STOP_LOSS"
-            closed.append(pos)
-            del _active_positions[cid]
-            _recently_closed[cid] = now
-            continue
+        # v27: STOP-LOSS / TRAILING DISABLED for DRY-RUN ladder strategy.
+        # coldmath holds all rungs to resolution (24-36h); cheap YES @ 5¢ drops to 2¢
+        # on any forecast revision → STOP_LOSS_PCT=0.40 converted near-misses into losses.
+        # One WIN @ $1.00 covers 5-8 wing losses @ 5¢, but only if we DON'T stop out.
+        # Both stops gated on config flag (0.0 → OFF).
+        sl_pct = getattr(config, "STOP_LOSS_PCT", 0.0)
+        hard_sl_pct = getattr(config, "STOP_LOSS_HARD_PCT", 0.0)
+        trailing_pct = getattr(config, "TRAILING_STOP_ACTIVATION_PCT", 0.0)
 
-        if pos.pnl_pct <= -config.STOP_LOSS_PCT and pos.entry_price > 0.03:
+        if sl_pct > 0.0 and pos.pnl_pct <= -sl_pct and pos.entry_price > 0.03:
             sl_min_hold = getattr(config, "STOP_LOSS_MIN_HOLD_HOURS", 1.0)
             if age_hours < sl_min_hold:
                 sl_key = f"sl:{cid}"
@@ -753,7 +751,15 @@ def check_and_close_positions(clob_client) -> List[Position]:
                 _recently_closed[cid] = now
                 continue
 
-        if _check_trailing_stop(pos):
+        if hard_sl_pct > 0.0 and pos.pnl_pct <= -hard_sl_pct and pos.entry_price > hard_sl_pct * 0.5:
+            logger.info(f"🔴 HARD Stop-loss: {pos.question[:50]} | entry={pos.entry_price:.4f} cur={pos.current_price:.4f} pnl={pos.pnl_pct:.0%} age={age_hours:.1f}h threshold={hard_sl_pct:.0%}")
+            pos.status = "STOP_LOSS"
+            closed.append(pos)
+            del _active_positions[cid]
+            _recently_closed[cid] = now
+            continue
+
+        if trailing_pct > 0.0 and _check_trailing_stop(pos):
             pos.status = "TRAILING_STOP"
             closed.append(pos)
             del _active_positions[cid]
