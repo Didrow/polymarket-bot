@@ -85,9 +85,35 @@ def record_forecast_error(city: str, source: str, forecast_c: float, actual_c: f
     logger.info(f"📐 Sigma calibrated: {city}/{source} error={error:.1f}°C")
 
 
+def _lookup_errors(city: str, source: str) -> List[float]:
+    """Look up errors for a possibly-combined source key.
+
+    Runtime callers (data_fetcher._get_sigma) pass the '+'-joined list of all
+    sources contributing to the merged forecast, e.g. "Open-Meteo_ENSEMBLE+NOAA".
+    Bootstrap feeds per-component keys (NOAA, Open-Meteo_ENSEMBLE, ECMWF).
+    We aggregate component errors (concatenate the last _MAX_SAMPLES/num_components
+    of each component) so a combined-key lookup works even when only individual
+    component keys exist in the calibrator store.
+    """
+    if city not in _city_source_errors:
+        return []
+    components = [s.strip() for s in source.split("+") if s.strip()]
+    if len(components) <= 1:
+        return list(_city_source_errors[city].get(source, []))
+    # aggregate per-component (cap each component's contribution so no single
+    # source dominates the combined RMS)
+    gathered: List[float] = []
+    per_comp_cap = max(_MIN_SAMPLES_FOR_ADAPTIVE, _MAX_SAMPLES // len(components))
+    for comp in components:
+        errs = _city_source_errors[city].get(comp, [])
+        if errs:
+            gathered.extend(errs[-per_comp_cap:])
+    return gathered
+
+
 def get_adaptive_sigma(city: str, source: str, base_sigma: float, hours: float = 24.0) -> float:
     with _lock:
-        errors = _city_source_errors.get(city, {}).get(source, [])
+        errors = _lookup_errors(city, source)
 
     if len(errors) < _MIN_SAMPLES_FOR_ADAPTIVE:
         return base_sigma

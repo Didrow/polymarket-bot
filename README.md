@@ -272,3 +272,99 @@ A: Найдешевша (1 CPU, 512MB RAM) — бот дуже легкий. Goo
 
 **Q: Скільки часу до першого прибутку?**  
 A: Weather ринки вирішуються за 24–72h. Перші результати — через 3–7 днів.
+
+---
+
+# Sigma Calibration Bootstrap (v28+)
+
+## What changed
+
+The bot from v9 through v27 had a fatal structural flaw diagnosed in
+`Recomeng.md`: `sigma_calibrator.py` was wired in (`data_fetcher._get_sigma`
+calls `get_adaptive_sigma`, `trader.py` calls `record_forecast_error` on
+resolution) but `data/sigma_calibration.json` did not exist, so every
+(city, source) pair had 0 samples and `get_adaptive_sigma` always fell back
+to the hardcoded `SIGMA_MIN = 3.0 C` floor.
+
+A 3.0 sigma floor combined with a 1 C bucket Gaussian produces phantom
+edges: actual forecast errors are 0.6-2.3 C per city (real ERA5-vs-archive
+numbers), so the bot systematically believed a 20 % probability bucket was
+"18 % edge" when in truth the bucket was already covered by the forecast's
+actual uncertainty. Result: v27 ended 0/15 win rate and self-halted on
+drawdown limit.
+
+`bootstrap_calibration.py` fixes the foundation: pulls 365 days of ERA5
+reanalysis (ground truth) + 3 independent archived forecast models per city,
+computes per-(city, source) RMS error, and primes `sigma_calibration.json`
+so `get_adaptive_sigma` returns real, calibrated sigmas from the first live
+trade onward.
+
+## Files
+
+- `bootstrap_calibration.py` - one-time primer (run manually, not at every
+  bot cycle).
+- `sigma_calibrator.py` - extended with `_lookup_errors` that splits `+`-joined
+  runtime source keys (e.g. `Open-Meteo_ENSEMBLE+NOAA+NASA_POWER`) and
+  aggregates per-component errors, so per-component bootstrap data is
+  lookup-able at runtime regardless of how live sources combine.
+- `data/sigma_calibration.json` - the calibration dataset (29 cities,
+  174 (city, source) pairs, ~8,700 samples).
+- `data/calibration_summary.json` - human-readable summary, overwritten per
+  run.
+
+## Honest limits (proxy disclosure)
+
+Open-Meteo free-tier archive does NOT expose the archived GEFS ensemble
+feed that the live bot consumes as `Open-Meteo_ENSEMBLE`. Bootstrap uses
+`icon_seamless` (DWD German seamless forecast) as a PROXY for the live
+ensemble source. This estimates **city-level error structure**, not the
+exact as-issued N-hour-ahead ensemble forecast error. The live calibrator
+will continue to refine `Open-Meteo_ENSEMBLE` and `NASA_POWER` (the latter
+has no free archive at all) at trade-resolution pace during normal bot
+operation.
+
+## How to run (one-time bootstrap)
+
+```powershell
+cd D:\Temp\Instal\Openbot\WeatherBot
+python bootstrap_calibration.py --days 365
+```
+
+This overwrites `data/sigma_calibration.json` with fresh data for all 28
+whitelist cities. Expect ~15-25 min wall time (112 API calls at 0.65 s
+throttle + occasional 429 backoff).
+
+## Weekly rerun (recommended)
+
+Forecasts slowly drift with seasons. To keep calibration fresh:
+
+```powershell
+python bootstrap_calibration.py --days 365 --append
+```
+
+`--append` keeps existing samples (up to `_MAX_SAMPLES = 50` per pair) and
+adds new days. Run weekly; the calibrator self-trims to the rolling 50 most
+recent samples per (city, source) pair.
+
+## Verification (post-bootstrap)
+
+Each pair must have >= 5 samples for adaptive sigma to activate. To verify:
+
+```powershell
+python -c "import json; d=json.load(open('data/sigma_calibration.json'));
+import statistics; bad=[(c,s,len(v)) for c in d['errors'] for s,v in d['errors'][c].items() if len(v)<5];
+print('pairs under 5 samples:', bad or 'NONE')"
+```
+
+Expected output: `pairs under 5 samples: NONE`
+
+## Deployment to Render
+
+`data/sigma_calibration.json` and `data/calibration_summary.json` MUST be
+pushed to GitHub alongside `bootstrap_calibration.py` and the modified
+`sigma_calibrator.py` so the live Render worker reads calibrated sigmas
+from the first cycle after deploy. Do NOT gitignore `data/sigma_calibration.json`.
+
+After deploy, set Render env `RESET_POSITIONS=true` for ONE cycle (to clear
+the v27 halted state and 0/15 resolved LOSS positions), then set it back to
+`false` to preserve capital state across the v28 validation run.
