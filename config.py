@@ -70,7 +70,7 @@ MIN_EDGE_YES: float = 0.03           # grid bucket acceptance (was 0.15 — kill
 MIN_EDGE_NO: float = 0.18
 MIN_PROB_ENTRY: float = 0.05         # absolute floor for cheap YES (was 0.08)
 
-MAX_RESOLUTION_HOURS: int = 36       # tighter horizon = better forecast
+MAX_RESOLUTION_HOURS: int = 60       # v28: bumped 36→60 to avoid "blind zone" after 10 UTC (markets on day+2)
 MIN_RESOLUTION_HOURS: float = 1.5
 MIN_MARKET_VOLUME_USD: float = 400.0
 SCAN_INTERVAL_SEC: int = 300

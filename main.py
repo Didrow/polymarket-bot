@@ -362,9 +362,10 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v27  🌤️")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v28  🌤️")
     logger.info("  🎯 PURE SNIPER GRID (coldmath/neobrother bucket ladder)")
-    logger.info("  📐 Прогноз 17.0 → YES на 16.5/17/17.5 (±1.5°C), peak 3× wing, hold to resolution")
+    logger.info("  📐 Sigma calibration bootstrap 8700 samples / 29 cities (adaptive σ)")
+    logger.info("  📐 Прогноз → YES на bucket ±0.5°C (1.65-2.44°C σ), peak 3× wing, hold to resolution")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
@@ -387,7 +388,10 @@ def main():
         f"{getattr(config, 'MIN_PROB_FAR', 0.15):.0%} | "
         f"cheap ratio≥{getattr(config, 'MIN_EDGE_RATIO_CHEAP', 2.2):.1f}x"
     )
-    logger.info(f"  Sigma min:  {config.SIGMA_MIN:.1f}°C | disc={getattr(config, 'CATEGORICAL_DISCOUNT', 0.92):.0%}")
+    logger.info(
+        f"  Sigma:      base {config.SIGMA_MIN:.1f}°C → ADAPTIVE 1.65-2.44°C "
+        f"(calibrator: 8700 samples, 29 cities) | disc={getattr(config, 'CATEGORICAL_DISCOUNT', 0.92):.0%}"
+    )
     logger.info(
         f"  Stake:      ${config.MIN_POSITION_USD:.2f}-${config.MAX_POSITION_USD:.2f}, "
         f"max {config.MAX_ACTIVE_POSITIONS} slots, {getattr(config, 'MAX_POSITIONS_PER_CITY', 5)}/city, "
