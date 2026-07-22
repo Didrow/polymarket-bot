@@ -60,7 +60,7 @@ TRAILING_STOP_ACTIVATION_PCT: float = 0.0  # OFF — was 0.35
 MAX_TOTAL_EXPOSURE_PCT: float = 0.70
 MAX_DAILY_LOSS_PCT: float = 0.20     # relaxed: ladder swings are normal
 MAX_DAILY_LOSS_USD: float = 25.0
-DRAWDOWN_LIMIT: float = 0.40         # ladder needs room (was 0.28)
+DRAWDOWN_LIMIT: float = 0.50         # v28: raised 0.40→0.50 in DRY-RUN to keep collecting samples past 14-trade loss streak for calibration analysis (was 0.40, originally 0.28)
 
 # ── STRATEGY: PURE SNIPER GRID ─────────────────────────────
 # v27: range + categorical ONLY (bucket grid). above/below disabled — not bucket ladder
