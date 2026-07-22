@@ -1,7 +1,7 @@
 {
-  "generated_utc": "2026-07-20T06:39:46.902721+00:00",
-  "window_start": "2025-07-20",
-  "window_end": "2026-07-19",
+  "generated_utc": "2026-07-22T08:12:19.038591+00:00",
+  "window_start": "2025-07-22",
+  "window_end": "2026-07-21",
   "days": 365,
   "cities": {
     "NYC": {
@@ -174,624 +174,816 @@
     }
   },
   "calibrator_stats": {
-    "Boston": {
+    "NYC": {
       "NOAA": {
         "n": 50,
-        "rms": 2.3,
-        "last_error": 1.8
+        "rms": 1.72,
+        "last_error": 4.0
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.07,
-        "last_error": 1.2
+        "rms": 1.25,
+        "last_error": 0.7
       },
       "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.69,
-        "last_error": 1.5
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.93,
-        "last_error": 1.0
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.95,
-        "last_error": 1.4
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.86,
-        "last_error": 0.6
-      }
-    },
-    "Houston": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.09,
-        "last_error": 1.1
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 0.98,
-        "last_error": 0.3
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.55,
-        "last_error": 1.0
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.09,
-        "last_error": 0.9
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.09,
-        "last_error": 1.0
-      },
-      "ECMWF_MIN": {
         "n": 50,
         "rms": 0.97,
-        "last_error": 0.1
-      }
-    },
-    "Austin": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.76,
-        "last_error": 1.0
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 0.67,
-        "last_error": 0.7
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.81,
-        "last_error": 0.9
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.53,
-        "last_error": 0.3
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.07,
-        "last_error": 0.2
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.88,
-        "last_error": 1.0
-      }
-    },
-    "San Francisco": {
-      "NOAA": {
-        "n": 50,
-        "rms": 2.13,
-        "last_error": 1.1
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.45,
-        "last_error": 2.0
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 6.13,
-        "last_error": 8.3
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.06,
-        "last_error": 2.2
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 4.3,
-        "last_error": 5.2
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.97,
-        "last_error": 2.4
-      }
-    },
-    "Phoenix": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.44,
-        "last_error": 0.8
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.38,
-        "last_error": 2.7
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.83,
-        "last_error": 0.3
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.36,
-        "last_error": 0.4
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 0.59,
-        "last_error": 0.2
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.85,
-        "last_error": 0.4
-      }
-    },
-    "Las Vegas": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.73,
-        "last_error": 1.7
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.01,
-        "last_error": 0.9
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.6,
-        "last_error": 2.0
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.26,
-        "last_error": 0.9
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 0.53,
-        "last_error": 0.7
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.28,
-        "last_error": 1.3
-      }
-    },
-    "Minneapolis": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.67,
-        "last_error": 0.4
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 0.86,
-        "last_error": 0.1
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.92,
-        "last_error": 0.8
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.16,
-        "last_error": 0.8
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 0.88,
-        "last_error": 1.3
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.02,
-        "last_error": 0.4
-      }
-    },
-    "Portland": {
-      "NOAA": {
-        "n": 50,
-        "rms": 2.01,
-        "last_error": 3.2
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 0.92,
-        "last_error": 1.0
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.78,
-        "last_error": 0.7
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.12,
-        "last_error": 2.2
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 0.75,
-        "last_error": 0.3
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.1,
-        "last_error": 2.0
-      }
-    },
-    "Nashville": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.33,
-        "last_error": 2.0
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.13,
-        "last_error": 0.3
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.99,
-        "last_error": 0.5
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.75,
-        "last_error": 0.3
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.23,
-        "last_error": 2.6
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.98,
-        "last_error": 0.5
-      }
-    },
-    "Charlotte": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.57,
-        "last_error": 0.1
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.42,
-        "last_error": 0.1
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.51,
-        "last_error": 1.1
+        "last_error": 3.0
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
         "rms": 0.84,
-        "last_error": 0.2
+        "last_error": 0.6
       },
       "ECMWF": {
         "n": 50,
-        "rms": 1.68,
-        "last_error": 0.6
+        "rms": 1.79,
+        "last_error": 3.8
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 0.73,
-        "last_error": 0.6
-      }
-    },
-    "Orlando": {
-      "NOAA": {
-        "n": 50,
-        "rms": 2.29,
-        "last_error": 0.9
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.36,
-        "last_error": 2.1
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.24,
-        "last_error": 1.1
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.52,
-        "last_error": 0.7
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.76,
-        "last_error": 0.4
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.76,
-        "last_error": 0.0
+        "rms": 0.82,
+        "last_error": 0.3
       }
     },
     "New York": {
       "NOAA": {
         "n": 50,
-        "rms": 1.6,
-        "last_error": 1.0
+        "rms": 1.72,
+        "last_error": 4.0
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.26,
-        "last_error": 1.5
+        "rms": 1.25,
+        "last_error": 0.7
       },
       "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.97,
+        "last_error": 3.0
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.84,
+        "last_error": 0.6
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.79,
+        "last_error": 3.8
+      },
+      "ECMWF_MIN": {
         "n": 50,
         "rms": 0.82,
-        "last_error": 0.1
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.83,
-        "last_error": 0.1
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.67,
-        "last_error": 0.8
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.83,
-        "last_error": 1.0
-      }
-    },
-    "Los Angeles": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.92,
-        "last_error": 0.2
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.12,
-        "last_error": 0.9
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 2.38,
-        "last_error": 2.4
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.86,
-        "last_error": 1.4
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.17,
-        "last_error": 0.2
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.65,
-        "last_error": 0.7
+        "last_error": 0.3
       }
     },
     "Chicago": {
       "NOAA": {
         "n": 50,
-        "rms": 1.8,
-        "last_error": 0.8
+        "rms": 1.75,
+        "last_error": 1.3
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.02,
-        "last_error": 1.1
+        "rms": 1.04,
+        "last_error": 0.3
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 2.75,
-        "last_error": 1.9
+        "rms": 2.72,
+        "last_error": 4.0
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
-        "rms": 1.84,
-        "last_error": 0.5
+        "rms": 1.82,
+        "last_error": 1.0
       },
       "ECMWF": {
         "n": 50,
         "rms": 1.81,
-        "last_error": 1.1
+        "last_error": 2.5
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 1.43,
-        "last_error": 1.3
+        "rms": 1.37,
+        "last_error": 0.9
+      }
+    },
+    "Los Angeles": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.97,
+        "last_error": 0.6
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.12,
+        "last_error": 1.5
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 2.5,
+        "last_error": 3.0
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.86,
+        "last_error": 1.1
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.26,
+        "last_error": 1.4
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.65,
+        "last_error": 0.4
       }
     },
     "Miami": {
       "NOAA": {
         "n": 50,
-        "rms": 1.89,
-        "last_error": 2.1
+        "rms": 1.92,
+        "last_error": 2.4
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.82,
-        "last_error": 1.9
+        "rms": 1.86,
+        "last_error": 1.1
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 1.29,
-        "last_error": 1.6
+        "rms": 1.32,
+        "last_error": 1.9
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
-        "rms": 0.69,
-        "last_error": 0.1
+        "rms": 0.71,
+        "last_error": 0.3
       },
       "ECMWF": {
         "n": 50,
-        "rms": 1.22,
-        "last_error": 0.8
+        "rms": 1.3,
+        "last_error": 2.9
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 1.18,
-        "last_error": 2.4
+        "rms": 1.25,
+        "last_error": 1.1
       }
     },
     "Dallas": {
       "NOAA": {
         "n": 50,
-        "rms": 1.3,
-        "last_error": 2.6
+        "rms": 1.47,
+        "last_error": 3.8
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 0.86,
+        "rms": 0.88,
         "last_error": 0.1
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 0.96,
-        "last_error": 1.4
+        "rms": 1.04,
+        "last_error": 2.2
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
-        "rms": 0.66,
-        "last_error": 1.2
+        "rms": 0.65,
+        "last_error": 0.6
       },
       "ECMWF": {
         "n": 50,
-        "rms": 1.08,
-        "last_error": 0.5
+        "rms": 1.07,
+        "last_error": 0.3
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 0.68,
-        "last_error": 0.8
+        "rms": 0.69,
+        "last_error": 1.0
       }
     },
     "Seattle": {
       "NOAA": {
         "n": 50,
-        "rms": 1.52,
-        "last_error": 1.1
+        "rms": 1.49,
+        "last_error": 0.3
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.42,
-        "last_error": 0.8
+        "rms": 1.46,
+        "last_error": 2.3
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 1.05,
-        "last_error": 0.6
+        "rms": 1.06,
+        "last_error": 1.4
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
-        "rms": 1.13,
-        "last_error": 1.0
+        "rms": 1.17,
+        "last_error": 1.9
       },
       "ECMWF": {
         "n": 50,
-        "rms": 1.38,
-        "last_error": 1.8
+        "rms": 1.42,
+        "last_error": 1.1
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 0.94,
-        "last_error": 1.3
+        "rms": 0.95,
+        "last_error": 0.5
       }
     },
     "Denver": {
       "NOAA": {
         "n": 50,
         "rms": 1.61,
-        "last_error": 1.1
+        "last_error": 1.4
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.11,
-        "last_error": 0.2
+        "rms": 1.1,
+        "last_error": 1.0
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
         "rms": 1.07,
-        "last_error": 0.0
+        "last_error": 0.8
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
-        "rms": 2.01,
-        "last_error": 1.5
+        "rms": 2.02,
+        "last_error": 1.3
       },
       "ECMWF": {
         "n": 50,
-        "rms": 1.09,
-        "last_error": 0.2
+        "rms": 1.08,
+        "last_error": 1.0
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 1.5,
-        "last_error": 0.6
+        "rms": 1.48,
+        "last_error": 2.1
       }
     },
     "Atlanta": {
       "NOAA": {
         "n": 50,
-        "rms": 1.28,
-        "last_error": 0.3
+        "rms": 1.31,
+        "last_error": 1.9
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 0.71,
+        "rms": 0.7,
         "last_error": 0.2
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 0.93,
-        "last_error": 1.0
+        "rms": 0.94,
+        "last_error": 0.2
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
         "rms": 0.6,
-        "last_error": 0.8
+        "last_error": 0.4
       },
       "ECMWF": {
         "n": 50,
-        "rms": 1.27,
-        "last_error": 1.5
+        "rms": 1.29,
+        "last_error": 0.6
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 0.91,
+        "rms": 0.9,
+        "last_error": 0.5
+      }
+    },
+    "Boston": {
+      "NOAA": {
+        "n": 50,
+        "rms": 2.21,
+        "last_error": 0.6
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.06,
+        "last_error": 0.0
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 1.68,
+        "last_error": 2.5
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.92,
+        "last_error": 0.7
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.94,
+        "last_error": 1.3
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.85,
+        "last_error": 0.3
+      }
+    },
+    "Houston": {
+      "NOAA": {
+        "n": 50,
+        "rms": 1.08,
+        "last_error": 0.8
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 0.96,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 1.56,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.11,
+        "last_error": 1.1
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.11,
+        "last_error": 1.7
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.97,
+        "last_error": 0.3
+      }
+    },
+    "Austin": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.74,
+        "last_error": 0.5
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 0.66,
+        "last_error": 0.6
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.83,
         "last_error": 1.4
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.55,
+        "last_error": 0.2
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.04,
+        "last_error": 0.2
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.87,
+        "last_error": 0.5
+      }
+    },
+    "San Francisco": {
+      "NOAA": {
+        "n": 50,
+        "rms": 2.17,
+        "last_error": 3.1
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.49,
+        "last_error": 2.3
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 6.37,
+        "last_error": 8.3
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.11,
+        "last_error": 2.1
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 4.52,
+        "last_error": 6.7
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.02,
+        "last_error": 2.1
+      }
+    },
+    "Phoenix": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.46,
+        "last_error": 1.7
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.38,
+        "last_error": 0.5
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.81,
+        "last_error": 0.5
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.35,
+        "last_error": 1.4
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 0.6,
+        "last_error": 0.8
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.82,
+        "last_error": 1.9
+      }
+    },
+    "Las Vegas": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.74,
+        "last_error": 1.5
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.03,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.58,
+        "last_error": 0.8
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.24,
+        "last_error": 0.4
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 0.53,
+        "last_error": 0.1
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.3,
+        "last_error": 2.0
+      }
+    },
+    "Minneapolis": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.68,
+        "last_error": 0.8
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 0.86,
+        "last_error": 0.0
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.93,
+        "last_error": 0.8
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.16,
+        "last_error": 1.6
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 0.9,
+        "last_error": 1.7
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.02,
+        "last_error": 0.7
+      }
+    },
+    "Portland": {
+      "NOAA": {
+        "n": 50,
+        "rms": 2.07,
+        "last_error": 2.3
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 0.92,
+        "last_error": 0.7
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.74,
+        "last_error": 0.6
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.14,
+        "last_error": 1.8
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 0.75,
+        "last_error": 0.1
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.11,
+        "last_error": 0.9
+      }
+    },
+    "Nashville": {
+      "NOAA": {
+        "n": 50,
+        "rms": 1.31,
+        "last_error": 0.2
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.13,
+        "last_error": 0.6
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.95,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.75,
+        "last_error": 0.7
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.21,
+        "last_error": 0.7
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.98,
+        "last_error": 0.4
+      }
+    },
+    "Charlotte": {
+      "NOAA": {
+        "n": 50,
+        "rms": 1.56,
+        "last_error": 0.8
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.45,
+        "last_error": 2.3
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 1.49,
+        "last_error": 0.4
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.86,
+        "last_error": 1.4
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.66,
+        "last_error": 1.7
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.72,
+        "last_error": 1.4
+      }
+    },
+    "Orlando": {
+      "NOAA": {
+        "n": 50,
+        "rms": 2.41,
+        "last_error": 2.7
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.39,
+        "last_error": 1.9
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 1.23,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.51,
+        "last_error": 0.2
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.63,
+        "last_error": 0.3
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.74,
+        "last_error": 0.1
+      }
+    },
+    "London": {
+      "NOAA": {
+        "n": 50,
+        "rms": 1.86,
+        "last_error": 1.5
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.36,
+        "last_error": 1.5
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 1.36,
+        "last_error": 0.6
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.54,
+        "last_error": 0.1
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.45,
+        "last_error": 1.1
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.4,
+        "last_error": 0.8
+      }
+    },
+    "Paris": {
+      "NOAA": {
+        "n": 50,
+        "rms": 1.03,
+        "last_error": 0.4
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 2.46,
+        "last_error": 2.4
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.67,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 2.43,
+        "last_error": 1.5
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 0.93,
+        "last_error": 0.3
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 2.06,
+        "last_error": 2.7
+      }
+    },
+    "Tokyo": {
+      "NOAA": {
+        "n": 50,
+        "rms": 1.45,
+        "last_error": 2.0
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.74,
+        "last_error": 2.2
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 1.17,
+        "last_error": 1.2
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 0.76,
+        "last_error": 0.5
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.41,
+        "last_error": 2.9
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.14,
+        "last_error": 1.9
+      }
+    },
+    "Singapore": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.69,
+        "last_error": 0.5
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 1.03,
+        "last_error": 0.2
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.5,
+        "last_error": 0.1
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.23,
+        "last_error": 1.2
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 0.82,
+        "last_error": 1.1
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 0.98,
+        "last_error": 0.6
+      }
+    },
+    "Sydney": {
+      "NOAA": {
+        "n": 50,
+        "rms": 0.9,
+        "last_error": 0.4
+      },
+      "NOAA_MIN": {
+        "n": 50,
+        "rms": 2.63,
+        "last_error": 4.1
+      },
+      "Open-Meteo_ENSEMBLE": {
+        "n": 50,
+        "rms": 0.76,
+        "last_error": 0.2
+      },
+      "Open-Meteo_ENSEMBLE_MIN": {
+        "n": 50,
+        "rms": 1.03,
+        "last_error": 0.6
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.11,
+        "last_error": 1.2
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.6,
+        "last_error": 2.4
       }
     },
     "Sao Paulo": {
       "NOAA": {
         "n": 50,
-        "rms": 1.07,
-        "last_error": 1.1
+        "rms": 1.05,
+        "last_error": 0.4
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.62,
-        "last_error": 2.0
+        "rms": 1.63,
+        "last_error": 0.0
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
@@ -805,301 +997,77 @@
       },
       "ECMWF": {
         "n": 50,
-        "rms": 0.8,
-        "last_error": 1.3
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.67,
-        "last_error": 0.6
-      }
-    },
-    "London": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.85,
-        "last_error": 2.8
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.37,
-        "last_error": 0.5
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.38,
-        "last_error": 2.2
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.55,
-        "last_error": 0.6
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.51,
-        "last_error": 2.6
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.52,
-        "last_error": 0.1
-      }
-    },
-    "Paris": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.02,
-        "last_error": 0.7
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 2.6,
-        "last_error": 0.9
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.69,
-        "last_error": 0.0
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 2.54,
-        "last_error": 0.1
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 0.92,
-        "last_error": 0.9
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 2.13,
-        "last_error": 0.7
-      }
-    },
-    "Tokyo": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.44,
-        "last_error": 2.2
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.76,
-        "last_error": 2.6
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.16,
-        "last_error": 2.2
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
         "rms": 0.76,
         "last_error": 0.7
       },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.31,
-        "last_error": 4.1
-      },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 1.08,
-        "last_error": 1.2
-      }
-    },
-    "Singapore": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.68,
-        "last_error": 0.5
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.05,
-        "last_error": 0.8
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.51,
-        "last_error": 1.0
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.23,
-        "last_error": 1.0
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 0.81,
-        "last_error": 0.9
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.0,
-        "last_error": 0.6
+        "rms": 0.69,
+        "last_error": 0.4
       }
     },
     "Buenos Aires": {
       "NOAA": {
         "n": 50,
         "rms": 0.88,
-        "last_error": 0.9
+        "last_error": 1.4
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.3,
-        "last_error": 2.3
+        "rms": 1.28,
+        "last_error": 0.2
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 1.03,
-        "last_error": 1.2
+        "rms": 1.01,
+        "last_error": 0.3
       },
       "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
-        "rms": 1.32,
-        "last_error": 1.0
+        "rms": 1.29,
+        "last_error": 0.4
       },
       "ECMWF": {
         "n": 50,
-        "rms": 0.66,
-        "last_error": 0.6
+        "rms": 0.7,
+        "last_error": 1.5
       },
       "ECMWF_MIN": {
         "n": 50,
-        "rms": 1.54,
-        "last_error": 3.3
+        "rms": 1.53,
+        "last_error": 1.4
       }
     },
     "Busan": {
       "NOAA": {
         "n": 50,
-        "rms": 1.51,
-        "last_error": 0.7
+        "rms": 1.48,
+        "last_error": 2.0
       },
       "NOAA_MIN": {
         "n": 50,
-        "rms": 1.48,
-        "last_error": 2.3
+        "rms": 1.5,
+        "last_error": 1.2
       },
       "Open-Meteo_ENSEMBLE": {
         "n": 50,
-        "rms": 2.41,
-        "last_error": 1.5
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.32,
+        "rms": 2.44,
         "last_error": 0.7
       },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.05,
-        "last_error": 0.2
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.09,
-        "last_error": 1.3
-      }
-    },
-    "Cape Town": {
-      "NOAA": {
+      "Open-Meteo_ENSEMBLE_MIN": {
         "n": 50,
         "rms": 1.36,
-        "last_error": 0.7
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 3.22,
-        "last_error": 1.6
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 1.04,
-        "last_error": 0.1
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.62,
-        "last_error": 2.3
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.19,
-        "last_error": 0.7
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.2,
-        "last_error": 0.8
-      }
-    },
-    "NYC": {
-      "NOAA": {
-        "n": 50,
-        "rms": 1.6,
-        "last_error": 1.0
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 1.26,
-        "last_error": 1.5
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.82,
-        "last_error": 0.1
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 0.83,
-        "last_error": 0.1
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.67,
-        "last_error": 0.8
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 0.83,
-        "last_error": 1.0
-      }
-    },
-    "Sydney": {
-      "NOAA": {
-        "n": 50,
-        "rms": 0.89,
-        "last_error": 0.3
-      },
-      "NOAA_MIN": {
-        "n": 50,
-        "rms": 2.53,
-        "last_error": 2.7
-      },
-      "Open-Meteo_ENSEMBLE": {
-        "n": 50,
-        "rms": 0.78,
-        "last_error": 0.0
-      },
-      "Open-Meteo_ENSEMBLE_MIN": {
-        "n": 50,
-        "rms": 1.04,
-        "last_error": 0.3
-      },
-      "ECMWF": {
-        "n": 50,
-        "rms": 1.11,
-        "last_error": 1.4
-      },
-      "ECMWF_MIN": {
-        "n": 50,
-        "rms": 1.55,
         "last_error": 1.9
+      },
+      "ECMWF": {
+        "n": 50,
+        "rms": 1.07,
+        "last_error": 0.7
+      },
+      "ECMWF_MIN": {
+        "n": 50,
+        "rms": 1.13,
+        "last_error": 1.3
       }
     }
   }
