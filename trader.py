@@ -6,6 +6,7 @@ Peak/wing Kelly sizing + fixed DRY-RUN resolution (range-first parse).
 import math
 import time
 import logging
+import os
 import requests
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional, Dict, List
@@ -356,7 +357,7 @@ def _get_equity_drawdown(current_capital: float, portfolio_value: float = 0.0) -
 
 def decide_position_size(edge_result: EdgeResult, current_capital: float, portfolio_value: float = 0.0) -> float:
     drawdown = _get_equity_drawdown(current_capital, portfolio_value)
-    dd_limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
+    dd_limit = float(os.environ.get('DRAWDOWN_LIMIT', getattr(config, 'DRAWDOWN_LIMIT', 0.25)))
     if drawdown >= dd_limit:
         logger.warning(f"⛔ Drawdown {drawdown:.1%} >= {dd_limit:.0%} limit — NO NEW TRADES")
         return 0.0
@@ -410,7 +411,7 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float, portfo
 def check_drawdown_stop(current_capital: float, portfolio_value: float = 0.0) -> bool:
     """True = треба зупинити торгівлю через просадку."""
     dd = _get_equity_drawdown(current_capital, portfolio_value)
-    limit = getattr(config, 'DRAWDOWN_LIMIT', 0.25)
+    limit = float(os.environ.get('DRAWDOWN_LIMIT', getattr(config, 'DRAWDOWN_LIMIT', 0.25)))
     if dd >= limit:
         logger.critical(f"🛑 ДОСЯГНУТО ЛІМІТУ ПРОСАДКИ: {dd:.1%} >= {limit:.0%}. ЗУПИНКА ТОРГІВЛІ.")
         return True

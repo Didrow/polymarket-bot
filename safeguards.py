@@ -729,7 +729,7 @@ class SafeguardManager:
 
     def check_drawdown(self) -> bool:
         dd = self.state.drawdown_pct
-        dd_limit = float(getattr(config, 'DRAWDOWN_LIMIT', 0.30))
+        dd_limit = float(os.environ.get('DRAWDOWN_LIMIT', getattr(config, 'DRAWDOWN_LIMIT', 0.30)))
         if dd >= dd_limit:
             self._halt(f"Просадка {dd:.1%} >= ліміт {dd_limit:.0%}")
             return False
@@ -842,7 +842,7 @@ class SafeguardManager:
         logger.info(f"   Unrealized:    ${s.unrealized_pnl:+.2f}")
         logger.info(f"   💎 Equity:     ${s.equity:.2f}")
         logger.info(f"   ROI:           {s.roi_pct:+.1%} (equity-based)")
-        logger.info(f"   Просадка:      {s.drawdown_pct:.1%}")
+        logger.info(f"   Просадка:      {s.drawdown_pct:.1%} (ліміт: {float(os.environ.get('DRAWDOWN_LIMIT', getattr(config, 'DRAWDOWN_LIMIT', 0.30))):.0%})")
         logger.info(f"   Угоди:         {s.total_trades} (виграш: {s.winning_trades}, програш: {s.losing_trades})")
         logger.info(f"   Win rate:      {s.win_rate:.1%} (з {total_resolved} resolved)")
         logger.info(f"   PnL total:     ${s.total_pnl:+.2f} (realized)")
