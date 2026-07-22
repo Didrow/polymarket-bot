@@ -752,8 +752,15 @@ class SafeguardManager:
 
     def can_trade(self) -> bool:
         if self.state.is_halted:
-            logger.error(f"БОТ ЗУПИНЕНО: {self.state.halt_reason}")
-            return False
+            # Re-evaluate drawdown halt: ліміт міг змінитись при restart/деплої
+            dd = self.state.drawdown_pct
+            dd_limit = float(os.environ.get('DRAWDOWN_LIMIT', getattr(config, 'DRAWDOWN_LIMIT', 0.30)))
+            if dd < dd_limit:
+                logger.info(f"↩️  Авто-відновлення: просадка {dd:.1%} < ліміт {dd_limit:.0%}")
+                self.resume()
+            else:
+                logger.error(f"БОТ ЗУПИНЕНО: {self.state.halt_reason} (просадка {dd:.1%} >= {dd_limit:.0%})")
+                return False
         if not self.check_daily_loss():
             return False
         if not self.check_drawdown():
