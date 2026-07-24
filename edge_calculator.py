@@ -34,10 +34,12 @@ logger = logging.getLogger(__name__)
 # Hard floors (ISOTONIC_MIN_PROB) are enforced after remap so model overconfidence
 # above the 0% empirical WR in the CSV is no longer able to manufacture edge.
 _RECALIB_POINTS: Optional[List[Tuple[float, float]]] = None
+_RECALIB_SCHEMA: int = 1  # 1 = our_prob-based (legacy), 2 = edge_at_entry-based (v29.1)
 
 
 def _load_recalibration_map() -> Optional[List[Tuple[float, float]]]:
     """Load isotonic-recalibration mapping from JSON. Returns sorted points or None."""
+    global _RECALIB_SCHEMA
     if not getattr(config, 'ISOTONIC_RECALIBRATE', False):
         return None
     path = getattr(config, 'ISOTONIC_MAP_FILE', 'data/prob_recalibration.json')
@@ -53,7 +55,11 @@ def _load_recalibration_map() -> Optional[List[Tuple[float, float]]]:
         clean.sort(key=lambda p: p[0])
         if len(clean) < 2:
             return None
-        logger.info(f"📐 Recalibration map loaded: {len(clean)} points "
+        _RECALIB_SCHEMA = int(data.get('schema', 1))
+        # v29.1: check 'key' field for edge-based maps (schema=2)
+        if data.get('key') == 'edge_at_entry':
+            _RECALIB_SCHEMA = 2
+        logger.info(f"📐 Recalibration map loaded (schema={_RECALIB_SCHEMA}): {len(clean)} points "
                     f"(raw {clean[0][0]:.3f}→{clean[0][1]:.3f} … {clean[-1][0]:.3f}→{clean[-1][1]:.3f})")
         return clean
     except Exception as e:
@@ -61,12 +67,8 @@ def _load_recalibration_map() -> Optional[List[Tuple[float, float]]]:
         return None
 
 
-def _apply_recalibration(raw_prob: float) -> float:
-    """Isotonic-remap raw_prob → calibrated prob via piecewise-linear interpolation.
-    Falls back to raw_prob if mapping missing. Clipped to [0, ISOTONIC_MIN_PROB floor handled by caller]."""
-    global _RECALIB_POINTS
-    if _RECALIB_POINTS is None:
-        _RECALIB_POINTS = _load_recalibration_map()
+def _apply_recalibration_prob(raw_prob: float) -> float:
+    """Schema 1 (legacy): remap our_prob → calibrated prob via piecewise-linear."""
     pts = _RECALIB_POINTS
     if not pts or raw_prob <= pts[0][0]:
         return raw_prob
@@ -81,6 +83,51 @@ def _apply_recalibration(raw_prob: float) -> float:
             t = (raw_prob - x0) / (x1 - x0)
             return y0 + t * (y1 - y0)
     return raw_prob
+
+
+def _apply_recalibration_edge(raw_edge: float) -> float:
+    """Schema 2 (v29.1): remap raw edge_at_entry → actual win rate.
+    The returned value estimates the TRUE probability that this trade will win,
+    given the historical relationship between predicted edge and realized outcome.
+    Bot then compares this calibrated win-rate vs market price to recompute effective edge."""
+    pts = _RECALIB_POINTS
+    if not pts or len(pts) < 2:
+        return raw_edge
+    # Clamp to extremes
+    if raw_edge <= pts[0][0]:
+        return pts[0][1]
+    if raw_edge >= pts[-1][0]:
+        return pts[-1][1]
+    # Piecewise-linear interpolate
+    for i in range(len(pts) - 1):
+        x0, y0 = pts[i]
+        x1, y1 = pts[i + 1]
+        if x0 <= raw_edge <= x1:
+            if x1 == x0:
+                return y0
+            t = (raw_edge - x0) / (x1 - x0)
+            return y0 + t * (y1 - y0)
+    return raw_edge
+
+
+def _apply_recalibration(raw_prob: float, raw_edge: Optional[float] = None) -> Tuple[float, float]:
+    """Apply recalibration. Returns (calibrated_prob_or_raw, calibrated_edge_or_raw).
+    - Schema 1 (our_prob-based): only prob is remapped, edge is recomputed as our_cal - mkt.
+    - Schema 2 (edge-based): edge is remapped to actual_win_rate (serves as our_cal), prob unchanged.
+
+    Falls back to raw_prob if mapping missing."""
+    global _RECALIB_POINTS
+    if _RECALIB_POINTS is None:
+        _RECALIB_POINTS = _load_recalibration_map()
+    pts = _RECALIB_POINTS
+    if not pts or len(pts) < 2:
+        return raw_prob, raw_edge
+    if _RECALIB_SCHEMA == 2 and raw_edge is not None:
+        cal_win_rate = _apply_recalibration_edge(raw_edge)
+        return raw_prob, cal_win_rate
+    # Schema 1 (legacy)
+    cal_prob = _apply_recalibration_prob(raw_prob)
+    return cal_prob, raw_edge
 
 
 @dataclass
@@ -253,7 +300,7 @@ def _prob_exact_gauss(forecast: WeatherForecast, low_c: float, high_c: float,
     # calibration data is available, we skip the historical discount when the
     # recalibration map is active.
     if _RECALIB_POINTS is not None or _load_recalibration_map() is not None:
-        raw = _apply_recalibration(raw)
+        raw, _edge_cal = _apply_recalibration(raw, raw_edge=None)
     else:
         discount = getattr(config, 'CATEGORICAL_DISCOUNT', 0.92)
         raw *= discount
@@ -273,7 +320,7 @@ def _prob_trend_gauss(forecast: WeatherForecast, threshold_c: float, kind: str,
         raw = 0.5 * (1 + math.erf((threshold_c - mean) / (sigma * math.sqrt(2))))
 
     if _RECALIB_POINTS is not None or _load_recalibration_map() is not None:
-        raw = _apply_recalibration(raw)
+        raw, _edge_cal = _apply_recalibration(raw, raw_edge=None)
     else:
         prob_bias = getattr(config, 'PROB_BIAS', 1.0)
         if prob_bias != 1.0:
@@ -535,6 +582,20 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     edge_direction = None
     eff_edge = 0.0
     reason = ""
+
+    # v29.1: schema=2 recalibration — remap raw edge_yes via isotonic map.
+    # The map was trained on (edge_at_entry, is_win), so the remapped value
+    # estimates P(win) directly. We then recompute effective edge as
+    # P(win) - market, which reflects E[profit per dollar] honestly.
+    if _RECALIB_POINTS is not None and getattr(config, 'ISOTONIC_RECALIBRATE', False):
+        if _load_recalibration_map() is not None and _RECALIB_SCHEMA == 2:
+            cal_win_p = _apply_recalibration_edge(max(edge_yes, 0.0))
+            # Bot uses eff_edge to decide entry — honest expectancy means
+            # if cal_win_p < market_prob, eff_edge should be negative → skip.
+            edge_yes_cal = cal_win_p - market_prob
+            edge_no_cal = market_prob - cal_win_p
+            edge_yes = edge_yes_cal
+            edge_no = edge_no_cal
 
     if kind in ("categorical", "range"):
         # v29: WING_BAN — peak-only YES gate. Any distance beyond PEAK_DIST_C

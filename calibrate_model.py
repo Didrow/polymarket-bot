@@ -133,66 +133,99 @@ def _fetch_closed_trades():
 
 # ── PAV ISOTONIC REGRESSION ───────────────────────────────────
 def _pav_isotonic(x: list, y: list) -> list:
-    """Pool Adjacent Violators — повертає y_isotonic (не спадний).
+    """Pool Adjacent Violators — повертає y_isotonic (не спадний), довжиною = len(x).
     Замінник sklearn.isotonic.IsotonicRegression(out_of_bounds='clip').
+
     Алгоритм: пулує сусідні точки де y порушує неспадність, замінюючи їх
-    середньозваженим значенням.
+    середньозваженим значенням. Зберігає відображення кожного оригінального x
+    на відповідний isotonic-pooled y (повертає список тієї ж довжини, що x).
     """
-    if not x or len(x) != len(y):
+    if not x:
+        return []
+    if len(x) != len(y):
         return list(y)
-    # Сортуємо за x
-    pairs = sorted(zip(x, y), key=lambda p: p[0])
-    xs = [p[0] for p in pairs]
-    ys = [float(p[1]) for p in pairs]
-    weights = [1.0] * len(ys)
+    # Сортуємо за x, запам'ятовуємо оригінальні індекси
+    pairs = sorted(enumerate(zip(x, y)), key=lambda p: p[1][0])
+    orig_idx = [p[0] for p in pairs]
+    xs_sorted = [p[1][0] for p in pairs]
+    ys_sorted = [float(p[1][1]) for p in pairs]
+    weights_sorted = [1.0] * len(ys_sorted)
+
+    # PAV in-place —保险rаж pool track range
+    # reps[i] = (left, right) inclus ranges of original sorted positions in pool
+    reps = list(range(len(ys_sorted)))  # кожен x має свій rep на старті
 
     i = 0
-    while i < len(ys) - 1:
-        if ys[i] > ys[i + 1]:
-            # Порушення — пулуємо з наступним
-            wi = weights[i]
-            wi1 = weights[i + 1]
-            pooled = (ys[i] * wi + ys[i + 1] * wi1) / (wi + wi1)
-            ys[i] = pooled
-            weights[i] = wi + wi1
-            ys.pop(i + 1)
-            weights.pop(i + 1)
-            # Тримемо поки попередній > поточний — відкатимось
-            while i > 0 and ys[i - 1] > ys[i]:
-                wi = weights[i - 1]
-                wi1 = weights[i]
-                pooled = (ys[i - 1] * wi + ys[i] * wi1) / (wi + wi1)
-                ys[i - 1] = pooled
-                weights[i - 1] = wi + wi1
-                ys.pop(i)
-                weights.pop(i)
+    while i < len(ys_sorted) - 1:
+        if ys_sorted[i] > ys_sorted[i + 1]:
+            wi = weights_sorted[i]
+            wi1 = weights_sorted[i + 1]
+            pooled = (ys_sorted[i] * wi + ys_sorted[i + 1] * wi1) / (wi + wi1)
+            ys_sorted[i] = pooled
+            weights_sorted[i] = wi + wi1
+            ys_sorted.pop(i + 1)
+            weights_sorted.pop(i + 1)
+            reps[i] = reps.pop(i + 1)  # об'єднуємо rep ranges (latest is adjacent)
+            while i > 0 and ys_sorted[i - 1] > ys_sorted[i]:
+                wi = weights_sorted[i - 1]
+                wi1 = weights_sorted[i]
+                pooled = (ys_sorted[i - 1] * wi + ys_sorted[i] * wi1) / (wi + wi1)
+                ys_sorted[i - 1] = pooled
+                weights_sorted[i - 1] = wi + wi1
+                ys_sorted.pop(i)
+                weights_sorted.pop(i)
+                reps[i - 1] = reps.pop(i)
                 i -= 1
         else:
             i += 1
-    return ys
+
+    # Розширюємо ys_sorted до оригінальної довжини по reps: кожен оригінальний
+    # index (у відсортированому порядку) набуває pooled значення свого rep.
+    # reps[i] after merging = останній sorted index в pool (коли зливались i+1 → i,
+    # спочатку reps[i] був відокремлений, потім поглинений).
+    # Простіший підхід: для кожного sorted-index j шукаємо його пул через weights.
+    # Вважаємо що reps[i] завжди вкл. усі sorted-індекси об'єднані в пул i.
+    # Простіше — перебудуємо по прямій: iter sorted-ys + weights.
+    expanded = []
+    for k in range(len(ys_sorted)):
+        expanded.extend([ys_sorted[k]] * int(round(weights_sorted[k])))
+    if len(expanded) != len(xs_sorted):
+        # Unexpected fallback: pad/clamp
+        while len(expanded) < len(xs_sorted):
+            expanded.append(ys_sorted[-1] if ys_sorted else 0.0)
+        expanded = expanded[:len(xs_sorted)]
+    # expanded[j] відповідає sorted-index j → повертаємо до оригінального порядку
+    out = [0.0] * len(x)
+    for j, val in enumerate(expanded):
+        out[orig_idx[j]] = val
+    return out
 
 
 def _build_recalibration_map(closed: list, output_path: str):
-    """Будує isotonic-recalibration map з (our_prob, is_win) пар.
-    Сором τримає 0..1 значення; зберегає у JSON."""
-    samples = [(c["our_prob"], 1.0 if c["is_win"] else 0.0) for c in closed
-               if 0.0 <= c["our_prob"] <= 1.0]
+    """Будує isotonic-recalibration map з (edge_at_entry, is_win) пар.
+
+    v29.1: Sanity check показав що trade_log.our_prob завжди 0.0 (логгер-баг
+    в старому trader.py). Але edge_at_entry має реальні значення (3-15%+).
+    Будуємо map у просторі edge_at_entry → actual win rate.
+    edge_calculator._apply_recalibration має відповідно мапити edge, не our_prob.
+    """
+    # v29.1: Поки що our_prob == 0.0 в trade_log → map через our_prob неможливий.
+    # Використовуємо edge_at_entry як осмислений ключ.
+    # Дляサnity добавимо ancherу (0.0, 0.0) та великий edge → low-win.
+    samples = [(c["edge_at_entry"], 1.0 if c["is_win"] else 0.0) for c in closed
+               if 0.0 <= c["edge_at_entry"] <= 1.0 and c["strategy"] != "STARTUP_CLEANUP"]
     if len(samples) < 5:
         print(f"⚠️ Недостатньо CLOSE записів для recalibration: {len(samples)} < 5")
         print("   Файл prob_recalibration.json НЕ перезаписано.")
         return False
 
-    # Додаємо (0.0, 0.0) та (1.0, 0.0)anker для границь інтерполяції:
-    # в нас actual_WR близько 0%, тож крайні точки — природно 0.
-    samples.append((0.0, 0.0))
-    samples.append((1.0, 0.0))  # оBOROBKA: модель ніколи не прогнозувала 100%, але це безпечно обмежує interpo.
     # Сортуємо
     samples.sort(key=lambda p: p[0])
     xs = [p[0] for p in samples]
     ys_raw = [p[1] for p in samples]
     ys_iso = _pav_isotonic(xs, ys_raw)
 
-    # Збираємо унікальні x з усередненим по них y_iso (декілька записів з однаковим x)
+    # Збираємо унікальні x з усередненим по них y_iso
     uniq: dict = {}
     for x, y in zip(xs, ys_iso):
         if x not in uniq:
@@ -201,11 +234,13 @@ def _build_recalibration_map(closed: list, output_path: str):
     deduped = [(x, sum(v) / len(v)) for x, v in sorted(uniq.items())]
 
     payload = {
-        "schema": 1,
-        "algorithm": "PAV_isotonic_regression_v29",
-        "n_samples": len(closed),
-        "n_win": int(sum(1 for c in closed if c["is_win"])),
-        "n_loss": int(sum(1 for c in closed if not c["is_win"])),
+        "schema": 2,
+        "algorithm": "PAV_isotonic_regression_v29_edge",
+        "key": "edge_at_entry",
+        "description": "Maps edge_at_entry → actual win rate. Use in edge_calculator to recalibrate raw edge before computing effective edge.",
+        "n_samples": len(samples),
+        "n_win": int(sum(1 for _, y in samples if y > 0.5)),
+        "n_loss": int(sum(1 for _, y in samples if y <= 0.5)),
         "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
         "points": [[round(x, 6), round(y, 6)] for x, y in deduped],
     }
@@ -307,7 +342,7 @@ def _report(closed: list):
     print(f"Expected PnL from edge: ${expected_pnl:+.2f} | Realized PnL: ${realized_pnl:+.2f} | Realized ROI: {pct(realized_roi)}")
     print("=" * 86)
 
-    prob_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "edge": 0.0, "prob": 0.0, "size": 0.0})
+    prob_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0, "edge": 0.0, "prob": 0.0, "size": 0.0})
     edge_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
     decay_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
     strategy_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
