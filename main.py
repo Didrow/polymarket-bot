@@ -362,10 +362,10 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v28  🌤️")
-    logger.info("  🎯 PURE SNIPER GRID (coldmath/neobrother bucket ladder)")
-    logger.info("  📐 Sigma calibration bootstrap 8700 samples / 29 cities (adaptive σ)")
-    logger.info("  📐 Прогноз → YES на bucket ±0.5°C (1.65-2.44°C σ), peak 3× wing, hold to resolution")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v29  🌤️")
+    logger.info("  🎯 PURE SNIPER GRID v29 (peak-only range, isotonic recalibration)")
+    logger.info("  📐 adaptive σ from bootstrap + PAV isotonic recalibration from trade_log")
+    logger.info("  📐 range only (≥3°C wide), peak-only (dist≤0.5°C), wing YES banned, min_prob 3%")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
@@ -474,6 +474,21 @@ def main():
     notifier.notify_startup(config.DRY_RUN, safeguard.state.current_capital)
     _initialized = True
     logger.info("🚀 Бот запущено. Ctrl+C для зупинки.\n")
+
+    # v29: auto-build isotonic recalibration map from PostgreSQL trade_log
+    if getattr(config, 'ISOTONIC_RECALIBRATE', False):
+        try:
+            from calibrate_model import _fetch_closed_trades, _build_recalibration_map
+            closed = _fetch_closed_trades()
+            n = len(closed) if closed else 0
+            if n >= 5:
+                map_path = getattr(config, 'ISOTONIC_MAP_FILE', 'data/prob_recalibration.json')
+                _build_recalibration_map(closed, map_path)
+                logger.info(f"📐 [v29] Isotonic recalibration map built from {n} CLOSED trades → {map_path}")
+            else:
+                logger.info(f"📐 [v29] Only {n} CLOSED trades in trade_log — skip map build (need ≥5). Bot will use raw probabilities.")
+        except Exception as e:
+            logger.warning(f"📐 [v29] Auto-calibration failed (non-fatal, will use raw probabilities): {e}")
 
     cycle_count = 0
     last_summary_time = time.time()

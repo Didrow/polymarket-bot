@@ -13,7 +13,9 @@ Lessons hard-coded:
 
 import math
 import re
+import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional, List, Tuple, Dict
 from dataclasses import dataclass
@@ -23,6 +25,62 @@ from data_fetcher import WeatherForecast, get_best_forecast
 from market_scanner import PolyMarket, get_target_date
 
 logger = logging.getLogger(__name__)
+
+
+# ── PROBABILITY RECALIBRATION (v29) ──────────────────────────
+# Loaded once at import time. Mapping is a sorted list of [raw_prob, calibrated_prob]
+# pairs produced by calibrate_model.py via PAV isotonic regression. Remap is
+# applied inside _prob_exact_gauss / _prob_trend_gauss BEFORE any discount/cap.
+# Hard floors (ISOTONIC_MIN_PROB) are enforced after remap so model overconfidence
+# above the 0% empirical WR in the CSV is no longer able to manufacture edge.
+_RECALIB_POINTS: Optional[List[Tuple[float, float]]] = None
+
+
+def _load_recalibration_map() -> Optional[List[Tuple[float, float]]]:
+    """Load isotonic-recalibration mapping from JSON. Returns sorted points or None."""
+    if not getattr(config, 'ISOTONIC_RECALIBRATE', False):
+        return None
+    path = getattr(config, 'ISOTONIC_MAP_FILE', 'data/prob_recalibration.json')
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        pts = data.get('points')
+        if not pts or not isinstance(pts, list):
+            return None
+        clean = [(float(a), float(b)) for a, b in pts if 0.0 <= float(a) <= 1.0 and 0.0 <= float(b) <= 1.0]
+        clean.sort(key=lambda p: p[0])
+        if len(clean) < 2:
+            return None
+        logger.info(f"📐 Recalibration map loaded: {len(clean)} points "
+                    f"(raw {clean[0][0]:.3f}→{clean[0][1]:.3f} … {clean[-1][0]:.3f}→{clean[-1][1]:.3f})")
+        return clean
+    except Exception as e:
+        logger.warning(f"Recalibration map load failed: {e}")
+        return None
+
+
+def _apply_recalibration(raw_prob: float) -> float:
+    """Isotonic-remap raw_prob → calibrated prob via piecewise-linear interpolation.
+    Falls back to raw_prob if mapping missing. Clipped to [0, ISOTONIC_MIN_PROB floor handled by caller]."""
+    global _RECALIB_POINTS
+    if _RECALIB_POINTS is None:
+        _RECALIB_POINTS = _load_recalibration_map()
+    pts = _RECALIB_POINTS
+    if not pts or raw_prob <= pts[0][0]:
+        return raw_prob
+    if raw_prob >= pts[-1][0]:
+        return pts[-1][1]
+    for i in range(len(pts) - 1):
+        x0, y0 = pts[i]
+        x1, y1 = pts[i + 1]
+        if x0 <= raw_prob <= x1:
+            if x1 == x0:
+                return y0
+            t = (raw_prob - x0) / (x1 - x0)
+            return y0 + t * (y1 - y0)
+    return raw_prob
 
 
 @dataclass
@@ -187,8 +245,18 @@ def _prob_exact_gauss(forecast: WeatherForecast, low_c: float, high_c: float,
             prob_emp = count_in / len(members)
             raw = (1 - emp_weight) * raw + emp_weight * prob_emp
 
-    discount = getattr(config, 'CATEGORICAL_DISCOUNT', 0.92)
-    raw *= discount
+    # v29: isotonic-recalibrate the Gaussian output BEFORE discount & cap.
+    # Why before discount: discount is a multiplicative term that was tuned on
+    # raw Gaussian. Recalibration learns the empirical wins/total mapping of
+    # the *post-discount* probability, so the mapping already folds in any
+    # structural bias the discount encoded. To avoid double-discounting after
+    # calibration data is available, we skip the historical discount when the
+    # recalibration map is active.
+    if _RECALIB_POINTS is not None or _load_recalibration_map() is not None:
+        raw = _apply_recalibration(raw)
+    else:
+        discount = getattr(config, 'CATEGORICAL_DISCOUNT', 0.92)
+        raw *= discount
 
     cap = _get_cap_exact(hours)
     return max(0.01, min(cap, round(raw, 4)))
@@ -204,9 +272,12 @@ def _prob_trend_gauss(forecast: WeatherForecast, threshold_c: float, kind: str,
     else:
         raw = 0.5 * (1 + math.erf((threshold_c - mean) / (sigma * math.sqrt(2))))
 
-    prob_bias = getattr(config, 'PROB_BIAS', 1.0)
-    if prob_bias != 1.0:
-        raw *= prob_bias
+    if _RECALIB_POINTS is not None or _load_recalibration_map() is not None:
+        raw = _apply_recalibration(raw)
+    else:
+        prob_bias = getattr(config, 'PROB_BIAS', 1.0)
+        if prob_bias != 1.0:
+            raw *= prob_bias
 
     cap = _get_cap_trend(hours)
     return max(0.01, min(cap, round(raw, 4)))
@@ -339,6 +410,11 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                 else:
                     range_c = (rl, rh)
             low_c, high_c = range_c
+            # v29: minimum bucket width — anything narrower than forecast
+            # uncertainty is essentially a coin flip on station noise.
+            min_width = getattr(config, 'RANGE_MIN_BUCKET_WIDTH_C', 3.0)
+            if (high_c - low_c) < min_width:
+                return None
             threshold_c = (low_c + high_c) / 2.0
             our_prob = _prob_exact_gauss(forecast, low_c, high_c, is_low, market.hours_to_resolution)
         else:
@@ -370,6 +446,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             threshold_c = threshold_value
         our_prob = _prob_trend_gauss(forecast, threshold_c, kind, is_low, market.hours_to_resolution)
 
+    # v29: hard floor on recalibrated our_prob — blocks the entire 0-10% bucket
+    # (calibration CSV: avg_pred 6.6% → actual 2.2%) from ever entering positions.
+    iso_floor = getattr(config, 'ISOTONIC_MIN_PROB', 0.0)
+    if iso_floor > 0.0 and our_prob < iso_floor:
+        return None
+
     fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
     distance_c = abs(fc_temp - threshold_c)
 
@@ -386,6 +468,18 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         sigma_edge = forecast._get_sigma(market.hours_to_resolution)
         if distance_c > max_dist_sigma * sigma_edge and our_prob > 0.50:
             return None
+
+    # v29: WING_BAN — eliminate any BUY_YES where forecast is not inside the
+    # peak bucket (dist > PEAK_DIST_C). Calibration CSV: 14/14 losses included
+    # wing-style 0.7-1.2°C off-forecast entries; no wins ever came from a wing.
+    # The ban is enforced here (in addition to SNIPER_GRID_DISTANCE_C tightening)
+    # so the NO path remains eligible for far-from-forecast mispriced extremes.
+    if getattr(config, 'WING_BAN', False):
+        peak_only_dist = getattr(config, 'PEAK_DIST_C', 0.50)
+        if distance_c > peak_only_dist:
+            # Not a peak — only allow further evaluation if it becomes a NO
+            # (handled below). Mark with sentinel: skip yes acceptance later.
+            pass
 
     # ── QUALITY GATES (distance-aware, not blanket ban) ──
     max_tail_prob = getattr(config, 'MAX_TAIL_PROB', 0.08)
@@ -443,7 +537,15 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     reason = ""
 
     if kind in ("categorical", "range"):
-        if edge_yes >= min_edge_yes and our_prob >= min_prob:
+        # v29: WING_BAN — peak-only YES gate. Any distance beyond PEAK_DIST_C
+        # turns this market into an automatic NO-only consideration.
+        wing_banned = False
+        if getattr(config, 'WING_BAN', False):
+            peak_only_dist = getattr(config, 'PEAK_DIST_C', 0.50)
+            if distance_c > peak_only_dist:
+                wing_banned = True
+
+        if not wing_banned and edge_yes >= min_edge_yes and our_prob >= min_prob:
             if not (ask_min_grid <= market_prob <= ask_max_grid):
                 return None
             edge_direction = "BUY_YES"

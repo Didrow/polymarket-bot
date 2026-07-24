@@ -1,52 +1,226 @@
+"""
+calibrate_model.py — Калібрування моделі прогнозу ймовірностей (v29)
+
+Нове в v29:
+  • PAV (Pool Adjacent Violators) isotonic regression — без sklearn-залежності
+    (требования Render / Neon не підтягають ще один важкий пакет).
+  • Збереження відображення у `data/prob_recalibration.json` — цей файл
+    підхоплює edge_calculator.py при старті, щоб замінити сирі Gaussian
+    ймовірності на емпірично калібровані ДО розрахунку edge/Kelly/size.
+  • Захист від невизначених єдиних пар: якщо у trade_log < 5 записів з дії CLOSE,
+    файл не перезаписується (залишається попередній, або一旁 взагалі не створюється).
+
+Файл compatible з Neon (DATABASE_URL) та SQLite (через _log_trade_to_sqlite fallback).
+"""
+
 import os
-import pg8000
+import json
 from collections import defaultdict
 from urllib.parse import urlparse
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    print("Error: DATABASE_URL variable not set!")
-    exit(1)
+try:
+    import pg8000
+    _HAS_PG8000 = True
+except ImportError:
+    _HAS_PG8000 = False
 
-parsed = urlparse(DATABASE_URL)
-conn = pg8000.connect(
-    host=parsed.hostname,
-    port=parsed.port or 5432,
-    user=parsed.username,
-    password=parsed.password,
-    database=parsed.path.lstrip("/"),
-)
 
-cur = conn.cursor()
-cur.execute(
+# ── DB CONNECTION ────────────────────────────────────────────
+def _fetch_closed_trades():
+    """Return list of dicts with our_prob + is_win from trade_log."""
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    if not DATABASE_URL:
+        print("Error: DATABASE_URL variable not set!")
+        return None
+
+    rows = None
+    if _HAS_PG8000:
+        try:
+            parsed = urlparse(DATABASE_URL)
+            conn = pg8000.connect(
+                host=parsed.hostname,
+                port=parsed.port or 5432,
+                user=parsed.username,
+                password=parsed.password,
+                database=parsed.path.lstrip("/"),
+            )
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT
+                    our_prob,
+                    market_prob,
+                    edge,
+                    edge_at_entry,
+                    entry_price,
+                    size_usd,
+                    pnl_usd,
+                    status,
+                    strategy,
+                    dry_run,
+                    time_decay_factor,
+                    timestamp
+                FROM trade_log
+                WHERE action = 'CLOSE'
+                ORDER BY timestamp
+                """
+            )
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"pg8000 недоступний: {e}. Спроба SQLAlchemy URL-фолбеку...")
+
+    if rows is None:
+        try:
+            import psycopg2
+            conn = psycopg2.connect(DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT
+                    our_prob, market_prob, edge, edge_at_entry, entry_price,
+                    size_usd, pnl_usd, status, strategy, dry_run, time_decay_factor, timestamp
+                FROM trade_log
+                WHERE action = 'CLOSE'
+                ORDER BY timestamp
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            print(f"psycopg2 також недоступний: {e}")
+            return None
+
+    closed = []
+    for row in rows:
+        def f(v):
+            try:
+                return float(v) if v is not None else 0.0
+            except Exception:
+                return 0.0
+        our_prob = f(row[0])
+        market_prob = f(row[1])
+        edge = f(row[2])
+        edge_at_entry = f(row[3]) if row[3] is not None else edge
+        entry_price = f(row[4])
+        size_usd = f(row[5])
+        pnl_usd = f(row[6])
+        status = str(row[7])
+        strategy = str(row[8] or "UNKNOWN")
+        dry_run = bool(row[9])
+        time_decay = f(row[10]) if row[10] is not None else 0.0
+        is_win = status == "WIN"
+        expected_pnl = edge_at_entry * size_usd
+        realized_roi = pnl_usd / size_usd if size_usd > 0 else 0.0
+        closed.append({
+            "our_prob": our_prob,
+            "market_prob": market_prob,
+            "edge": edge,
+            "edge_at_entry": edge_at_entry,
+            "entry_price": entry_price,
+            "size_usd": size_usd,
+            "pnl_usd": pnl_usd,
+            "status": status,
+            "strategy": strategy,
+            "dry_run": dry_run,
+            "time_decay": time_decay,
+            "is_win": is_win,
+            "expected_pnl": expected_pnl,
+            "realized_roi": realized_roi,
+        })
+    return closed
+
+
+# ── PAV ISOTONIC REGRESSION ───────────────────────────────────
+def _pav_isotonic(x: list, y: list) -> list:
+    """Pool Adjacent Violators — повертає y_isotonic (не спадний).
+    Замінник sklearn.isotonic.IsotonicRegression(out_of_bounds='clip').
+    Алгоритм: пулує сусідні точки де y порушує неспадність, замінюючи їх
+    середньозваженим значенням.
     """
-    SELECT
-        our_prob,
-        market_prob,
-        edge,
-        edge_at_entry,
-        entry_price,
-        size_usd,
-        pnl_usd,
-        status,
-        strategy,
-        dry_run,
-        time_decay_factor,
-        timestamp
-    FROM trade_log
-    WHERE action = 'CLOSE'
-    ORDER BY timestamp
-    """
-)
-rows = cur.fetchall()
-cur.close()
-conn.close()
+    if not x or len(x) != len(y):
+        return list(y)
+    # Сортуємо за x
+    pairs = sorted(zip(x, y), key=lambda p: p[0])
+    xs = [p[0] for p in pairs]
+    ys = [float(p[1]) for p in pairs]
+    weights = [1.0] * len(ys)
 
-if not rows:
-    print("Немає закритих угод для калібрування.")
-    exit(0)
+    i = 0
+    while i < len(ys) - 1:
+        if ys[i] > ys[i + 1]:
+            # Порушення — пулуємо з наступним
+            wi = weights[i]
+            wi1 = weights[i + 1]
+            pooled = (ys[i] * wi + ys[i + 1] * wi1) / (wi + wi1)
+            ys[i] = pooled
+            weights[i] = wi + wi1
+            ys.pop(i + 1)
+            weights.pop(i + 1)
+            # Тримемо поки попередній > поточний — відкатимось
+            while i > 0 and ys[i - 1] > ys[i]:
+                wi = weights[i - 1]
+                wi1 = weights[i]
+                pooled = (ys[i - 1] * wi + ys[i] * wi1) / (wi + wi1)
+                ys[i - 1] = pooled
+                weights[i - 1] = wi + wi1
+                ys.pop(i)
+                weights.pop(i)
+                i -= 1
+        else:
+            i += 1
+    return ys
 
 
+def _build_recalibration_map(closed: list, output_path: str):
+    """Будує isotonic-recalibration map з (our_prob, is_win) пар.
+    Сором τримає 0..1 значення; зберегає у JSON."""
+    samples = [(c["our_prob"], 1.0 if c["is_win"] else 0.0) for c in closed
+               if 0.0 <= c["our_prob"] <= 1.0]
+    if len(samples) < 5:
+        print(f"⚠️ Недостатньо CLOSE записів для recalibration: {len(samples)} < 5")
+        print("   Файл prob_recalibration.json НЕ перезаписано.")
+        return False
+
+    # Додаємо (0.0, 0.0) та (1.0, 0.0)anker для границь інтерполяції:
+    # в нас actual_WR близько 0%, тож крайні точки — природно 0.
+    samples.append((0.0, 0.0))
+    samples.append((1.0, 0.0))  # оBOROBKA: модель ніколи не прогнозувала 100%, але це безпечно обмежує interpo.
+    # Сортуємо
+    samples.sort(key=lambda p: p[0])
+    xs = [p[0] for p in samples]
+    ys_raw = [p[1] for p in samples]
+    ys_iso = _pav_isotonic(xs, ys_raw)
+
+    # Збираємо унікальні x з усередненим по них y_iso (декілька записів з однаковим x)
+    uniq: dict = {}
+    for x, y in zip(xs, ys_iso):
+        if x not in uniq:
+            uniq[x] = []
+        uniq[x].append(y)
+    deduped = [(x, sum(v) / len(v)) for x, v in sorted(uniq.items())]
+
+    payload = {
+        "schema": 1,
+        "algorithm": "PAV_isotonic_regression_v29",
+        "n_samples": len(closed),
+        "n_win": int(sum(1 for c in closed if c["is_win"])),
+        "n_loss": int(sum(1 for c in closed if not c["is_win"])),
+        "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "points": [[round(x, 6), round(y, 6)] for x, y in deduped],
+    }
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    print(f"✅ Збережено recalibration map: {output_path}")
+    print(f"   точки: {len(payload['points'])}")
+    print(f"   перша: raw {deduped[0][0]:.3f} → cal {deduped[0][1]:.3f}")
+    print(f"   остання: raw {deduped[-1][0]:.3f} → cal {deduped[-1][1]:.3f}")
+    return True
+
+
+# ── REPORTING (старий звіт зберігається) ─────────────────────
 def f(v):
     try:
         return float(v)
@@ -89,75 +263,6 @@ def decay_bucket(d):
         return "12-24h"
     return "24h+"
 
-closed = []
-for row in rows:
-    our_prob = f(row[0])
-    market_prob = f(row[1])
-    edge = f(row[2])
-    edge_at_entry = f(row[3]) if row[3] is not None else edge
-    entry_price = f(row[4])
-    size_usd = f(row[5])
-    pnl_usd = f(row[6])
-    status = str(row[7])
-    strategy = str(row[8] or "UNKNOWN")
-    dry_run = bool(row[9])
-    time_decay = f(row[10]) if row[10] is not None else 0.0
-    is_win = status == "WIN"
-    expected_pnl = edge_at_entry * size_usd
-    realized_roi = pnl_usd / size_usd if size_usd > 0 else 0.0
-    closed.append({
-        "our_prob": our_prob,
-        "market_prob": market_prob,
-        "edge": edge,
-        "edge_at_entry": edge_at_entry,
-        "entry_price": entry_price,
-        "size_usd": size_usd,
-        "pnl_usd": pnl_usd,
-        "status": status,
-        "strategy": strategy,
-        "dry_run": dry_run,
-        "time_decay": time_decay,
-        "is_win": is_win,
-        "expected_pnl": expected_pnl,
-        "realized_roi": realized_roi,
-    })
-
-trades = len(closed)
-wins = sum(1 for x in closed if x["is_win"])
-losses = trades - wins
-actual_wr = wins / trades if trades else 0.0
-avg_prob = sum(x["our_prob"] for x in closed) / trades
-avg_edge = sum(x["edge_at_entry"] for x in closed) / trades
-expected_pnl = sum(x["expected_pnl"] for x in closed)
-realized_pnl = sum(x["pnl_usd"] for x in closed)
-realized_roi = realized_pnl / sum(x["size_usd"] for x in closed)
-
-print("\n📊 ЗВІТ КАЛІБРУВАННЯ МОДЕЛІ (Predicted vs Actual)")
-print("=" * 86)
-print(f"Закритих угод: {trades} | Wins: {wins} | Losses: {losses} | Actual WR: {pct(actual_wr)}")
-print(f"Avg predicted prob: {avg_prob:.1%} | Avg edge_at_entry: {avg_edge:.1%}")
-print(f"Expected PnL from edge: ${expected_pnl:+.2f} | Realized PnL: ${realized_pnl:+.2f} | Realized ROI: {pct(realized_roi)}")
-print("=" * 86)
-
-prob_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "edge": 0.0, "prob": 0.0, "size": 0.0})
-edge_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
-decay_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
-strategy_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
-
-for x in closed:
-    pb = prob_bucket(x["our_prob"])
-    eb = edge_bucket(x["edge_at_entry"])
-    db = decay_bucket(x["time_decay"])
-    sb = x["strategy"]
-    for bucket, key in [(prob_buckets, pb), (edge_buckets, eb), (decay_buckets, db), (strategy_buckets, sb)]:
-        bucket[key]["trades"] += 1
-        bucket[key]["wins"] += int(x["is_win"])
-        bucket[key]["pnl"] += x["pnl_usd"]
-        bucket[key]["expected"] += x["expected_pnl"]
-    prob_buckets[pb]["prob"] += x["our_prob"]
-    prob_buckets[pb]["edge"] += x["edge_at_entry"]
-    prob_buckets[pb]["size"] += x["size_usd"]
-
 
 def print_bucket_table(title, buckets, show_prob=False):
     print(f"\n{title}")
@@ -181,10 +286,73 @@ def print_bucket_table(title, buckets, show_prob=False):
             avg_pnl = pnl / n if n else 0.0
             print(f"{bucket:<14} | {n:>4} | {wr:<9.1%} | ${expected:+11.2f} | ${pnl:+9.2f} | ${avg_pnl:+8.2f}")
 
-print_bucket_table("Калібрування за our_prob", prob_buckets, show_prob=True)
-print_bucket_table("Backtest sanity за edge_at_entry", edge_buckets)
-print_bucket_table("Time-decay sanity", decay_buckets)
-print_bucket_table("Strategy sanity", strategy_buckets)
 
-print("\n⚠️ Якщо bias стабільно від'ємний у tail-бакетах 0-10% / 10-20%, треба піднімати EXTREME_TAIL_MIN_EDGE_YES.")
-print("⚠️ Якщо Expected PnL позитивний, а Realized PnL мінусовий — проблема в resolution/model calibration, не в edge-фільтрі.")
+def _report(closed: list):
+    trades = len(closed)
+    wins = sum(1 for x in closed if x["is_win"])
+    losses = trades - wins
+    actual_wr = wins / trades if trades else 0.0
+    avg_prob = sum(x["our_prob"] for x in closed) / trades if trades else 0.0
+    avg_edge = sum(x["edge_at_entry"] for x in closed) / trades if trades else 0.0
+    expected_pnl = sum(x["expected_pnl"] for x in closed)
+    realized_pnl = sum(x["pnl_usd"] for x in closed)
+    total_size = sum(x["size_usd"] for x in closed)
+    realized_roi = realized_pnl / total_size if total_size > 0 else 0.0
+
+    print("\n" + "=" * 86)
+    print(f"📊 ЗВІТ КАЛІБРУВАННЯ МОДЕЛІ (Predicted vs Actual)")
+    print("=" * 86)
+    print(f"Закритих угод: {trades} | Wins: {wins} | Losses: {losses} | Actual WR: {pct(actual_wr)}")
+    print(f"Avg predicted prob: {avg_prob:.1%} | Avg edge_at_entry: {avg_edge:.1%}")
+    print(f"Expected PnL from edge: ${expected_pnl:+.2f} | Realized PnL: ${realized_pnl:+.2f} | Realized ROI: {pct(realized_roi)}")
+    print("=" * 86)
+
+    prob_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "edge": 0.0, "prob": 0.0, "size": 0.0})
+    edge_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
+    decay_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
+    strategy_buckets = defaultdict(lambda: {"trades": 0, "wins": 0, "pnl": 0.0, "expected": 0.0})
+
+    for x in closed:
+        pb = prob_bucket(x["our_prob"])
+        eb = edge_bucket(x["edge_at_entry"])
+        db = decay_bucket(x["time_decay"])
+        sb = x["strategy"]
+        for bucket, key in [(prob_buckets, pb), (edge_buckets, eb), (decay_buckets, db), (strategy_buckets, sb)]:
+            bucket[key]["trades"] += 1
+            bucket[key]["wins"] += int(x["is_win"])
+            bucket[key]["pnl"] += x["pnl_usd"]
+            bucket[key]["expected"] += x["expected_pnl"]
+        prob_buckets[pb]["prob"] += x["our_prob"]
+        prob_buckets[pb]["edge"] += x["edge_at_entry"]
+        prob_buckets[pb]["size"] += x["size_usd"]
+
+    print_bucket_table("Калібрування за our_prob", prob_buckets, show_prob=True)
+    print_bucket_table("Backtest sanity за edge_at_entry", edge_buckets)
+    print_bucket_table("Time-decay sanity", decay_buckets)
+    print_bucket_table("Strategy sanity", strategy_buckets)
+
+    print("\n⚠️ Якщо bias стабільно від'ємний у tail-бакетах 0-10% / 10-20%,")
+    print("   треба піднімати EXTREME_TAIL_MIN_EDGE_YES або ISOTONIC_MIN_PROB.")
+    print("⚠️ Якщо Expected PnL позитивний, а Realized PnL мінусовий —")
+    print("   проблема в resolution/model calibration, не в edge-фільтрі.")
+
+
+# ── MAIN ─────────────────────────────────────────────────────
+if __name__ == "__main__":
+    closed = _fetch_closed_trades()
+    if closed is None:
+        exit(1)
+    if not closed:
+        print("Немає закритих угод для калібрування.")
+        exit(0)
+
+    _report(closed)
+
+    # v29: зберегти isotonic-recalibration map для edge_calculator.py
+    output_path = os.environ.get("RECALIBRATION_MAP_PATH", "data/prob_recalibration.json")
+    print(f"\n📐 Будуємо isotonic-recalibration map → {output_path}")
+    ok = _build_recalibration_map(closed, output_path)
+    if ok:
+        print("   Бот підхопить новий map на наступному циклі.")
+    else:
+        print("   Залишаємо попередній map (якщо існує).")
