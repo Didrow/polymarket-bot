@@ -1,5 +1,5 @@
 """
-edge_calculator.py — Weather Bot v30 (LOTTERY EDGE / TIME WINDOW)
+edge_calculator.py — Weather Bot v31 (LOTTERY EDGE / WIDER WINDOW)
 
 neobrother / coldmath style:
   Forecast 17.0 → buy YES ladder on nearby buckets (16/17/18 or 16.8…17.2)
@@ -696,7 +696,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results: List[EdgeResult] = []
     skip_vol = skip_city = skip_hours = skip_none = skip_spread = skip_kind = skip_window = 0
 
-    # v30: Time window gate — only trade in fresh-market window (00:00-06:00 UTC)
+    # v31: Time window gate — only trade in fresh-market window (00:00-08:00 UTC)
     # Historical analysis: all 8 wins opened 00:00-04:00 UTC. 12:00 UTC: 109 trades, 0.9% WR.
     win_start = getattr(config, 'OPEN_WINDOW_START_UTC', 0)
     win_end = getattr(config, 'OPEN_WINDOW_END_UTC', 24)
@@ -704,7 +704,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     in_window = win_start <= now_utc.hour < win_end
     if not in_window:
         logger.info(
-            f"⊓ v30 time-window: outside open window ({now_utc.hour:02d}:{now_utc.minute:02d} UTC, "
+            f"⊓ v31 time-window: outside open window ({now_utc.hour:02d}:{now_utc.minute:02d} UTC, "
             f"window={win_start:02d}-{win_end:02d} UTC). Skipping all trades this cycle."
         )
 
@@ -733,7 +733,7 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
         if len(markets) > 400 and idx % 200 == 0 and idx > 0:
             logger.info(f"  scan progress: {idx}/{len(markets)} processed, {len(results)} tradeable so far")
 
-        # v30: Skip all market processing if outside time window
+        # v31: Skip all market processing if outside time window
         if not in_window:
             skip_window += 1
             continue

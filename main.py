@@ -1,5 +1,5 @@
 """
-main.py — Polymarket Weather Bot v30 (LOTTERY EDGE / TIME WINDOW)
+main.py — Polymarket Weather Bot v31 (LOTTERY EDGE / WIDER WINDOW)
 Forecast-centered YES ladder (neobrother/coldmath style).
 """
 
@@ -318,7 +318,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "LOTTERY_EDGE_v30"
+            _strategy = "LOTTERY_EDGE_v31"
             _fc = 0.0
             if edge_result.forecast:
                 _is_low = "lowest" in position.question.lower()
@@ -362,10 +362,10 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v30  🌤️")
-    logger.info("  🎯 LOTTERY EDGE / TIME WINDOW (cheap peak YES, 00-06 UTC only)")
-    logger.info("  📐 Break-even WR ≈ 5% (1 WIN @ $1 covers 20 LOSS @ 5¢)")
-    logger.info("  📐 Only peak-bucket YES ≤5¢, 6 winner-cities, isotonic OFF")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v31  🌤️")
+    logger.info("  🎯 LOTTERY EDGE / WIDER WINDOW (cheap peak YES, 00-08 UTC)")
+    logger.info("  📐 Break-even WR ≈ 5-8% (1 WIN @ $1 covers 12 LOSS @ 8¢)")
+    logger.info("  📐 Only peak-bucket YES ≤8¢, 8 winner-cities, isotonic OFF")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
@@ -557,14 +557,14 @@ def main():
                         sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
                 else:
                     now_utc = datetime.now(timezone.utc)
-                    # v30: dead-zone tied to OPEN_WINDOW_END_UTC (default 6).
-                    # If outside open window 00-06 UTC, sleep until 00:30 UTC next day.
+                    # v31: dead-zone tied to OPEN_WINDOW_END_UTC (default 8).
+                    # If outside open window 00-08 UTC, sleep until 00:30 UTC next day.
                     win_end = getattr(config, 'OPEN_WINDOW_END_UTC', 6)
                     if win_end <= now_utc.hour or now_utc.hour < 0:
                         target = now_utc.replace(hour=0, minute=30, second=0, microsecond=0) + timedelta(days=1)
                         sleep_seconds = int((target - now_utc).total_seconds())
                         sleep_time = max(300, min(sleep_seconds, 23 * 3600))
-                        logger.info(f"🌙 v30 dead-zone ({now_utc.hour:02d}:{now_utc.minute:02d} UTC; window ends {win_end:02d}). "
+                        logger.info(f"🌙 v31 dead-zone ({now_utc.hour:02d}:{now_utc.minute:02d} UTC; window ends {win_end:02d}). "
                                    f"Сплю {sleep_time//3600}г {sleep_time%3600//60}хв до {target.strftime('%H:%M UTC')} (нові ринки)")
                     elif empty_cycles >= 12:
                         sleep_time = 1800

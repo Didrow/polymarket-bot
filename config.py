@@ -1,23 +1,31 @@
 """
-config.py — Weather Bot v30 (LOTTERY EDGE / TIME WINDOW)
+config.py — Weather Bot v31 (LOTTERY EDGE / WIDER WINDOW)
 
-Стратегія фокусується на дешевих YES (≤5¢) тільки у вікні 00:00-06:00 UTC,
-де один WIN @ $1.00 покриває 20+ LOSS-ів @ 5¢. Break-even WR знижується до 5-12%.
+Еволюція v30 → v31:
+  День 1 v30 дав 3 угоди з 6 кандидатів — обсяг достатній для break-even (WR ~5%),
+  але замало для реальної прибутковості (треба >5% для accumulation).
+  v31 розширює-phase: +2год вікна, +2 міст, +60% цінового діапазону, Kelly x1.7.
+
+v31 фікси vs v30:
+  1) OPEN_WINDOW_END_UTC 6 → 8 (+2 годcandidates, +33% scan window)
+  2) SNIPER_GRID_MAX_ASK 0.05 → 0.08 (lottery верхня межа 8¢, BE WR 8%)
+  3) MAX_OPEN_PER_CYCLE 4 → 6 (більше угод за один цикл)
+  4) MAX_ACTIVE_POSITIONS 12 → 20 (портфель вмістить 8 міст × ~2-3 бакети)
+  5) KELLY_SCALE 0.15 → 0.25 (position size зростає ~x1.7)
+  6) CITY_WHITELIST 6 → 8 (+Mumbai, +Delhi — топ-heat cities)
+  7) MAX_PREFETCH_CITIES 6 → 8 (sync з whitelist)
 
 Аналіз 294 CLOSE trades показав:
-  - Avg WIN $5.78 vs Avg LOSS $1.28 → потрібен 39% WR для break-even
+  - Avg WIN $5.78 vs Avg LOSS $1.28 → потрібен 39% WR для break-even (old v27/v29)
   - Реальний WR = 2.7% → математично неможливо profitувати з v27/v29 стратегією
   - Всі 8 historic wins у вікні 00:00-04:00 UTC, peak-bucket, ≤15¢ entry
   - 12:00 UTC = 109 trades, 0.9% WR — бот спамив stale midday markets
 
-v30 фікси vs v29:
-  1) ISOTONIC_RECALIBRATE OFF — правильний, але вбиває все (вивчив 288 losers)
-  2) KINDS_ONLY range + categorical (categorical ban was unjustified: 1.7% vs 2.6% WR)
-  3) SNIPER_GRID_MAX_ASK 0.20 → 0.05 — ТІЛЬКИ lottery tickets (1 WIN = $1, 1 LOSS = 5¢)
-  4) CITY_WHITELIST 28 → 6 (тільки historic winner-cities)
-  5) OPEN_WINDOW_START_UTC/END_UTC = 0/6 — trades тільки у вікні fresh daily markets
-  6) MAX_POSITION_USD 3.50 → 1.50 — дрібні ставки для lottery mode
-  7) KELLY_SCALE 0.25 → 0.15 — conservative sizing для high-variance lottery
+v31 break-even математика:
+  - Avg entry ~5¢ (max 8¢)
+  - 1 WIN @ $1.00 покриває 12 LOSS-ів @ 8¢ → BE WR ≈ 8%
+  - Historic wins в ranges 1–5¢ показували WR 3–4% → Маржевий scenario.
+  - Ключ: 6-10 угод/день × 30 днів = 180-300 trades/міс для швидкої статистики.
 
 Уроки (НЕ повторювати):
   v9:   discount 0.30 → 0% WR
@@ -40,19 +48,20 @@ CLOB_URL: str = "https://clob.polymarket.com"
 GAMMA_URL: str = "https://gamma-api.polymarket.com"
 CHAIN_ID: int = 137
 
-# ── v30: TIME WINDOW (fresh daily markets only) ───────────
+# ── v31: TIME WINDOW (fresh daily markets, widened +2h) ───
 # Historical analysis: all 8 wins opened 00:00-04:00 UTC.
+# v30: 0-6 UTC → 3 угоди/день. v31: 0-8 UTC → est 6-10 угод/день.
 # 12:00 UTC had 109 trades with 0.9% WR — bot wasted capital on stale midday markets.
 OPEN_WINDOW_START_UTC: int = 0       # 00:00 UTC — when fresh daily temp markets appear
-OPEN_WINDOW_END_UTC: int = 6         # 06:00 UTC — cutoff (after this, markets are stale)
+OPEN_WINDOW_END_UTC: int = 8         # v31: 08:00 UTC — widened +2h (was 6)
 
 # ── CAPITAL & RISK ──────────────────────────────────────────
 INITIAL_CAPITAL: float = 100.0
 MAX_POSITION_PCT: float = 0.035
 MIN_POSITION_USD: float = 0.75       # v30: дрібні lottery stakes
 MAX_POSITION_USD: float = 1.50       # v30: lottery mode (was 3.50)
-MAX_ACTIVE_POSITIONS: int = 12       # v30: 6 cities × 2 buckets each
-MAX_OPEN_PER_CYCLE: int = 4          # v30: щільніший grid в active window
+MAX_ACTIVE_POSITIONS: int = 20       # v31: 8 cities × 2-3 buckets (was 12)
+MAX_OPEN_PER_CYCLE: int = 6          # v31: 6/cycle (was 4) — wider window needs faster fill
 MAX_POSITIONS_PER_CITY: int = 3      # v30: 3 peak buckets per city
 # v27: STOP-LOSS & TRAILING OFF for DRY-RUN ladder (hold to resolution)
 STOP_LOSS_PCT: float = 0.0           # OFF — was 0.40 (killed v26 0/8)
@@ -89,7 +98,7 @@ WING_BAN: bool = True                     # blocks any BUY_YES where dist > PEAK
 SNIPER_GRID_MIN_EDGE: float = 0.03       # accept very small edge if peak bucket
 SNIPER_GRID_MIN_EDGE_NO: float = 0.18
 SNIPER_GRID_MIN_ASK: float = 0.01
-SNIPER_GRID_MAX_ASK: float = 0.05        # v30: LOTTERY ONLY — 5¢ cap (was 0.20)
+SNIPER_GRID_MAX_ASK: float = 0.08        # v31: 8¢ cap (was 0.05) — 60% more price walks, BE WR ~8%
 SNIPER_GRID_NO_MIN_MARKET: float = 0.80  # NO only on extreme misprice (≥80¢)
 SNIPER_GRID_MAX_PER_CITY_CYCLE: int = 2  # v30: 2 peak buckets per city (was 3)
 
@@ -170,7 +179,7 @@ ENSEMBLE_WEIGHT: float = 0.70
 
 # ── KELLY ──────────────────────────────────────────────────
 USE_KELLY: bool = True
-KELLY_SCALE: float = 0.15           # v30: conservative (was 0.25) — high-variance lottery
+KELLY_SCALE: float = 0.25           # v31: scaled up (was 0.15) — more volume per trade
 KELLY_MAX_POSITION_USD: float = 2.00  # v30: cap (was 4.50)
 KELLY_PROB_CAP: float = 0.85        # let high-conf peak buckets size up
 
@@ -186,8 +195,8 @@ LOGS_DIR: str = "logs"
 CACHE_DIR: str = "cache"
 EMAIL_ENABLED: bool = False
 
-# v30: City whitelist — ТІЛЬКИ 6 historic winner-cities (з 294 trades аналізу)
-# v29 28-city whitelist включав багато 0% WR міст → витрачав scan time + capital
+# v31: City whitelist — 8 топ-heat міст з високою diurnal temp variance
+# v30: 6 historic winner-cities. v31: +Mumbai, +Delhi — Indian heat mega-cities
 CITY_WHITELIST: List[str] = [
     "Dallas",
     "Singapore",
@@ -196,9 +205,11 @@ CITY_WHITELIST: List[str] = [
     "New York",
     "Lucknow",
     "Tokyo",
+    "Mumbai",      # v31: top-heat Indian metro, high diurnal variance
+    "Delhi",       # v31: extreme summer temps, fresh bucket markets
 ]
 
-MAX_PREFETCH_CITIES: int = 6
+MAX_PREFETCH_CITIES: int = 8  # v31: sync з CITY_WHITELIST (was 6)
 
 # ── DRY-RUN VALIDATION GATES ───────────────────────────────
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
