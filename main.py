@@ -1,5 +1,5 @@
 """
-main.py — Polymarket Weather Bot v27 (PURE SNIPER GRID)
+main.py — Polymarket Weather Bot v30 (LOTTERY EDGE / TIME WINDOW)
 Forecast-centered YES ladder (neobrother/coldmath style).
 """
 
@@ -318,7 +318,7 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "PURE_SNIPER_GRID_v27"
+            _strategy = "LOTTERY_EDGE_v30"
             _fc = 0.0
             if edge_result.forecast:
                 _is_low = "lowest" in position.question.lower()
@@ -362,19 +362,20 @@ def main():
     _start_health_server()
     logger.info("")
     logger.info("=" * 60)
-    logger.info("  🌤️  POLYMARKET WEATHER BOT v29  🌤️")
-    logger.info("  🎯 PURE SNIPER GRID v29 (peak-only range, isotonic recalibration)")
-    logger.info("  📐 adaptive σ from bootstrap + PAV isotonic recalibration from trade_log")
-    logger.info("  📐 range only (≥3°C wide), peak-only (dist≤0.5°C), wing YES banned, min_prob 3%")
+    logger.info("  🌤️  POLYMARKET WEATHER BOT v30  🌤️")
+    logger.info("  🎯 LOTTERY EDGE / TIME WINDOW (cheap peak YES, 00-06 UTC only)")
+    logger.info("  📐 Break-even WR ≈ 5% (1 WIN @ $1 covers 20 LOSS @ 5¢)")
+    logger.info("  📐 Only peak-bucket YES ≤5¢, 6 winner-cities, isotonic OFF")
     logger.info("=" * 60)
     logger.info(f"  Режим:    {'🧪 DRY-RUN (симуляція)' if config.DRY_RUN else '💰 РЕАЛЬНА ТОРГІВЛЯ'}")
     logger.info(f"  Капітал:  ${config.INITIAL_CAPITAL:.2f}")
     logger.info(f"  Kelly:    {'✅' if config.USE_KELLY else '❌'} (scale={config.KELLY_SCALE}, cap={getattr(config, 'KELLY_PROB_CAP', 0.85):.0%})")
     logger.info(f"  Stop-loss: {'✅' if getattr(config, 'STOP_LOSS_PCT', 0) > 0 else '❌ OFF (hold to resolution)'}")
     logger.info(f"  Trailing:  {'✅' if getattr(config, 'TRAILING_STOP_ACTIVATION_PCT', 0) > 0 else '❌ OFF'}")
+    logger.info(f"  Time window: {getattr(config,'OPEN_WINDOW_START_UTC',0):02d}-{getattr(config,'OPEN_WINDOW_END_UTC',24):02d} UTC")
     logger.info(f"  Сканування: кожні {config.SCAN_INTERVAL_SEC}s")
     kinds = "/".join(getattr(config, 'KINDS_ONLY', ['categorical', 'range']))
-    logger.info(f"  Стратегія:  PURE SNIPER GRID ({kinds})")
+    logger.info(f"  Стратегія:  LOTTERY EDGE ({kinds})")
     logger.info(f"  Горизонт:   {config.MIN_RESOLUTION_HOURS:.0f}-{config.MAX_RESOLUTION_HOURS}h")
     logger.info(
         f"  Ladder:     dist≤{getattr(config, 'SNIPER_GRID_DISTANCE_C', 1.5):.1f}°C | "
@@ -556,13 +557,14 @@ def main():
                         sleep_time = int(config.SCAN_INTERVAL_SEC * 1.0)
                 else:
                     now_utc = datetime.now(timezone.utc)
-                    # Розумний сон: якщо зараз 06:00-23:59 UTC — сьогоднішні ринки вже мертві,
-                    # спімо до 00:30 UTC коли з'являються свіжі daily-temperature ринки
-                    if 6 <= now_utc.hour < 24:
+                    # v30: dead-zone tied to OPEN_WINDOW_END_UTC (default 6).
+                    # If outside open window 00-06 UTC, sleep until 00:30 UTC next day.
+                    win_end = getattr(config, 'OPEN_WINDOW_END_UTC', 6)
+                    if win_end <= now_utc.hour or now_utc.hour < 0:
                         target = now_utc.replace(hour=0, minute=30, second=0, microsecond=0) + timedelta(days=1)
                         sleep_seconds = int((target - now_utc).total_seconds())
                         sleep_time = max(300, min(sleep_seconds, 23 * 3600))
-                        logger.info(f"🌙 Мертва зона ({now_utc.hour:02d}:{now_utc.minute:02d} UTC) — сьогоднішні ринки висохли. "
+                        logger.info(f"🌙 v30 dead-zone ({now_utc.hour:02d}:{now_utc.minute:02d} UTC; window ends {win_end:02d}). "
                                    f"Сплю {sleep_time//3600}г {sleep_time%3600//60}хв до {target.strftime('%H:%M UTC')} (нові ринки)")
                     elif empty_cycles >= 12:
                         sleep_time = 1800
