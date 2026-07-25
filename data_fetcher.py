@@ -752,6 +752,8 @@ CITY_TO_ICAO: Dict[str, str] = {
     "Jeddah": "OEJN", "Jeddah King Abdulaziz": "OEJN",
     "Ankara": "LTAC", "Ankara Esenboga": "LTAC",
     "Lucknow": "VILK", "Lucknow Amausi": "VILK",
+    "Mumbai": "VABB", "Mumbai Chhatrapati Shivaji": "VABB",
+    "Delhi": "VIDP", "New Delhi": "VIDP", "Delhi Indira Gandhi": "VIDP",
     "Karachi": "OPKC", "Karachi Jinnah": "OPKC",
     "Moscow": "UUWW", "Moscow Vnukovo": "UUWW",
     # South America

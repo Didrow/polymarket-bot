@@ -131,6 +131,10 @@ def _detect_city(text: str) -> str:
         "shenzhen": "Shenzhen", "kuala lumpur": "Kuala Lumpur",
         "guangzhou": "Guangzhou", "qingdao": "Qingdao", "manila": "Manila",
         "tel aviv": "Tel Aviv", "milan": "Milan", "tel aviv-yafo": "Tel Aviv",
+        # v31 — Indian heat mega-cities (whitelist additions)
+        "mumbai": "Mumbai", "delhi": "Delhi",
+        # Delhi aliased formats seen in Polymarket questions
+        "new delhi": "Delhi",
     }
     for key, city in cities.items():
         if key in t:
