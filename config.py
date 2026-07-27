@@ -1,7 +1,31 @@
 """
-config.py — Weather Bot v31 (LOTTERY EDGE / WIDER WINDOW)
+config.py — Weather Bot v32 (NEAR-RESOLUTION EXECUTION EDGE)
 
-Еволюція v30 → v31:
+Еволюція v31 → v32:
+  v31 продовжує 0% WR (0/5 resolved, ROI -9.9%) — той самий forecast-edge баг:
+  модель системно переоцінює our_prob у 8 разів (historic 2.7% WR на 294 trades).
+  Документація від іншого агента (Recomendation.md) пропонує інший edge:
+  EXECUTION/LATENCY edge — near-resolution ринки (1-6h до close), коли
+  добовий ТЕМПЕРАТУРНИЙ ПІК ВЖЕ ПРОЙШОВ, а маркет-мейкери ще не перекотировали.
+
+  v32 = parity layer поверх v31, не заміна:
+    1) Якщо market.hours_to_resolution ≤ NEAR_RESOLUTION_MAX_HOURS (6h)
+       І local peak-hour для міста вже пройшов (з safety buffer),
+       І max_so_far за сьогодні вже ВПАВ у бакет (для YES) або нижче бакета на ≥1°C (для NO),
+       → near_resolution_signal() повертає рішення, ОБХОДЯЧИ Gaussian / sigma / isotonic.
+    2) Інакше calculate_edge падає у звичайний v31 forecast-edge flow.
+
+  Очікуваний профіль: 1-3 угоди/день на все місто (частота мала),
+  але WR 50-90% на коректно закритих бакетах (фізика vsforecast).
+  Hard cap NEAR_RESOLUTION_MAX_SIZE_USD — рідкісний грозовий фронт може
+  зламати «пік вже пройшов»; не 100% Kelly.初衷иonhold近resolution.
+
+  v31 break-even математика (збережено як baseline):
+    - Avg entry ~5¢ (max 8¢)
+    - 1 WIN @ $1.00 покриває 12 LOSS-ів @ 8¢ → BE WR ≈ 8%
+    - Historic wins в ranges 1–5¢ показували WR 3–4% → Маржевий scenario.
+
+Еволюція v30 → v31 (збережено для контексту):
   День 1 v30 дав 3 угоди з 6 кандидатів — обсяг достатній для break-even (WR ~5%),
   але замало для реальної прибутковості (треба >5% для accumulation).
   v31 розширює-phase: +2год вікна, +2 міст, +60% цінового діапазону, Kelly x1.7.
@@ -37,7 +61,7 @@ v31 break-even математика:
   v27-v29: maths break-even fail (avg win $5.78 / avg loss $1.28 / WR 2.7%)
 """
 
-from typing import List
+from typing import List, Dict
 import os
 
 DRY_RUN: bool = True
@@ -217,4 +241,103 @@ VALIDATION_MIN_RESOLVED_TRADES: int = 30
 VALIDATION_MIN_DRY_RUN_HOURS: int = 168
 VALIDATION_MIN_WIN_RATE: float = 0.18   # ladder WR can be ~15–25%; ROI is king
 VALIDATION_MIN_ROI: float = 0.03
-VALIDATION_MIN_EQUITY: float = 0.00
+VALIDATION_MIN_EQUITY: float = 0.0
+
+# ── v32: NEAR-RESOLUTION EXECUTION EDGE ─────────────────────
+# Strategy layer: when hours_to_resolution is small AND the city's local
+# diurnal temperature peak-hour already passed (with safety buffer), observed
+# running max_so_far IS the daily high — forecasts become irrelevant.
+# Market-makers are slow to requote thin bucket markets → execution edge.
+#
+# Two sub-strategies:
+#   BUCKET_LOCKED_YES: max_so_far already in bucket, last 2-3h flat/declining
+#                      → bucket is locked → BUY YES even at 0.85-0.95
+#                      (low yield, high confidence)
+#   BUCKET_IMPOSSIBLE_NO: max_so_far below bucket by ≥1°C → jump after peak
+#                         is climatology-impossible → BUY NO cheap (5-10¢)
+#
+# Frequency: low (1-2 moments/day per city). A late thunderstorm can break the
+# "peak passed" assumption → hard size cap, NOT 100% Kelly.
+
+# Maximum hours-to-resolution for near-resolution signal to be considered.
+# Above this, falls back to standard forecast-edge flow.
+NEAR_RESOLUTION_MAX_HOURS: float = 6.0
+
+# Minimum hours-to-resolution — too close to close, spread widens illiquidly.
+NEAR_RESOLUTION_MIN_HOURS: float = 0.5
+
+# Safety buffer AFTER empirical peak hour before signal is trusted.
+# 1.5h buffer = peak at 15:00, signal active from 16:30 local onward.
+NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.5
+
+# For BUCKET_LOCKED_YES: how many last observed hourly temps must be
+# flat or declining (each ≤ previous) to confirm peak is behind us.
+NEAR_RESOLUTION_DECLINE_WINDOW: int = 3
+
+# For BUCKET_LOCKED_YES: max temperature delta allowed over the decline window
+# (sum of rises, ignoring drops) — tolerates noise but rejects secondary spikes.
+NEAR_RESOLUTION_DECLINE_TOLERANCE_C: float = 0.5
+
+# For BUCKET_IMPOSSIBLE_NO: minimum distance (°C) max_so_far must be BELOW
+# the bucket low edge for the bucket to be "impossible".
+NEAR_RESOLUTION_IMPOSSIBLE_GAP_C: float = 1.0
+
+# Confidence assigned to near-resolution signals (used in size calc).
+# Recommendation warns: late storms break the assumption, so hard cap below.
+NEAR_RES_CONFIDENCE_YES: float = 0.92
+NEAR_RES_CONFIDENCE_NO: float = 0.85
+
+# Price bands for near-resolution trades (independent of SNIPER_GRID_*):
+#   YES bucket-locked: market is pricing bucket high (0.50-0.95) — we ride it.
+#   NO  bucket-impossible: market still hopes for the bucket (0.05-0.20).
+NEAR_RES_YES_MIN_ASK: float = 0.50
+NEAR_RES_YES_MAX_ASK: float = 0.95
+NEAR_RES_NO_MIN_ASK: float = 0.03
+NEAR_RES_NO_MAX_ASK: float = 0.20
+
+# Position size hard cap — independent of Kelly.
+# Recommendation: DON'T use 100% Kelly; rare late storms can reverse.
+NEAR_RESOLUTION_MAX_SIZE_USD: float = 2.00
+NEAR_RESOLUTION_MIN_SIZE_USD: float = 0.75
+
+# Max near-resolution positions per cycle (low frequency — keep tight)
+NEAR_RESOLUTION_MAX_PER_CYCLE: int = 2
+
+# Max near-resolution positions per city (one bucket per city — avoid overlap)
+NEAR_RESOLUTION_MAX_PER_CITY: int = 1
+
+# Empirical local peak-hour by city (LOCAL solar/clock hour, float for half-hours).
+# Source: 22-month climatology for daily temperature maximum.
+# These are APPROXIMATE — the safety buffer absorbs the variance.
+PEAK_HOUR_BY_CITY: Dict[str, float] = {
+    # USA (DST adjusted — local standard time +1 in summer; values below are local clock)
+    "Dallas":      16.5,   # 16:30 local — dry heat, slow cooling afternoon
+    "NYC":         15.0,   # 15:00 local — urban heat island
+    "New York":    15.0,
+    # Asia
+    "Tokyo":       14.0,   # 14:00 local — humid subtropical, peaks early
+    "Singapore":   14.0,   # 14:00 local — convective equatorial (low diurnal variance — risky)
+    "Lucknow":     15.5,   # 15:30 local — Indo-Gangetic heat
+    "Mumbai":      14.5,   # 14:30 local — coastal, earlier peak
+    "Delhi":       15.5,   # 15:30 local — extreme heat mega-city
+    # Europe
+    "London":      15.0,   # 15:00 local — mid-latitude maritime
+}
+
+# UTC offsets for cities (hours). Used to convert "local peak hour" to UTC.
+# Matches market_scanner.get_target_date offsets but kept here locally for
+# the near-resolution layer (single source of truth for v32 logic).
+CITY_UTC_OFFSET_HOURS: Dict[str, float] = {
+    "Dallas":     -5.0,
+    "NYC":        -4.0,
+    "New York":   -4.0,
+    "Tokyo":       9.0,
+    "Singapore":   8.0,
+    "Lucknow":     5.5,
+    "Mumbai":      5.5,
+    "Delhi":       5.5,
+    "London":      1.0,
+}
+
+# Master switch for the v32 layer (temp kill switch if behaviour unexpected).
+NEAR_RESOLUTION_ENABLED: bool = True

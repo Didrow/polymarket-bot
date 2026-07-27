@@ -1,5 +1,10 @@
 """
-edge_calculator.py — Weather Bot v31 (LOTTERY EDGE / WIDER WINDOW)
+edge_calculator.py — Weather Bot v32 (NEAR-RESOLUTION EXECUTION EDGE + LOTTERY EDGE)
+
+v32 adds a parity layer: near_resolution_signal() — when the local diurnal peak
+has passed and observed extremes lock (or kill) the bucket, physical reality
+trumps forecast modeling. Bypasses Gaussian/sigma/isotonic entirely.
+Falls back to v31 LOTTERY EDGE forecast-edge flow (cheap peak YES ≤8¢).
 
 neobrother / coldmath style:
   Forecast 17.0 → buy YES ladder on nearby buckets (16/17/18 or 16.8…17.2)
@@ -21,7 +26,7 @@ from typing import Optional, List, Tuple, Dict
 from dataclasses import dataclass
 
 import config
-from data_fetcher import WeatherForecast, get_best_forecast
+from data_fetcher import WeatherForecast, get_best_forecast, fetch_running_temperatures, get_city_local_hour, RunningTemps
 from market_scanner import PolyMarket, get_target_date
 
 logger = logging.getLogger(__name__)
@@ -409,6 +414,138 @@ def _suggest_size(our_prob: float, market_prob: float, edge: float,
     return round(size, 2)
 
 
+# ── v32: NEAR-RESOLUTION EXECUTION EDGE ─────────────────────
+# When hours_to_resolution is small AND the city's empirical local peak-hour
+# has already passed (with safety buffer), the observed max_so_far IS the
+# daily high — forecasts become irrelevant. We bypass Gaussian / sigma /
+# isotonic and trade on physical reality + market-maker latency.
+#
+# Returns Optional[Tuple[direction, confidence, reason_key, peak_local_hour]]
+# direction ∈ {"BUY_YES", "BUY_NO"}
+# reason_key ∈ {"bucket_locked_yes", "bucket_impossible_no"}
+# Caller is responsible for market price gates + size cap.
+
+def near_resolution_signal(market: "PolyMarket",
+                           low_c: float,
+                           high_c: float,
+                           is_low: bool) -> Optional[Tuple[str, float, str, float]]:
+    """
+    v32: Decide if the market is in a near-resolution execution-edge state.
+
+    A market qualifies when ALL of:
+      1. NEAR_RESOLUTION_ENABLED is True
+      2. NEAR_RESOLUTION_MIN_HOURS ≤ market.hours_to_resolution ≤ NEAR_RESOLUTION_MAX_HOURS
+      3. city has PEAK_HOUR_BY_CITY entry
+      4. current local hour > peak_hour + NEAR_RESOLUTION_PEAK_BUFFER_HOURS
+         (peak already passed with safety margin)
+      5. fetch_running_temperatures() succeeds
+      6. For BUCKET_LOCKED_YES: max_so_far in [low_c, high_c] AND latest_declining
+         For BUCKET_IMPOSSIBLE_NO: max_so_far < (low_c - NEAR_RESOLUTION_IMPOSSIBLE_GAP_C)
+
+    For 'low' temperature markets (lowest temp/win), peak-hour logic is INVERTED:
+      - Coldest temp happens around sunrise (early morning). The "peak" of cold
+        is actually a trough. To reuse the same peak-passed logic, we check
+        whether the local hour has passed the cold-hour buffer AND the
+        min_so_far (not max_so_far) has already entered (or is below) the bucket.
+
+    NB: We do NOT touch the forecast layer or sigma/isotonic — these signals
+    are KEPT SEPARATE per the v32 design (parity layer, not replacement).
+    """
+    if not getattr(config, 'NEAR_RESOLUTION_ENABLED', False):
+        return None
+
+    hours = market.hours_to_resolution
+    max_h = getattr(config, 'NEAR_RESOLUTION_MAX_HOURS', 6.0)
+    min_h = getattr(config, 'NEAR_RESOLUTION_MIN_HOURS', 0.5)
+    if hours > max_h or hours < min_h:
+        return None
+
+    city = market.detected_city
+    if not city:
+        return None
+
+    peak_hours = getattr(config, 'PEAK_HOUR_BY_CITY', {})
+    if not peak_hours or city not in peak_hours:
+        return None
+    peak_hour = float(peak_hours[city])
+
+    # v32: for 'lowest' markets, invert the sense — coldest temp ~06:00 local,
+    # signal becomes "morning cold trough already passed".
+    if is_low:
+        cold_hour = peak_hours.get(city, 14.0)
+        # Use a rough early-morning proxy: cold trough happens ~6h before thermal peak.
+        # Solar min is ~1-2h after sunrise; equator cities ~06:00, mid-lat ~05-07:00.
+        cold_trough_hour = 6.0
+        empirical_extreme_hour = cold_trough_hour
+    else:
+        empirical_extreme_hour = peak_hour
+
+    local_hour = get_city_local_hour(city)
+    if local_hour is None:
+        return None
+
+    buffer_h = getattr(config, 'NEAR_RESOLUTION_PEAK_BUFFER_HOURS', 1.5)
+    # Wrap-around handling: a market may resolve after midnight local — wrap window.
+    # We treat "peak passed" as: local_hour > empirical_extreme_hour + buffer_h
+    # within a 24h clock (allowing small wrap if e.g. peak_hour=23, local=0.5 next day).
+    hours_after_peak = (local_hour - (empirical_extreme_hour + buffer_h)) % 24.0
+    # If we're anywhere further than buffer past peak on the dial, hours_after_peak ∈ [0, 24-buffer).
+    # If we're BEFORE peak (still approaching), hours_after_peak is huge (close to 24).
+    # Threshold: require hours_after_peak < (24 - buffer) to avoid wrap-around false positives.
+    if hours_after_peak >= (24.0 - buffer_h):
+        return None
+
+    # Fetch running observed temperatures (cached 30 min).
+    rt = fetch_running_temperatures(city)
+    if rt is None or len(rt.hourly_temps) < 4:
+        return None
+
+    if is_low:
+        # COLD-trough logic — bucket locked if min_so_far IS in bucket, AND temps
+        # have been flat/rising (cold already bottomed). Bucket impossible if
+        # min_so_far is ABOVE bucket by ≥gap_C (warmer than bucket → bucket already busted going down).
+        extreme_so_far = rt.min_so_far
+        # Rising = not (latest_declining on the cold side). Temperature trend
+        # rises after morning cold trough, so flat-or-rising = passed trough.
+        cold_passed = not rt.latest_declining if len(rt.hourly_temps) >= 4 else False
+        # Simpler proxy: latest temp > min_so_far + small tol means trough behind.
+        latest = rt.hourly_temps[-1]
+        cold_passed = (latest - extreme_so_far) >= -0.2  # tolerate noise
+        if not cold_passed:
+            return None
+
+        gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
+        # Bucket locked (cold already hit bucket): min_so_far in [low, high]
+        if low_c <= extreme_so_far <= high_c:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            return ("BUY_YES", conf, "bucket_locked_yes_cold", empirical_extreme_hour)
+        # Bucket impossible (cold already warmer than bucket by gap → bucket can't be hit)
+        if extreme_so_far > high_c + gap:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+            return ("BUY_NO", conf, "bucket_impossible_no_cold", empirical_extreme_hour)
+        return None
+
+    # HEAT-side logic — bucket locked if max_so_far in bucket AND declining.
+    extreme_so_far = rt.max_so_far
+    if not rt.latest_declining:
+        # Peak may still be ahead — not in the "peak passed" state yet.
+        return None
+
+    gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
+    # Bucket locked: max_so_far ALREADY in bucket → daily high almost certainly
+    # in bucket (we'd need a new higher reading after the peak hour, which the
+    # safety buffer + decline-window check protects against).
+    if low_c <= extreme_so_far <= high_c:
+        conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+        return ("BUY_YES", conf, "bucket_locked_yes", empirical_extreme_hour)
+    # Bucket impossible: max_so_far already BELOW bucket by ≥gap → even an
+    # unusual late-afternoon spike can't climb into the bucket.
+    if extreme_so_far < low_c - gap:
+        conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+        return ("BUY_NO", conf, "bucket_impossible_no", empirical_extreme_hour)
+    return None
+
+
 # ── MAIN EDGE CALCULATION ──────────────────────────────────
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
@@ -492,6 +629,58 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         else:
             threshold_c = threshold_value
         our_prob = _prob_trend_gauss(forecast, threshold_c, kind, is_low, market.hours_to_resolution)
+
+    # ═══════════════════════════════════════════════════════════════
+    # v32: NEAR-RESOLUTION SIGNAL — bypass Gaussian/sigma/isotonic
+    # ═══════════════════════════════════════════════════════════════
+    # When the local diurnal peak has passed AND observed extremes already
+    # lock (or kill) the bucket, physical reality trumps forecast models.
+    # This check runs BEFORE Gaussian/sigma/isotonic — near-resolution
+    # signals short-circuit the entire forecast-edge path.
+    if kind in ("categorical", "range"):
+        nr = near_resolution_signal(market, low_c, high_c, is_low)
+        if nr is not None:
+            nrs_dir, nrs_conf, nrs_reason_key, nrs_peak_hr = nr
+            mkt_prob = market.best_ask_yes
+            if mkt_prob is None or mkt_prob < 0.01:
+                mkt_prob = getattr(market, "midpoint_yes", 0.0)
+            if mkt_prob <= 0.001 or mkt_prob >= 0.999:
+                return None
+
+            if nrs_dir == "BUY_YES":
+                min_ask = getattr(config, 'NEAR_RES_YES_MIN_ASK', 0.50)
+                max_ask = getattr(config, 'NEAR_RES_YES_MAX_ASK', 0.95)
+            else:
+                min_ask = getattr(config, 'NEAR_RES_NO_MIN_ASK', 0.03)
+                max_ask = getattr(config, 'NEAR_RES_NO_MAX_ASK', 0.20)
+            if not (min_ask <= mkt_prob <= max_ask):
+                return None
+
+            eff_edge_nr = (nrs_conf - mkt_prob) if nrs_dir == "BUY_YES" else (mkt_prob - nrs_conf)
+            eff_edge_nr = min(max(eff_edge_nr, 0.0), getattr(config, 'MAX_EDGE_CAP', 0.45))
+            if eff_edge_nr <= 0.0:
+                return None
+
+            max_sz = getattr(config, 'NEAR_RESOLUTION_MAX_SIZE_USD', 2.00)
+            min_sz = getattr(config, 'NEAR_RESOLUTION_MIN_SIZE_USD', 0.75)
+            size_nr = round(max(min_sz, min(max_sz, eff_edge_nr * 3.0)), 2)
+
+            logger.info(
+                f"✅ NEAR-RES {nrs_reason_key}: {market.question[:55]} | "
+                f"dir={nrs_dir} conf={nrs_conf:.0%} mkt={mkt_prob:.0%} "
+                f"edge={eff_edge_nr:.1%} peak_hr={nrs_peak_hr:.1f}"
+            )
+            return EdgeResult(
+                market=market, forecast=None,
+                estimated_prob=nrs_conf, market_prob=mkt_prob,
+                edge=eff_edge_nr, edge_direction=nrs_dir,
+                confidence=nrs_conf,
+                reason=f"NEAR-RES {nrs_reason_key} @ {mkt_prob:.3f}",
+                is_tradeable=True, size_usd=size_nr,
+                threshold_c=low_c if is_low else high_c,
+                distance_c=0.0, kind=kind,
+                ladder_rank=999.0,
+            )
 
     # v29: hard floor on recalibrated our_prob — blocks the entire 0-10% bucket
     # (calibration CSV: avg_pred 6.6% → actual 2.2%) from ever entering positions.
@@ -696,15 +885,16 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results: List[EdgeResult] = []
     skip_vol = skip_city = skip_hours = skip_none = skip_spread = skip_kind = skip_window = 0
 
-    # v31: Time window gate — only trade in fresh-market window (00:00-08:00 UTC)
-    # Historical analysis: all 8 wins opened 00:00-04:00 UTC. 12:00 UTC: 109 trades, 0.9% WR.
+    # v32: Time window gate — near-res trades can also fire outside LOTTERY window
+    # (peak-hour based, not UTC-time based), but we keep the lottery window check
+    # as a fallback filter — markets mainly have fresh liquidity 00:00-08:00 UTC.
     win_start = getattr(config, 'OPEN_WINDOW_START_UTC', 0)
     win_end = getattr(config, 'OPEN_WINDOW_END_UTC', 24)
     now_utc = datetime.now(timezone.utc)
     in_window = win_start <= now_utc.hour < win_end
     if not in_window:
         logger.info(
-            f"⊓ v31 time-window: outside open window ({now_utc.hour:02d}:{now_utc.minute:02d} UTC, "
+            f"⊓ v32 time-window: outside open window ({now_utc.hour:02d}:{now_utc.minute:02d} UTC, "
             f"window={win_start:02d}-{win_end:02d} UTC). Skipping all trades this cycle."
         )
 

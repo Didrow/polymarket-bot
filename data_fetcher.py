@@ -844,14 +844,60 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
     Повертає (min_so_far, max_so_far) або None.
     Використовується як фізичне обмеження для ринків, що вирішуються сьогодні.
     """
+    return _fetch_running_temperatures(city, return_minmax_only=True)
+
+
+# v32: structured running-temperatures data for the near-resolution layer.
+# Same API call as _fetch_observed_daily_extremes, but exposes the full
+# hourly series for the current local day so edge_calculator can determine
+# whether the daily peak has passed. Lightweight wrapper keeps the old
+# function compatible with all existing call sites.
+
+@dataclass
+class RunningTemps:
+    """v32: running temperature observations for current local day."""
+    min_so_far: float
+    max_so_far: float
+    hours_observed: int
+    # Latest hourly temps in chronological order (oldest first), today local.
+    hourly_temps: List[float] = field(default_factory=list)
+    # True if last 3 entries are flat or declining (each ≤ previous).
+    latest_declining: bool = False
+    # Hour-of-day (local) of the max_so_far observation.
+    peak_local_hour: float = -1.0
+    # Hour-of-day (local) of the most recent observation.
+    latest_local_hour: float = -1.0
+
+
+def _fetch_running_temperatures(city: str, return_minmax_only: bool = False):
+    """
+    Fetches today's hourly temperatures from Open-Meteo past_hours=48 endpoint.
+
+    Returns:
+        - If return_minmax_only=True: Optional[Tuple[min_so_far, max_so_far]]
+          (legacy contract — used by _fetch_observed_daily_extremes)
+        - Else: Optional[RunningTemps]
+
+    Open-Meteo 'forecast' API with past_hours=48 + forecast_hours=0 returns
+    observed (model-assimilated) hourly temps up to the most recent available
+    hour (~1-2h lag typical). We filter to the local 'today' based on the
+    API's timezone=auto response.
+    """
     coords = _get_coords(city, prefer_airport=True)
     if not coords:
         return None
 
-    key = f"obs_{city}"
-    cached = _cache_get(key)
-    if cached:
-        return cached
+    key_full = f"obs_full_{city}"
+    if return_minmax_only:
+        # Reuse legacy key for backwards-compat with existing cache entries.
+        key = f"obs_{city}"
+        cached = _cache_get(key)
+        if cached:
+            return cached
+    else:
+        cached = _cache_get(key_full)
+        if cached:
+            return cached
 
     lat, lon = coords
     try:
@@ -876,28 +922,108 @@ def _fetch_observed_daily_extremes(city: str) -> Optional[Tuple[float, float]]:
         if not times or not temps:
             return None
 
-        today_str = times[-1][:10] if times else None
-        if not today_str:
+        # API returns utc_offset_seconds when timezone=auto.
+        utc_offset_s = data.get("utc_offset_seconds", 0)
+        # Last timestamp defines "today" in LOCAL time at the city.
+        # times are ISO 8601 LOCAL strings (e.g. "2026-07-27T14:00")
+        # when timezone=auto, so we can just take the date prefix.
+        today_str_local = times[-1][:10] if times else None
+        if not today_str_local:
             return None
 
-        today_temps = []
+        # Filter to today-local, preserving order.
+        today_temps: List[float] = []
+        today_hours_local: List[float] = []
         for t_str, temp in zip(times, temps):
             try:
-                if t_str[:10] == today_str and temp is not None:
-                    today_temps.append(temp)
-            except:
+                if t_str[:10] == today_str_local and temp is not None:
+                    today_temps.append(float(temp))
+                    # Extract hour (and minutes if present) from local ISO string.
+                    time_part = t_str[11:]  # "HH:MM" or "HH"
+                    if ":" in time_part:
+                        hh, mm = time_part.split(":")[:2]
+                        hour_float = float(hh) + float(mm) / 60.0
+                    else:
+                        hour_float = float(time_part)
+                    today_hours_local.append(hour_float)
+            except Exception:
                 pass
 
         if len(today_temps) < 2:
             return None
 
-        result = (min(today_temps), max(today_temps))
-        _cache_set(key, result)
-        logger.debug(f"📊 Observed today {city}: min={result[0]:.1f}°C, max={result[1]:.1f}°C ({len(today_temps)} hours)")
-        return result
+        min_so_far = min(today_temps)
+        max_so_far = max(today_temps)
+
+        if return_minmax_only:
+            result_mm = (min_so_far, max_so_far)
+            _cache_set(f"obs_{city}", result_mm)
+            return result_mm
+
+        # v32 structured data: peak hour + declining window.
+        max_idx = today_temps.index(max_so_far)
+        peak_local_hour = today_hours_local[max_idx] if max_idx < len(today_hours_local) else -1.0
+        latest_local_hour = today_hours_local[-1] if today_hours_local else -1.0
+
+        # Determine if last N temps are flat/declining (each ≤ previous ± tolerance).
+        decline_window = getattr(config, 'NEAR_RESOLUTION_DECLINE_WINDOW', 3)
+        decline_tol = getattr(config, 'NEAR_RESOLUTION_DECLINE_TOLERANCE_C', 0.5)
+        latest_declining = False
+        if len(today_temps) >= decline_window + 1:
+            window = today_temps[-(decline_window + 1):]
+            # Count rises, allow small tolerance for noise.
+            rises = sum(max(0.0, window[i] - window[i - 1]) for i in range(1, len(window)))
+            latest_declining = rises <= decline_tol
+
+        rt = RunningTemps(
+            min_so_far=min_so_far,
+            max_so_far=max_so_far,
+            hours_observed=len(today_temps),
+            hourly_temps=today_temps,
+            latest_declining=latest_declining,
+            peak_local_hour=peak_local_hour,
+            latest_local_hour=latest_local_hour,
+        )
+        _cache_set(key_full, rt)
+        logger.debug(
+            f"📊 Running temps {city}: min={min_so_far:.1f}°C max={max_so_far:.1f}°C "
+            f"({len(today_temps)}h, peak@{peak_local_hour:.1f} local, "
+            f"declining={latest_declining})"
+        )
+        return rt
     except Exception:
-        logger.debug(f"Observed today error {city}: single-request failed (likely 429, expected on Render free tier)")
+        logger.debug(f"Running temps error {city}: single-request failed (likely 429, expected on Render free tier)")
         return None
+
+
+def fetch_running_temperatures(city: str) -> Optional[RunningTemps]:
+    """Public alias for v32 near-resolution layer."""
+    return _fetch_running_temperatures(city, return_minmax_only=False)
+
+
+def get_city_local_hour(city: str) -> Optional[float]:
+    """
+    Returns current LOCAL hour (0-24) for the given city, computed from
+    the CITY_UTC_OFFSET_HOURS map in config. Used by v32 near-resolution
+    logic to decide if the empirical peak hour has passed.
+    """
+    offsets = getattr(config, 'CITY_UTC_OFFSET_HOURS', {})
+    if city not in offsets:
+        # Fall back to a sparse built-in map for whitelist safety.
+        _fallback = {
+            "Dallas": -5.0, "NYC": -4.0, "New York": -4.0,
+            "Tokyo": 9.0, "Singapore": 8.0,
+            "Lucknow": 5.5, "Mumbai": 5.5, "Delhi": 5.5,
+            "London": 1.0,
+        }
+        if city not in _fallback:
+            return None
+        offset = _fallback[city]
+    else:
+        offset = offsets[city]
+    now_utc = datetime.now(timezone.utc)
+    local_hour = (now_utc.hour + offset + now_utc.minute / 60.0) % 24.0
+    return local_hour
 
 
 # ─────────────────────────────────────────────
