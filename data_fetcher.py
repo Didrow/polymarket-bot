@@ -11,6 +11,10 @@ import logging
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Tuple
+try:
+    from zoneinfo import ZoneInfo  # stdlib, Python 3.9+ — DST-aware
+except ImportError:
+    ZoneInfo = None
 
 import config
 
@@ -1007,6 +1011,15 @@ def get_city_local_hour(city: str) -> Optional[float]:
     the CITY_UTC_OFFSET_HOURS map in config. Used by v32 near-resolution
     logic to decide if the empirical peak hour has passed.
     """
+    # v32 FIX: prefer real IANA timezone (DST-aware) over fixed offsets.
+    tz_names = getattr(config, 'CITY_TZ_NAME', {})
+    if ZoneInfo is not None and city in tz_names:
+        try:
+            now_local = datetime.now(ZoneInfo(tz_names[city]))
+            return now_local.hour + now_local.minute / 60.0
+        except Exception:
+            pass  # fall through to fixed-offset fallback below
+
     offsets = getattr(config, 'CITY_UTC_OFFSET_HOURS', {})
     if city not in offsets:
         # Fall back to a sparse built-in map for whitelist safety.

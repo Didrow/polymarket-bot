@@ -472,8 +472,7 @@ def near_resolution_signal(market: "PolyMarket",
     # v32: for 'lowest' markets, invert the sense — coldest temp ~06:00 local,
     # signal becomes "morning cold trough already passed".
     if is_low:
-        cold_hour = peak_hours.get(city, 14.0)
-        # Use a rough early-morning proxy: cold trough happens ~6h before thermal peak.
+        # Rough early-morning proxy: cold trough happens ~6h before thermal peak.
         # Solar min is ~1-2h after sunrise; equator cities ~06:00, mid-lat ~05-07:00.
         cold_trough_hour = 6.0
         empirical_extreme_hour = cold_trough_hour
@@ -485,14 +484,14 @@ def near_resolution_signal(market: "PolyMarket",
         return None
 
     buffer_h = getattr(config, 'NEAR_RESOLUTION_PEAK_BUFFER_HOURS', 1.5)
-    # Wrap-around handling: a market may resolve after midnight local — wrap window.
-    # We treat "peak passed" as: local_hour > empirical_extreme_hour + buffer_h
-    # within a 24h clock (allowing small wrap if e.g. peak_hour=23, local=0.5 next day).
-    hours_after_peak = (local_hour - (empirical_extreme_hour + buffer_h)) % 24.0
-    # If we're anywhere further than buffer past peak on the dial, hours_after_peak ∈ [0, 24-buffer).
-    # If we're BEFORE peak (still approaching), hours_after_peak is huge (close to 24).
-    # Threshold: require hours_after_peak < (24 - buffer) to avoid wrap-around false positives.
-    if hours_after_peak >= (24.0 - buffer_h):
+    # v32 FIX: the old modulo comparison against (24 - buffer) wrongly treated
+    # hours well BEFORE today's peak as "peak already passed" (e.g. 10:00 with
+    # a 15:00 peak: (10-16.5)%24=17.5, which is < 22.5 and passed the gate).
+    # Correct check: hours elapsed since the extreme must be at least the
+    # safety buffer, and not implausibly large (i.e. not actually YESTERDAY's
+    # extreme — cap at 12h since resolution windows are already ≤ NEAR_RESOLUTION_MAX_HOURS).
+    hours_since_extreme = (local_hour - empirical_extreme_hour) % 24.0
+    if hours_since_extreme < buffer_h or hours_since_extreme > 12.0:
         return None
 
     # Fetch running observed temperatures (cached 30 min).
@@ -505,12 +504,9 @@ def near_resolution_signal(market: "PolyMarket",
         # have been flat/rising (cold already bottomed). Bucket impossible if
         # min_so_far is ABOVE bucket by ≥gap_C (warmer than bucket → bucket already busted going down).
         extreme_so_far = rt.min_so_far
-        # Rising = not (latest_declining on the cold side). Temperature trend
-        # rises after morning cold trough, so flat-or-rising = passed trough.
-        cold_passed = not rt.latest_declining if len(rt.hourly_temps) >= 4 else False
-        # Simpler proxy: latest temp > min_so_far + small tol means trough behind.
+        # Cold trough passed = latest reading no longer dropping (tolerate noise).
         latest = rt.hourly_temps[-1]
-        cold_passed = (latest - extreme_so_far) >= -0.2  # tolerate noise
+        cold_passed = (latest - extreme_so_far) >= -0.2
         if not cold_passed:
             return None
 
@@ -543,6 +539,14 @@ def near_resolution_signal(market: "PolyMarket",
     if extreme_so_far < low_c - gap:
         conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
         return ("BUY_NO", conf, "bucket_impossible_no", empirical_extreme_hour)
+    # v32 FIX: bucket ALREADY EXCEEDED from above — max_so_far is monotonically
+    # non-decreasing through the day, so once it's past high_c the final daily
+    # high can only be >= extreme_so_far > high_c. This is the single safest
+    # signal (doesn't even depend on the peak-passed timing check), and was
+    # missing entirely before this patch.
+    if extreme_so_far > high_c + gap:
+        conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+        return ("BUY_NO", conf, "bucket_impossible_no_exceeded", empirical_extreme_hour)
     return None
 
 

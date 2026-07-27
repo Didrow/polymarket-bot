@@ -324,9 +324,26 @@ PEAK_HOUR_BY_CITY: Dict[str, float] = {
     "London":      15.0,   # 15:00 local — mid-latitude maritime
 }
 
-# UTC offsets for cities (hours). Used to convert "local peak hour" to UTC.
-# Matches market_scanner.get_target_date offsets but kept here locally for
-# the near-resolution layer (single source of truth for v32 logic).
+# v32 FIX: real IANA timezone names — DST-aware, never goes stale.
+# Preferred over CITY_UTC_OFFSET_HOURS below. get_city_local_hour() tries
+# this map first via zoneinfo, and only falls back to the fixed-offset
+# table if a city is missing here or zoneinfo is unavailable.
+CITY_TZ_NAME: Dict[str, str] = {
+    "Dallas":     "America/Chicago",
+    "NYC":        "America/New_York",
+    "New York":   "America/New_York",
+    "Tokyo":      "Asia/Tokyo",
+    "Singapore":  "Asia/Singapore",
+    "Lucknow":    "Asia/Kolkata",
+    "Mumbai":     "Asia/Kolkata",
+    "Delhi":      "Asia/Kolkata",
+    "London":     "Europe/London",
+}
+
+# UTC offsets for cities (hours). FALLBACK ONLY — correct for July 2026
+# (Northern-hemisphere DST) but will silently drift by 1h once DST ends.
+# Kept as a safety net if CITY_TZ_NAME/zoneinfo lookup fails; not the
+# primary source of truth anymore.
 CITY_UTC_OFFSET_HOURS: Dict[str, float] = {
     "Dallas":     -5.0,
     "NYC":        -4.0,

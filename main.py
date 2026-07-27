@@ -260,6 +260,12 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
     city_counts_this_cycle = {}
     dup_count = 0
     city_limit_count = 0
+    # v32 FIX: NEAR_RESOLUTION_MAX_PER_CYCLE / MAX_PER_CITY were defined in
+    # config.py but never enforced anywhere — near-res trades share the
+    # correlated risk of one wrong "peak passed" assumption, so they need
+    # their own tighter counters, separate from the general lottery-edge ones.
+    near_res_opened_this_cycle = 0
+    near_res_city_counts_this_cycle = {}
     for edge_result in tradeable:
         if opened_this_cycle >= config.MAX_OPEN_PER_CYCLE:
             break
@@ -281,6 +287,17 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             if city_count >= config.MAX_POSITIONS_PER_CITY:
                 city_limit_count += 1
                 continue
+
+        # v32 FIX: separate, tighter caps for near-resolution signals.
+        is_near_res = edge_result.forecast is None
+        if is_near_res:
+            nr_max_cycle = getattr(config, 'NEAR_RESOLUTION_MAX_PER_CYCLE', 2)
+            if near_res_opened_this_cycle >= nr_max_cycle:
+                continue
+            nr_max_city = getattr(config, 'NEAR_RESOLUTION_MAX_PER_CITY', 1)
+            if city and near_res_city_counts_this_cycle.get(city, 0) >= nr_max_city:
+                continue
+
         if not safeguard.check_hourly_trade_limit():
             break
 
@@ -308,6 +325,10 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         if position:
             opened_this_cycle += 1
             city_counts_this_cycle[city] = city_counts_this_cycle.get(city, 0) + 1
+            if is_near_res:
+                near_res_opened_this_cycle += 1
+                if city:
+                    near_res_city_counts_this_cycle[city] = near_res_city_counts_this_cycle.get(city, 0) + 1
             if city:
                 cities_with_open.add(city)
             active_questions.add(norm_q)
@@ -318,7 +339,11 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             safeguard.record_trade_open(position.size_usd)
             
             from safeguards import log_trade_to_pg
-            _strategy = "NEAR_RES_LOTTERY_v32"
+            # v32 FIX: was hardcoded to "NEAR_RES_LOTTERY_v32" for EVERY trade,
+            # so Neon trade_log couldn't distinguish near-res from lottery-edge
+            # results — defeated the whole point of measuring the parity layer
+            # separately. edge_result.forecast is None only for near-res trades.
+            _strategy = "NEAR_RES_v32" if is_near_res else "LOTTERY_EDGE_v31"
             _fc = 0.0
             if edge_result.forecast:
                 _is_low = "lowest" in position.question.lower()
