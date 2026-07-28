@@ -358,3 +358,9 @@ CITY_UTC_OFFSET_HOURS: Dict[str, float] = {
 
 # Master switch for the v32 layer (temp kill switch if behaviour unexpected).
 NEAR_RESOLUTION_ENABLED: bool = True
+
+# v32b: kill switch for the legacy forecast/Gaussian "lottery" entry path
+# (v9-v31 — documented 0-4% WR across 20+ iterations). Set False to trade
+# ONLY near-resolution signals while that layer gathers real performance
+# data, instead of bleeding capital into the disproven path in parallel.
+FORECAST_EDGE_ENABLED: bool = False

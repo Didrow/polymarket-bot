@@ -686,6 +686,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                 ladder_rank=999.0,
             )
 
+    # v32b: legacy forecast/lottery path kill switch. near_resolution_signal()
+    # above already ran and returned/short-circuited if it found something;
+    # if we reach here, either it found nothing or kind isn't categorical/range.
+    # When disabled, don't fall through into the disproven Gaussian/sigma path.
+    if not getattr(config, 'FORECAST_EDGE_ENABLED', True):
+        return None
+
     # v29: hard floor on recalibrated our_prob — blocks the entire 0-10% bucket
     # (calibration CSV: avg_pred 6.6% → actual 2.2%) from ever entering positions.
     iso_floor = getattr(config, 'ISOTONIC_MIN_PROB', 0.0)
