@@ -124,10 +124,6 @@ def get_adaptive_sigma(city: str, source: str, base_sigma: float, hours: float =
 
     blended = _BLEND_WEIGHT * adaptive_sigma + (1 - _BLEND_WEIGHT) * base_sigma
 
-    logger.debug(
-        f"📐 Adaptive sigma: {city}/{source} | rms={rms:.2f} | "
-        f"adaptive={adaptive_sigma:.2f} | base={base_sigma:.2f} | blended={blended:.2f} | n={len(errors)}"
-    )
     return round(blended, 3)
 
 
