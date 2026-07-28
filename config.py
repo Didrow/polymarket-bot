@@ -77,7 +77,12 @@ CHAIN_ID: int = 137
 # v30: 0-6 UTC → 3 угоди/день. v31: 0-8 UTC → est 6-10 угод/день.
 # 12:00 UTC had 109 trades with 0.9% WR — bot wasted capital on stale midday markets.
 OPEN_WINDOW_START_UTC: int = 0       # 00:00 UTC — when fresh daily temp markets appear
-OPEN_WINDOW_END_UTC: int = 8         # v31: 08:00 UTC — widened +2h (was 6)
+# v32b: was 8 (tuned for the old FORECAST_EDGE lottery path — fresh cheap YES
+# appears at 00:00 UTC). Near-resolution fires based on each city's LOCAL peak
+# hour, not UTC clock time, so a narrow UTC window blocks it for most cities
+# (London/NYC/Dallas/Lucknow/Delhi/Mumbai all peak-pass outside 00-08 UTC).
+# Widened to 24 so near-res can fire whenever a city's peak has actually passed.
+OPEN_WINDOW_END_UTC: int = 24        # v32b: 24h — near-res is peak-hour gated, not UTC-window gated
 
 # ── CAPITAL & RISK ──────────────────────────────────────────
 INITIAL_CAPITAL: float = 100.0
