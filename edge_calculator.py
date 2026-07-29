@@ -425,6 +425,19 @@ def _suggest_size(our_prob: float, market_prob: float, edge: float,
 # reason_key ∈ {"bucket_locked_yes", "bucket_impossible_no"}
 # Caller is responsible for market price gates + size cap.
 
+# v32c: diagnostic counters — WHY near_resolution_signal() returns None.
+# Reset once per scan_all_edges() call, logged in the "Edge scan:" summary line.
+# Added because 100+ consecutive cycles showed 0 near-res trades with a
+# suspiciously constant "none" count, and there was no visibility into which
+# of the ~9 rejection branches was responsible (rate-limited running-temps
+# fetch on Render free tier vs peak-gate vs no bucket match, etc).
+_NR_STATS: Dict[str, int] = {}
+
+
+def _nr_note(reason: str) -> None:
+    _NR_STATS[reason] = _NR_STATS.get(reason, 0) + 1
+
+
 def near_resolution_signal(market: "PolyMarket",
                            low_c: float,
                            high_c: float,
@@ -452,20 +465,24 @@ def near_resolution_signal(market: "PolyMarket",
     are KEPT SEPARATE per the v32 design (parity layer, not replacement).
     """
     if not getattr(config, 'NEAR_RESOLUTION_ENABLED', False):
+        _nr_note("disabled")
         return None
 
     hours = market.hours_to_resolution
     max_h = getattr(config, 'NEAR_RESOLUTION_MAX_HOURS', 6.0)
     min_h = getattr(config, 'NEAR_RESOLUTION_MIN_HOURS', 0.5)
     if hours > max_h or hours < min_h:
+        _nr_note("hours_out_of_range")
         return None
 
     city = market.detected_city
     if not city:
+        _nr_note("no_city")
         return None
 
     peak_hours = getattr(config, 'PEAK_HOUR_BY_CITY', {})
     if not peak_hours or city not in peak_hours:
+        _nr_note("no_peak_hour_entry")
         return None
     peak_hour = float(peak_hours[city])
 
@@ -481,6 +498,7 @@ def near_resolution_signal(market: "PolyMarket",
 
     local_hour = get_city_local_hour(city)
     if local_hour is None:
+        _nr_note("no_local_hour")
         return None
 
     buffer_h = getattr(config, 'NEAR_RESOLUTION_PEAK_BUFFER_HOURS', 1.5)
@@ -491,12 +509,17 @@ def near_resolution_signal(market: "PolyMarket",
     # safety buffer, and not implausibly large (i.e. not actually YESTERDAY's
     # extreme — cap at 12h since resolution windows are already ≤ NEAR_RESOLUTION_MAX_HOURS).
     hours_since_extreme = (local_hour - empirical_extreme_hour) % 24.0
-    if hours_since_extreme < buffer_h or hours_since_extreme > 12.0:
+    if hours_since_extreme < buffer_h:
+        _nr_note("peak_not_passed_yet")
+        return None
+    if hours_since_extreme > 12.0:
+        _nr_note("peak_too_long_ago")
         return None
 
     # Fetch running observed temperatures (cached 30 min).
     rt = fetch_running_temperatures(city)
     if rt is None or len(rt.hourly_temps) < 4:
+        _nr_note("running_temps_unavailable")
         return None
 
     if is_low:
@@ -508,6 +531,7 @@ def near_resolution_signal(market: "PolyMarket",
         latest = rt.hourly_temps[-1]
         cold_passed = (latest - extreme_so_far) >= -0.2
         if not cold_passed:
+            _nr_note("cold_still_dropping")
             return None
 
         gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
@@ -519,12 +543,14 @@ def near_resolution_signal(market: "PolyMarket",
         if extreme_so_far > high_c + gap:
             conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
             return ("BUY_NO", conf, "bucket_impossible_no_cold", empirical_extreme_hour)
+        _nr_note("cold_bucket_ambiguous")
         return None
 
     # HEAT-side logic — bucket locked if max_so_far in bucket AND declining.
     extreme_so_far = rt.max_so_far
     if not rt.latest_declining:
         # Peak may still be ahead — not in the "peak passed" state yet.
+        _nr_note("heat_not_declining_yet")
         return None
 
     gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
@@ -547,6 +573,7 @@ def near_resolution_signal(market: "PolyMarket",
     if extreme_so_far > high_c + gap:
         conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
         return ("BUY_NO", conf, "bucket_impossible_no_exceeded", empirical_extreme_hour)
+    _nr_note("heat_bucket_ambiguous")
     return None
 
 
@@ -895,6 +922,7 @@ def _max_spread_for(market: PolyMarket) -> float:
 def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
     results: List[EdgeResult] = []
     skip_vol = skip_city = skip_hours = skip_none = skip_spread = skip_kind = skip_window = 0
+    _NR_STATS.clear()
 
     # v32: Time window gate — near-res trades can also fire outside LOTTERY window
     # (peak-hour based, not UTC-time based), but we keep the lottery window check
@@ -991,6 +1019,9 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
         f"| skip: vol={skip_vol}, hours={skip_hours}, city={skip_city}, "
         f"kind={skip_kind}, spread={skip_spread}, none={skip_none}, window={skip_window}"
     )
+    if _NR_STATS:
+        nr_summary = ", ".join(f"{k}={v}" for k, v in sorted(_NR_STATS.items(), key=lambda x: -x[1]))
+        logger.info(f"  near-res reasons: {nr_summary}")
     return results
 
 
