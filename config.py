@@ -274,6 +274,15 @@ NEAR_RESOLUTION_MIN_HOURS: float = 0.5
 # Safety buffer AFTER empirical peak hour before signal is trusted.
 # 1.5h buffer = peak at 15:00, signal active from 16:30 local onward.
 NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.5
+# v32d: upper bound on "hours since peak" — was hardcoded 12.0, which real
+# log data showed rejecting 18/94 near-res candidates per cycle as
+# "peak_too_long_ago" even though their trend was already confirmed declining.
+# The 12h cap can't distinguish "peak was legitimately 12-18h ago" from the
+# wraparound failure case (both land in the same 17-19h range), so erring
+# toward a wider window trades a small re-introduction of wraparound risk for
+# recovering real signal — the independent latest_declining/cold_passed check
+# already guards against acting on a stale/wrong peak.
+NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 18.0
 
 # For BUCKET_LOCKED_YES: how many last observed hourly temps must be
 # flat or declining (each ≤ previous) to confirm peak is behind us.

@@ -512,7 +512,7 @@ def near_resolution_signal(market: "PolyMarket",
     if hours_since_extreme < buffer_h:
         _nr_note("peak_not_passed_yet")
         return None
-    if hours_since_extreme > 12.0:
+    if hours_since_extreme > getattr(config, 'NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS', 18.0):
         _nr_note("peak_too_long_ago")
         return None
 
