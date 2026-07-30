@@ -441,9 +441,12 @@ def _nr_note(reason: str) -> None:
 def near_resolution_signal(market: "PolyMarket",
                            low_c: float,
                            high_c: float,
-                           is_low: bool) -> Optional[Tuple[str, float, str, float]]:
+                           is_low: bool,
+                           kind: str = "range",
+                           threshold_c: float = 0.0) -> Optional[Tuple[str, float, str, float]]:
     """
     v32: Decide if the market is in a near-resolution execution-edge state.
+    v33: extended to trend markets (`kind in ("above","below")`) — threshold pass.
 
     A market qualifies when ALL of:
       1. NEAR_RESOLUTION_ENABLED is True
@@ -452,14 +455,21 @@ def near_resolution_signal(market: "PolyMarket",
       4. current local hour > peak_hour + NEAR_RESOLUTION_PEAK_BUFFER_HOURS
          (peak already passed with safety margin)
       5. fetch_running_temperatures() succeeds
-      6. For BUCKET_LOCKED_YES: max_so_far in [low_c, high_c] AND latest_declining
-         For BUCKET_IMPOSSIBLE_NO: max_so_far < (low_c - NEAR_RESOLUTION_IMPOSSIBLE_GAP_C)
+
+    Then by kind:
+      categorical/range — bucket logic (low_c..high_c):
+         BUCKET_LOCKED_YES:        extreme in bucket AND declining/passing
+         BUCKET_IMPOSSIBLE_NO:     extreme below bucket by ≥gap (or above for cold)
+         BUCKET_EXCEEDED_NO:       (heat) extreme already past high edge by ≥gap
+      above (heat threshold):     threshold_c is the line, max_so_far extreme
+         TREND_LOCKED_ABOVE_YES:  max_so_far ≥ threshold_c (the "above" already true)
+         TREND_IMPOSSIBLE_ABOVE_NO: max_so_far < threshold_c - gap after peak
+      below (cold threshold):     threshold_c is the line, min_so_far extreme
+         TREND_LOCKED_BELOW_YES:  min_so_far ≤ threshold_c (the "below" already true)
+         TREND_IMPOSSIBLE_BELOW_NO: min_so_far > threshold_c + gap after trough
 
     For 'low' temperature markets (lowest temp/win), peak-hour logic is INVERTED:
-      - Coldest temp happens around sunrise (early morning). The "peak" of cold
-        is actually a trough. To reuse the same peak-passed logic, we check
-        whether the local hour has passed the cold-hour buffer AND the
-        min_so_far (not max_so_far) has already entered (or is below) the bucket.
+      - Coldest temp happens around sunrise. The "peak" of cold is a trough.
 
     NB: We do NOT touch the forecast layer or sigma/isotonic — these signals
     are KEPT SEPARATE per the v32 design (parity layer, not replacement).
@@ -486,11 +496,11 @@ def near_resolution_signal(market: "PolyMarket",
         return None
     peak_hour = float(peak_hours[city])
 
-    # v32: for 'lowest' markets, invert the sense — coldest temp ~06:00 local,
-    # signal becomes "morning cold trough already passed".
-    if is_low:
-        # Rough early-morning proxy: cold trough happens ~6h before thermal peak.
-        # Solar min is ~1-2h after sunrise; equator cities ~06:00, mid-lat ~05-07:00.
+    # v33: 'below' trend is also a cold extreme — treat it as a cold-side market
+    # for the timing check (cold trough ~06:00 local, not the heat peak).
+    cold_market = is_low or (kind == "below")
+
+    if cold_market:
         cold_trough_hour = 6.0
         empirical_extreme_hour = cold_trough_hour
     else:
@@ -502,12 +512,6 @@ def near_resolution_signal(market: "PolyMarket",
         return None
 
     buffer_h = getattr(config, 'NEAR_RESOLUTION_PEAK_BUFFER_HOURS', 1.5)
-    # v32 FIX: the old modulo comparison against (24 - buffer) wrongly treated
-    # hours well BEFORE today's peak as "peak already passed" (e.g. 10:00 with
-    # a 15:00 peak: (10-16.5)%24=17.5, which is < 22.5 and passed the gate).
-    # Correct check: hours elapsed since the extreme must be at least the
-    # safety buffer, and not implausibly large (i.e. not actually YESTERDAY's
-    # extreme — cap at 12h since resolution windows are already ≤ NEAR_RESOLUTION_MAX_HOURS).
     hours_since_extreme = (local_hour - empirical_extreme_hour) % 24.0
     if hours_since_extreme < buffer_h:
         _nr_note("peak_not_passed_yet")
@@ -522,6 +526,49 @@ def near_resolution_signal(market: "PolyMarket",
         _nr_note("running_temps_unavailable")
         return None
 
+    # ──────────────────────────────────────────────────────────
+    # v33: TREND (above/below) — threshold pass / fail detection
+    # ──────────────────────────────────────────────────────────
+    if kind == "above":
+        # Heat threshold. max_so_far is monotonically non-decreasing through
+        # the day → once it crossed threshold_c the "above" outcome is sealed.
+        extreme_so_far = rt.max_so_far
+        if not rt.latest_declining:
+            _nr_note("trend_above_not_declining")
+            return None
+        gap = getattr(config, 'NEAR_RES_TREND_IMPOSSIBLE_GAP_C', 1.0)
+        if extreme_so_far >= threshold_c:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            return ("BUY_YES", conf, "trend_locked_above_yes", empirical_extreme_hour)
+        if extreme_so_far < threshold_c - gap:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+            return ("BUY_NO", conf, "trend_impossible_above_no", empirical_extreme_hour)
+        _nr_note("trend_above_ambiguous")
+        return None
+
+    if kind == "below":
+        # Cold threshold. min_so_far is monotonically non-increasing through the
+        # day's early hours → once below threshold_c the outcome is sealed.
+        # Use cold_passed gate (latest reading no longer dropping).
+        extreme_so_far = rt.min_so_far
+        latest = rt.hourly_temps[-1]
+        cold_passed = (latest - extreme_so_far) >= -0.2
+        if not cold_passed:
+            _nr_note("trend_below_still_dropping")
+            return None
+        gap = getattr(config, 'NEAR_RES_TREND_IMPOSSIBLE_GAP_C', 1.0)
+        if extreme_so_far <= threshold_c:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            return ("BUY_YES", conf, "trend_locked_below_yes", empirical_extreme_hour)
+        if extreme_so_far > threshold_c + gap:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+            return ("BUY_NO", conf, "trend_impossible_below_no", empirical_extreme_hour)
+        _nr_note("trend_below_ambiguous")
+        return None
+
+    # ──────────────────────────────────────────────────────────
+    # Bucket markets (categorical / range) — original v32 logic
+    # ──────────────────────────────────────────────────────────
     if is_low:
         # COLD-trough logic — bucket locked if min_so_far IS in bucket, AND temps
         # have been flat/rising (cold already bottomed). Bucket impossible if
@@ -631,7 +678,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             if (high_c - low_c) < min_width:
                 return None
             threshold_c = (low_c + high_c) / 2.0
-            our_prob = _prob_exact_gauss(forecast, low_c, high_c, is_low, market.hours_to_resolution)
         else:
             parsed_kind, threshold_value, punit = _parse_threshold(market.question)
             if threshold_value is None:
@@ -648,7 +694,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                 half_c = 0.5
             low_c = threshold_c - half_c
             high_c = threshold_c + half_c
-            our_prob = _prob_exact_gauss(forecast, low_c, high_c, is_low, market.hours_to_resolution)
     else:
         parsed_kind, threshold_value, punit = _parse_threshold(market.question)
         if threshold_value is None:
@@ -659,7 +704,6 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             threshold_c = _f_to_c(threshold_value)
         else:
             threshold_c = threshold_value
-        our_prob = _prob_trend_gauss(forecast, threshold_c, kind, is_low, market.hours_to_resolution)
 
     # ═══════════════════════════════════════════════════════════════
     # v32: NEAR-RESOLUTION SIGNAL — bypass Gaussian/sigma/isotonic
@@ -668,8 +712,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # lock (or kill) the bucket, physical reality trumps forecast models.
     # This check runs BEFORE Gaussian/sigma/isotonic — near-resolution
     # signals short-circuit the entire forecast-edge path.
-    if kind in ("categorical", "range"):
-        nr = near_resolution_signal(market, low_c, high_c, is_low)
+    # v33: now also applies to trend (above/below) markets — they were given
+    # 0% WR at 24-60h entry but never tested near-resolution; with threshold
+    # markets being higher-volume, this is the originally-intended use case.
+    if kind in ("categorical", "range", "above", "below"):
+        # threshold_c for trend; for bucket use low_c/high_c (sentinel).
+        nr_threshold = threshold_c if kind in ("above", "below") else 0.0
+        nr = near_resolution_signal(market, low_c, high_c, is_low, kind=kind, threshold_c=nr_threshold)
         if nr is not None:
             nrs_dir, nrs_conf, nrs_reason_key, nrs_peak_hr = nr
             mkt_prob = market.best_ask_yes
@@ -678,12 +727,21 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             if mkt_prob <= 0.001 or mkt_prob >= 0.999:
                 return None
 
-            if nrs_dir == "BUY_YES":
-                min_ask = getattr(config, 'NEAR_RES_YES_MIN_ASK', 0.50)
-                max_ask = getattr(config, 'NEAR_RES_YES_MAX_ASK', 0.95)
+            # v33: trend markets use their own price bands (slightly wider NO).
+            if kind in ("above", "below"):
+                if nrs_dir == "BUY_YES":
+                    min_ask = getattr(config, 'NEAR_RES_TREND_YES_MIN_ASK', 0.50)
+                    max_ask = getattr(config, 'NEAR_RES_TREND_YES_MAX_ASK', 0.95)
+                else:
+                    min_ask = getattr(config, 'NEAR_RES_TREND_NO_MIN_ASK', 0.05)
+                    max_ask = getattr(config, 'NEAR_RES_TREND_NO_MAX_ASK', 0.30)
             else:
-                min_ask = getattr(config, 'NEAR_RES_NO_MIN_ASK', 0.03)
-                max_ask = getattr(config, 'NEAR_RES_NO_MAX_ASK', 0.20)
+                if nrs_dir == "BUY_YES":
+                    min_ask = getattr(config, 'NEAR_RES_YES_MIN_ASK', 0.50)
+                    max_ask = getattr(config, 'NEAR_RES_YES_MAX_ASK', 0.95)
+                else:
+                    min_ask = getattr(config, 'NEAR_RES_NO_MIN_ASK', 0.03)
+                    max_ask = getattr(config, 'NEAR_RES_NO_MAX_ASK', 0.20)
             if not (min_ask <= mkt_prob <= max_ask):
                 return None
 
@@ -712,6 +770,12 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                 distance_c=0.0, kind=kind,
                 ladder_rank=999.0,
             )
+
+    # Compute Gaussian prob now that we know near-res didn't fire.
+    if kind in ("categorical", "range"):
+        our_prob = _prob_exact_gauss(forecast, low_c, high_c, is_low, market.hours_to_resolution)
+    else:
+        our_prob = _prob_trend_gauss(forecast, threshold_c, kind, is_low, market.hours_to_resolution)
 
     # v32b: legacy forecast/lottery path kill switch. near_resolution_signal()
     # above already ran and returned/short-circuited if it found something;

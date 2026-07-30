@@ -106,7 +106,7 @@ DRAWDOWN_LIMIT: float = 0.50         # v28: raised 0.40→0.50 in DRY-RUN to kee
 # v30: categorical + range (ban was unjustified — 1.7% vs 2.6% WR, both bad but
 #      categorical = 62% of historical trade universe, removing it killed v29)
 #      above/below still disabled (not bucket grid).
-KINDS_ONLY: List[str] = ["range", "categorical"]
+KINDS_ONLY: List[str] = ["range", "categorical", "above", "below"]
 
 MIN_EDGE_YES: float = 0.03           # accept tiny edge on cheap YES (lottery upside)
 MIN_EDGE_NO: float = 0.18
@@ -224,21 +224,43 @@ LOGS_DIR: str = "logs"
 CACHE_DIR: str = "cache"
 EMAIL_ENABLED: bool = False
 
-# v31: City whitelist — 8 топ-heat міст з високою diurnal temp variance
-# v30: 6 historic winner-cities. v31: +Mumbai, +Delhi — Indian heat mega-cities
+# v33: City whitelist expanded 9 -> 24 to unlock more near-resolution candidates.
+# Near-resolution fires only when city's local diurnal peak has passed, so
+# covering multiple timezones means signals flow throughout UTC day instead
+# of clustering in one window. Plus Seoul/Hanoi/Bangkok/Mexico City have
+# high-volume weather markets that were being skipped by the city filter.
 CITY_WHITELIST: List[str] = [
+    # North America (heterogeneous diurnal variance)
     "Dallas",
-    "Singapore",
-    "London",
     "NYC",
     "New York",
-    "Lucknow",
+    "Chicago",
+    "Los Angeles",
+    "Miami",
+    "Phoenix",
+    "Denver",
+    "Mexico City",
+    # Europe (mid-lat maritime — peak 14-16 local)
+    "London",
+    "Paris",
+    "Berlin",
+    "Madrid",
+    # Asia (early afternoon peak — covers UTC morning)
     "Tokyo",
-    "Mumbai",      # v31: top-heat Indian metro, high diurnal variance
-    "Delhi",       # v31: extreme summer temps, fresh bucket markets
+    "Seoul",
+    "Singapore",
+    "Mumbai",
+    "Delhi",
+    "Lucknow",
+    "Bangkok",
+    "Hanoi",
+    "Dubai",
+    # South America / Oceania (peak in UTC morning)
+    "Sao Paulo",
+    "Sydney",
 ]
 
-MAX_PREFETCH_CITIES: int = 8  # v31: sync з CITY_WHITELIST (was 6)
+MAX_PREFETCH_CITIES: int = 24  # v33: sync з CITY_WHITELIST
 
 # ── DRY-RUN VALIDATION GATES ───────────────────────────────
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
@@ -282,7 +304,7 @@ NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.5
 # toward a wider window trades a small re-introduction of wraparound risk for
 # recovering real signal — the independent latest_declining/cold_passed check
 # already guards against acting on a stale/wrong peak.
-NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 18.0
+NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 12.0
 
 # For BUCKET_LOCKED_YES: how many last observed hourly temps must be
 # flat or declining (each ≤ previous) to confirm peak is behind us.
@@ -309,33 +331,74 @@ NEAR_RES_YES_MAX_ASK: float = 0.95
 NEAR_RES_NO_MIN_ASK: float = 0.03
 NEAR_RES_NO_MAX_ASK: float = 0.20
 
+# v33 TREND near-resolution price bands (above/below threshold markets).
+# The two threshold-side scenarios:
+#   - TREND_LOCKED_YES: observed extreme already crossed the threshold
+#     (e.g. market "above 35°C", max_so_far already 36°C after peak — locked).
+#     Market is pricing threshold high → ride the high-priced YES (0.50-0.95).
+#   - TREND_IMPOSSIBLE_NO: after peak, max_so_far falls THRESHOLD_GAP short
+#     and gap > climatology possible swing → buy cheap NO (0.05-0.30).
+# Trend NO band is slightly wider than bucket NO because threshold markets
+# have higher volume / better liquidity than 1°C categorical buckets.
+NEAR_RES_TREND_YES_MIN_ASK: float = 0.50
+NEAR_RES_TREND_YES_MAX_ASK: float = 0.95
+NEAR_RES_TREND_NO_MIN_ASK: float = 0.05
+NEAR_RES_TREND_NO_MAX_ASK: float = 0.30
+
+# v33 For trend-impossible: how far below threshold must max_so_far fall
+# (after peak) for a NO to be confident. Mirror of NEAR_RESOLUTION_IMPOSSIBLE_GAP_C.
+# Default 1.0°C — slightly more conservative than bucket (0.5°C half-width)
+# because threshold is a single point, not a range.
+NEAR_RES_TREND_IMPOSSIBLE_GAP_C: float = 1.0
+
 # Position size hard cap — independent of Kelly.
 # Recommendation: DON'T use 100% Kelly; rare late storms can reverse.
 NEAR_RESOLUTION_MAX_SIZE_USD: float = 2.00
 NEAR_RESOLUTION_MIN_SIZE_USD: float = 0.75
 
-# Max near-resolution positions per cycle (low frequency — keep tight)
-NEAR_RESOLUTION_MAX_PER_CYCLE: int = 2
+# v33: 2->3 per cycle. With 24 cities × {categorical, range, above, below}
+# candidates, a single cycle often sees multiple near-res opportunities in
+# different timezones. 3/cycle keeps position-opening rate sane while not
+# missing the Asia morning + Europe afternoon + US evening sequence.
+NEAR_RESOLUTION_MAX_PER_CYCLE: int = 3
 
-# Max near-resolution positions per city (one bucket per city — avoid overlap)
-NEAR_RESOLUTION_MAX_PER_CITY: int = 1
+# v33: 1->2 per city. Allows one categorical/bucket + one trend signal per
+# city per cycle (different condition_ids, same physical reality — not the
+# same market twice). Still avoids piling duplicates.
+NEAR_RESOLUTION_MAX_PER_CITY: int = 2
 
 # Empirical local peak-hour by city (LOCAL solar/clock hour, float for half-hours).
 # Source: 22-month climatology for daily temperature maximum.
 # These are APPROXIMATE — the safety buffer absorbs the variance.
 PEAK_HOUR_BY_CITY: Dict[str, float] = {
-    # USA (DST adjusted — local standard time +1 in summer; values below are local clock)
-    "Dallas":      16.5,   # 16:30 local — dry heat, slow cooling afternoon
-    "NYC":         15.0,   # 15:00 local — urban heat island
-    "New York":    15.0,
-    # Asia
-    "Tokyo":       14.0,   # 14:00 local — humid subtropical, peaks early
-    "Singapore":   14.0,   # 14:00 local — convective equatorial (low diurnal variance — risky)
-    "Lucknow":     15.5,   # 15:30 local — Indo-Gangetic heat
-    "Mumbai":      14.5,   # 14:30 local — coastal, earlier peak
-    "Delhi":       15.5,   # 15:30 local — extreme heat mega-city
-    # Europe
-    "London":      15.0,   # 15:00 local — mid-latitude maritime
+    # North America (DST adjusted — local clock times)
+    "Dallas":       16.5,  # 16:30 local — dry heat, slow cooling afternoon
+    "NYC":          15.0,
+    "New York":     15.0,
+    "Chicago":      15.0,
+    "Los Angeles":  15.5,
+    "Miami":        14.0,  # humid; convective clouds cap afternoon
+    "Phoenix":      16.0,  # desert: late peak, high diurnal variance
+    "Denver":       16.0,  # high altitude: late solar peak
+    "Mexico City":  15.0,  # high altitude tropical
+    # Europe (mid-lat maritime — peak 14-16 local)
+    "London":       15.0,
+    "Paris":        15.0,
+    "Berlin":       15.0,
+    "Madrid":       16.0,  # continental interior, later peak
+    # Asia (early afternoon peak)
+    "Tokyo":        14.0,
+    "Seoul":        14.0,
+    "Singapore":    14.0,  # equatorial — low diurnal variance (risky for near-res)
+    "Mumbai":       14.5,
+    "Delhi":        15.5,
+    "Lucknow":      15.5,
+    "Bangkok":      14.0,
+    "Hanoi":        14.0,
+    "Dubai":        15.0,  # desert: high variance, clean decline
+    # Southern hemisphere (UTC morning peak)
+    "Sao Paulo":    14.0,
+    "Sydney":       16.0,
 }
 
 # v32 FIX: real IANA timezone names — DST-aware, never goes stale.
@@ -343,15 +406,30 @@ PEAK_HOUR_BY_CITY: Dict[str, float] = {
 # this map first via zoneinfo, and only falls back to the fixed-offset
 # table if a city is missing here or zoneinfo is unavailable.
 CITY_TZ_NAME: Dict[str, str] = {
-    "Dallas":     "America/Chicago",
-    "NYC":        "America/New_York",
-    "New York":   "America/New_York",
-    "Tokyo":      "Asia/Tokyo",
-    "Singapore":  "Asia/Singapore",
-    "Lucknow":    "Asia/Kolkata",
-    "Mumbai":     "Asia/Kolkata",
-    "Delhi":      "Asia/Kolkata",
-    "London":     "Europe/London",
+    "Dallas":        "America/Chicago",
+    "NYC":           "America/New_York",
+    "New York":      "America/New_York",
+    "Chicago":       "America/Chicago",
+    "Los Angeles":   "America/Los_Angeles",
+    "Miami":         "America/New_York",
+    "Phoenix":       "America/Phoenix",  # no DST
+    "Denver":        "America/Denver",
+    "Mexico City":   "America/Mexico_City",
+    "Tokyo":         "Asia/Tokyo",
+    "Seoul":         "Asia/Seoul",
+    "Singapore":     "Asia/Singapore",
+    "Lucknow":       "Asia/Kolkata",
+    "Mumbai":        "Asia/Kolkata",
+    "Delhi":         "Asia/Kolkata",
+    "Bangkok":       "Asia/Bangkok",
+    "Hanoi":         "Asia/Ho_Chi_Minh",
+    "Dubai":         "Asia/Dubai",
+    "London":        "Europe/London",
+    "Paris":         "Europe/Paris",
+    "Berlin":        "Europe/Berlin",
+    "Madrid":        "Europe/Madrid",
+    "Sao Paulo":     "America/Sao_Paulo",
+    "Sydney":        "Australia/Sydney",
 }
 
 # UTC offsets for cities (hours). FALLBACK ONLY — correct for July 2026
@@ -359,15 +437,30 @@ CITY_TZ_NAME: Dict[str, str] = {
 # Kept as a safety net if CITY_TZ_NAME/zoneinfo lookup fails; not the
 # primary source of truth anymore.
 CITY_UTC_OFFSET_HOURS: Dict[str, float] = {
-    "Dallas":     -5.0,
-    "NYC":        -4.0,
-    "New York":   -4.0,
-    "Tokyo":       9.0,
-    "Singapore":   8.0,
-    "Lucknow":     5.5,
-    "Mumbai":      5.5,
-    "Delhi":       5.5,
-    "London":      1.0,
+    "Dallas":        -5.0,
+    "NYC":           -4.0,
+    "New York":      -4.0,
+    "Chicago":       -5.0,
+    "Los Angeles":   -7.0,
+    "Miami":         -4.0,
+    "Phoenix":       -7.0,
+    "Denver":        -6.0,
+    "Mexico City":   -6.0,
+    "Tokyo":          9.0,
+    "Seoul":          9.0,
+    "Singapore":      8.0,
+    "Lucknow":        5.5,
+    "Mumbai":         5.5,
+    "Delhi":          5.5,
+    "Bangkok":        7.0,
+    "Hanoi":          7.0,
+    "Dubai":          4.0,
+    "London":         1.0,
+    "Paris":          2.0,
+    "Berlin":         2.0,
+    "Madrid":         2.0,
+    "Sao Paulo":     -3.0,
+    "Sydney":        10.0,
 }
 
 # Master switch for the v32 layer (temp kill switch if behaviour unexpected).
