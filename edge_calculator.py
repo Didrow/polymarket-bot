@@ -483,6 +483,14 @@ def near_resolution_signal(market: "PolyMarket",
     min_h = getattr(config, 'NEAR_RESOLUTION_MIN_HOURS', 0.5)
     if hours > max_h or hours < min_h:
         _nr_note("hours_out_of_range")
+        # v34: visibility — markets in 8-20h band ARE candidates if MAX_HOURS widens
+        # further, but for now show how many we're rejecting (sampling 1/cycle).
+        import logging as _logging
+        if 8.0 < hours < 20.0 and market.detected_city:
+            _logging.getLogger(__name__).debug(
+                f"  [v34 wide-window] rejected {market.detected_city} {market.kind} "
+                f"h={hours:.1f} question={market.question[:60]!r}"
+            )
         return None
 
     city = market.detected_city
@@ -518,11 +526,16 @@ def near_resolution_signal(market: "PolyMarket",
     # v33d: allow impossible-NO even before peak if max_so_far physically can't
     # reach the bucket in the remaining hours (peak max swing << gap).
     # Tight gate: requires hours < 4h to resolution AND max_so_far check below.
+    # v34: extended to trend kinds ("above","below"). Same physical argument —
+    # if max_so_far is ≥gap below the threshold AND only <4h left, even a
+    # strong peak swing cannot close the gap (climatology daily swing is
+    # bounded). Pre-peak YES_locked for trend still requires declining=True
+    # (see below) — only the impossible-NO branch is safe without peak_passed.
     allow_pre_peak_impossible = (
         not peak_passed
         and peak_not_too_old
         and hours <= 4.0
-        and kind in ("categorical", "range")
+        and kind in ("categorical", "range", "above", "below")
     )
     if not peak_passed and not allow_pre_peak_impossible:
         _nr_note("peak_not_passed_yet")

@@ -336,14 +336,24 @@ VALIDATION_MIN_EQUITY: float = 0.0
 
 # Maximum hours-to-resolution for near-resolution signal to be considered.
 # Above this, falls back to standard forecast-edge flow.
-NEAR_RESOLUTION_MAX_HOURS: float = 6.0
+# v34: 6.0 -> 12.0 (mixed approach). The narrower 6h window was rejecting
+# 526+ daily-temperature markets (24-72h to resolution) entirely, while
+# only ~25-50 markets were inside 0.5-6h. Widening to 12h captures the
+# late-window transition (8-12h out) where empirical peak + 1h buffer
+# is already passing for Asia/Europe evening markets, and pre-peak
+# impossible-NO is safe for trend (above/below) kinds.
+NEAR_RESOLUTION_MAX_HOURS: float = 12.0
 
 # Minimum hours-to-resolution — too close to close, spread widens illiquidly.
 NEAR_RESOLUTION_MIN_HOURS: float = 0.5
 
 # Safety buffer AFTER empirical peak hour before signal is trusted.
-# 1.5h buffer = peak at 15:00, signal active from 16:30 local onward.
-NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.5
+# v34: 1.5 -> 1.0 (mixed approach). Tighter buffer activates signals sooner
+# after empirical peak (peak at 15:00 → signal from 16:00 local instead of
+# 16:30). Trend (above/below) markets have wider near-res price bands
+# (0.05-0.30 NO) so 1.0h buffer is safe with independent
+# cold_passed/latest_declining guards.
+NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.0
 # v32d: upper bound on "hours since peak" — was hardcoded 12.0, which real
 # log data showed rejecting 18/94 near-res candidates per cycle as
 # "peak_too_long_ago" even though their trend was already confirmed declining.
