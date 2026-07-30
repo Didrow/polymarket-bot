@@ -513,10 +513,21 @@ def near_resolution_signal(market: "PolyMarket",
 
     buffer_h = getattr(config, 'NEAR_RESOLUTION_PEAK_BUFFER_HOURS', 1.5)
     hours_since_extreme = (local_hour - empirical_extreme_hour) % 24.0
-    if hours_since_extreme < buffer_h:
+    peak_passed = hours_since_extreme >= buffer_h
+    peak_not_too_old = hours_since_extreme <= getattr(config, 'NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS', 12.0)
+    # v33d: allow impossible-NO even before peak if max_so_far physically can't
+    # reach the bucket in the remaining hours (peak max swing << gap).
+    # Tight gate: requires hours < 4h to resolution AND max_so_far check below.
+    allow_pre_peak_impossible = (
+        not peak_passed
+        and peak_not_too_old
+        and hours <= 4.0
+        and kind in ("categorical", "range")
+    )
+    if not peak_passed and not allow_pre_peak_impossible:
         _nr_note("peak_not_passed_yet")
         return None
-    if hours_since_extreme > getattr(config, 'NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS', 18.0):
+    if not peak_not_too_old:
         _nr_note("peak_too_long_ago")
         return None
 
@@ -533,16 +544,18 @@ def near_resolution_signal(market: "PolyMarket",
         # Heat threshold. max_so_far is monotonically non-decreasing through
         # the day → once it crossed threshold_c the "above" outcome is sealed.
         extreme_so_far = rt.max_so_far
-        if not rt.latest_declining:
-            _nr_note("trend_above_not_declining")
-            return None
         gap = getattr(config, 'NEAR_RES_TREND_IMPOSSIBLE_GAP_C', 1.0)
-        if extreme_so_far >= threshold_c:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
-            return ("BUY_YES", conf, "trend_locked_above_yes", empirical_extreme_hour)
+        # v33d: impossible-NO safe without declining gate (gap > 1°C hard to climb)
         if extreme_so_far < threshold_c - gap:
             conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
             return ("BUY_NO", conf, "trend_impossible_above_no", empirical_extreme_hour)
+        # For YES_locked we DO require declining (peak-passed safety).
+        if not rt.latest_declining:
+            _nr_note("trend_above_not_declining")
+            return None
+        if extreme_so_far >= threshold_c:
+            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            return ("BUY_YES", conf, "trend_locked_above_yes", empirical_extreme_hour)
         _nr_note("trend_above_ambiguous")
         return None
 
@@ -595,23 +608,28 @@ def near_resolution_signal(market: "PolyMarket",
 
     # HEAT-side logic — bucket locked if max_so_far in bucket AND declining.
     extreme_so_far = rt.max_so_far
+    gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
+
+    # v33d: Bucket IMPOSSIBLE_NO — max_so_far already ≥gap below bucket.
+    # This is physically safe BEFORE the peak too: even at peak + 1.5h buffer,
+    # a >1.0°C climb from max_so_far to low_c in <4h is climatology-impossible.
+    # So skip the declining gate for this branch.
+    if extreme_so_far < low_c - gap:
+        conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+        return ("BUY_NO", conf, "bucket_impossible_no", empirical_extreme_hour)
+
+    # For BUY_YES_locked and BUY_NO_exceeded we DO require declining=True,
+    # because peak-passed is the safety condition for acting on current extreme.
     if not rt.latest_declining:
-        # Peak may still be ahead — not in the "peak passed" state yet.
         _nr_note("heat_not_declining_yet")
         return None
 
-    gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
     # Bucket locked: max_so_far ALREADY in bucket → daily high almost certainly
     # in bucket (we'd need a new higher reading after the peak hour, which the
     # safety buffer + decline-window check protects against).
     if low_c <= extreme_so_far <= high_c:
         conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
         return ("BUY_YES", conf, "bucket_locked_yes", empirical_extreme_hour)
-    # Bucket impossible: max_so_far already BELOW bucket by ≥gap → even an
-    # unusual late-afternoon spike can't climb into the bucket.
-    if extreme_so_far < low_c - gap:
-        conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
-        return ("BUY_NO", conf, "bucket_impossible_no", empirical_extreme_hour)
     # v32 FIX: bucket ALREADY EXCEEDED from above — max_so_far is monotonically
     # non-decreasing through the day, so once it's past high_c the final daily
     # high can only be >= extreme_so_far > high_c. This is the single safest
