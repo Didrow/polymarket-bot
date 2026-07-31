@@ -362,7 +362,7 @@ NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.0
 # toward a wider window trades a small re-introduction of wraparound risk for
 # recovering real signal — the independent latest_declining/cold_passed check
 # already guards against acting on a stale/wrong peak.
-NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 12.0
+NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 18.0
 
 # For BUCKET_LOCKED_YES: how many last observed hourly temps must be
 # flat or declining (each ≤ previous) to confirm peak is behind us.
@@ -418,7 +418,7 @@ NEAR_RESOLUTION_MIN_SIZE_USD: float = 0.75
 # candidates, a single cycle often sees multiple near-res opportunities in
 # different timezones. 3/cycle keeps position-opening rate sane while not
 # missing the Asia morning + Europe afternoon + US evening sequence.
-NEAR_RESOLUTION_MAX_PER_CYCLE: int = 3
+NEAR_RESOLUTION_MAX_PER_CYCLE: int = 4
 
 # v33: 1->2 per city. Allows one categorical/bucket + one trend signal per
 # city per cycle (different condition_ids, same physical reality — not the
