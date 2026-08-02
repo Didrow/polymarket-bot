@@ -344,6 +344,27 @@ VALIDATION_MIN_EQUITY: float = 0.0
 # impossible-NO is safe for trend (above/below) kinds.
 NEAR_RESOLUTION_MAX_HOURS: float = 12.0
 
+# v36: PRE-RESOLUTION window — separate gate for markets that resolve in
+# 12-24h at the FIXED Polymarket 12:00 UTC resolution time. These markets
+# cannot use peak-passed timing (peak is still hours away) but ARE safe for
+# IMPOSSIBLE_NO when extreme_so_far falls ≥NEAR_RESOLUTION_PRE_MIN_GAP_C
+# below the bucket/threshold: even a strong peak swing cannot close such
+# a gap before 12:00 UTC. This unlocks the dominant fraction of
+# daily-temperature markets (most resolve in 18-30h range, all at 12 UTC).
+# Example: London market resolving Aug 3 12:00 UTC, current local hour
+# 16:00 BST on Aug 2 → hours_to_resolution=20h, but if max_so_far is
+# 23.0°C and bucket low edge is 27.0°C, a 4°C climb in 20h before 12 UTC
+# is climatology-impossible (typical diurnal swing 5-8°C takes 8-10h, but
+# remaining swing budget after 16:00 BST peak ~14:00 is essentially zero).
+NEAR_RESOLUTION_PRE_MAX_HOURS: float = 24.0
+
+# v36: Required gap (°C) below bucket/threshold for pre-resolution
+# IMPOSSIBLE_NO. Larger than post-peak gap (1.0°C) because we have NO
+# peak_passed safety net — the gap must be large enough to survive any
+# conceivable late-day climb. 2.5°C ≥ 99th percentile of 6h diurnal
+# delta-warming in WMO climatology for temperate latitudes.
+NEAR_RESOLUTION_PRE_MIN_GAP_C: float = 2.5
+
 # Minimum hours-to-resolution — too close to close, spread widens illiquidly.
 NEAR_RESOLUTION_MIN_HOURS: float = 0.5
 
@@ -362,7 +383,7 @@ NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.0
 # toward a wider window trades a small re-introduction of wraparound risk for
 # recovering real signal — the independent latest_declining/cold_passed check
 # already guards against acting on a stale/wrong peak.
-NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 18.0
+NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 12.0
 
 # For BUCKET_LOCKED_YES: how many last observed hourly temps must be
 # flat or declining (each ≤ previous) to confirm peak is behind us.

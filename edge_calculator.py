@@ -438,6 +438,93 @@ def _nr_note(reason: str) -> None:
     _NR_STATS[reason] = _NR_STATS.get(reason, 0) + 1
 
 
+def _near_resolution_pre_signal(market: "PolyMarket",
+                                hours: float,
+                                pre_max_h: float,
+                                low_c: float,
+                                high_c: float,
+                                is_low: bool,
+                                kind: str = "range",
+                                threshold_c: float = 0.0) -> Optional[Tuple[str, float, str, float]]:
+    """
+    v36: PRE-RESOLUTION branch for markets with hours_to_resolution in
+    (NEAR_RESOLUTION_MAX_HOURS, NEAR_RESOLUTION_PRE_MAX_HOURS].
+
+    Polymarket resolves ALL daily-temperature markets at 12:00 UTC regardless
+    of city (verified via gamma-api.polymarket.com endDate on London, Tokyo,
+    Seoul, Buenos Aires — all 2026-08-03T12:00:00Z). This is FIXED, not per-
+    city local noon. As a result, most markets at any scan time have:
+      • hours_to_resolution = 18-30h (resolved tomorrow at 12 UTC)
+      • local meteorological peak still in the future
+
+    These markets cannot satisfy the peak_passed gate inside near_resolution_signal,
+    but they ARE safe for IMPOSSIBLE_NO when the gap is large enough that no
+    conceivable diurnal climb can close it before 12 UTC. The required gap is
+    NEAR_RESOLUTION_PRE_MIN_GAP_C (2.5°C — vs 1.0°C post-peak), because we have
+    no peak_passed safety net; the gap itself must guarantee impossibility.
+
+    SAFETY INVARIANTS:
+      1. ONLY IMPOSSIBLE_NO is emitted (never BUY_YES). Locked-YES requires
+         peak_passed to confirm max_so_far is monotonically near-final.
+      2. Bucket-impossible (heat): max_so_far < low_c - PRE_MIN_GAP_C
+      3. Bucket-impossible (cold): min_so_far > high_c + PRE_MIN_GAP_C
+      4. Trend-impossible (above): max_so_far < threshold_c - PRE_MIN_GAP_C
+      5. Trend-impossible (below): min_so_far > threshold_c + PRE_MIN_GAP_C
+
+    Why this is safe: max_so_far in a day has a hard ceiling — the day's
+    climatological max. If we observe max_so_far=23.0°C at, say, 10:00 local
+    time and the bucket low edge is 26.0°C, we'd need a 3°C climb in the
+    remaining hours. Even on the hottest day of the year in temperate
+    latitudes, the climb rate past midday is <0.5°C/hour and slows to ~0
+    by evening. A 2.5°C+ gap is therefore physically infeasible to close
+    regardless of when in the day we observe it.
+    """
+    city = market.detected_city
+    if not city:
+        _nr_note("pre_no_city")
+        return None
+
+    rt = fetch_running_temperatures(city)
+    if rt is None or len(rt.hourly_temps) < 4:
+        _nr_note("pre_running_temps_unavailable")
+        return None
+
+    pre_gap = getattr(config, 'NEAR_RESOLUTION_PRE_MIN_GAP_C', 2.5)
+    conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+    # Slightly discounted confidence for pre-resolution path — we lack the
+    # peak_passed confirmation, so the model gets a 5pt haircut.
+    pre_conf = max(0.78, conf - 0.05)
+
+    cold_market = is_low or (kind == "below")
+
+    if kind == "above":
+        if rt.max_so_far < threshold_c - pre_gap:
+            return ("BUY_NO", pre_conf, "pre_trend_impossible_above_no", 0.0)
+        _nr_note("pre_trend_above_gap_too_small")
+        return None
+
+    if kind == "below":
+        if rt.min_so_far > threshold_c + pre_gap:
+            return ("BUY_NO", pre_conf, "pre_trend_impossible_below_no", 0.0)
+        _nr_note("pre_trend_below_gap_too_small")
+        return None
+
+    # categorical / range
+    if cold_market:
+        # Cold side — bucket impossible if min_so_far is ABOVE bucket by gap
+        # (warmer than bucket high edge → can't get cold enough to hit bucket).
+        if rt.min_so_far > high_c + pre_gap:
+            return ("BUY_NO", pre_conf, "pre_bucket_impossible_no_cold", 0.0)
+        _nr_note("pre_cold_bucket_gap_too_small")
+        return None
+
+    # Heat side — bucket impossible if max_so_far is BELOW bucket by gap
+    if rt.max_so_far < low_c - pre_gap:
+        return ("BUY_NO", pre_conf, "pre_bucket_impossible_no", 0.0)
+    _nr_note("pre_heat_bucket_gap_too_small")
+    return None
+
+
 def near_resolution_signal(market: "PolyMarket",
                            low_c: float,
                            high_c: float,
@@ -480,17 +567,23 @@ def near_resolution_signal(market: "PolyMarket",
 
     hours = market.hours_to_resolution
     max_h = getattr(config, 'NEAR_RESOLUTION_MAX_HOURS', 6.0)
+    pre_max_h = getattr(config, 'NEAR_RESOLUTION_PRE_MAX_HOURS', 24.0)
     min_h = getattr(config, 'NEAR_RESOLUTION_MIN_HOURS', 0.5)
-    if hours > max_h or hours < min_h:
+    if hours < min_h:
+        _nr_note("hours_too_close")
+        return None
+    # v36: PRE-RESOLUTION window (12-24h to 12:00 UTC resolution). These markets
+    # do NOT qualify for peak-passed timing logic but CAN fire IMPOSSIBLE_NO
+    # if extreme_so_far falls far enough below the bucket/threshold that no
+    # conceivable late-day climb can close the gap before 12 UTC. We branch
+    # early and never invoke the peak_passed gate below.
+    if hours > max_h and hours <= pre_max_h:
+        # Pre-resolution path: skip peak_passed entirely. Dispatch to the
+        # IMPOSSIBLE_NO logic for the relevant kind with tightened gap.
+        return _near_resolution_pre_signal(market, hours, pre_max_h, low_c, high_c,
+                                           is_low, kind, threshold_c)
+    if hours > pre_max_h:
         _nr_note("hours_out_of_range")
-        # v34: visibility — markets in 8-20h band ARE candidates if MAX_HOURS widens
-        # further, but for now show how many we're rejecting (sampling 1/cycle).
-        import logging as _logging
-        if 8.0 < hours < 20.0 and market.detected_city:
-            _logging.getLogger(__name__).debug(
-                f"  [v34 wide-window] rejected {market.detected_city} {market.kind} "
-                f"h={hours:.1f} question={market.question[:60]!r}"
-            )
         return None
 
     city = market.detected_city
