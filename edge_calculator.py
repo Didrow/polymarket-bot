@@ -445,45 +445,49 @@ def _near_resolution_pre_signal(market: "PolyMarket",
                                 high_c: float,
                                 is_low: bool,
                                 kind: str = "range",
-                                threshold_c: float = 0.0) -> Optional[Tuple[str, float, str, float]]:
+                                threshold_c: float = 0.0,
+                                forecast: Optional[WeatherForecast] = None) -> Optional[Tuple[str, float, str, float]]:
     """
     v36: PRE-RESOLUTION branch for markets with hours_to_resolution in
     (NEAR_RESOLUTION_MAX_HOURS, NEAR_RESOLUTION_PRE_MAX_HOURS].
 
-    Polymarket resolves ALL daily-temperature markets at 12:00 UTC regardless
-    of city (verified via gamma-api.polymarket.com endDate on London, Tokyo,
-    Seoul, Buenos Aires — all 2026-08-03T12:00:00Z). This is FIXED, not per-
-    city local noon. As a result, most markets at any scan time have:
-      • hours_to_resolution = 18-30h (resolved tomorrow at 12 UTC)
-      • local meteorological peak still in the future
+    v36c: ARCHITECTURAL FIX. Pre-resolution markets resolve at the NEXT 12:00
+    UTC boundary (tomorrow), so the "physical reference" for impossibility is
+    the FORECAST for that target date — NOT today's running temperatures.
+    Using rt.max_so_far (today's morning temp ~29°C) to assess tomorrow's
+    Dallas market (bucket 39.4-40.0°C, forecast 40.2°C) is a category error:
+    it falsely labels ~250 markets as "impossible_NO" or "gap_too_small"
+    depending on which way the inequality flips.
 
-    These markets cannot satisfy the peak_passed gate inside near_resolution_signal,
-    but they ARE safe for IMPOSSIBLE_NO when the gap is large enough that no
-    conceivable diurnal climb can close it before 12 UTC. The required gap is
-    NEAR_RESOLUTION_PRE_MIN_GAP_C (2.5°C — vs 1.0°C post-peak), because we have
-    no peak_passed safety net; the gap itself must guarantee impossibility.
+    v36c strategy:
+      • For hours > 12.0 (pre-res, tomorrow-resolving): use forecast.temp_high_c
+        (heat side) / forecast.temp_low_c (cold side) as the physical reference.
+      Fallback to rt.max_so_far / rt.min_so_far when forecast is None.
+      • For hours <= 12.0 but > NEAR_RESOLUTION_MAX_HOURS (same-day twilight):
+        keep rt.max_so_far (today's extremes ARE the day's extremes).
 
-    SAFETY INVARIANTS:
+    SAFETY INVARIANTS (unchanged):
       1. ONLY IMPOSSIBLE_NO is emitted (never BUY_YES). Locked-YES requires
          peak_passed to confirm max_so_far is monotonically near-final.
-      2. Bucket-impossible (heat): max_so_far < low_c - PRE_MIN_GAP_C
-      3. Bucket-impossible (cold): min_so_far > high_c + PRE_MIN_GAP_C
-      4. Trend-impossible (above): max_so_far < threshold_c - PRE_MIN_GAP_C
-      5. Trend-impossible (below): min_so_far > threshold_c + PRE_MIN_GAP_C
+      2. Bucket-impossible (heat): ref < low_c - PRE_MIN_GAP_C
+      3. Bucket-impossible (cold): ref > high_c + PRE_MIN_GAP_C
+      4. Trend-impossible (above): ref < threshold_c - PRE_MIN_GAP_C
+      5. Trend-impossible (below): ref > threshold_c + PRE_MIN_GAP_C
 
-    Why this is safe: max_so_far in a day has a hard ceiling — the day's
-    climatological max. If we observe max_so_far=23.0°C at, say, 10:00 local
-    time and the bucket low edge is 26.0°C, we'd need a 3°C climb in the
-    remaining hours. Even on the hottest day of the year in temperate
-    latitudes, the climb rate past midday is <0.5°C/hour and slows to ~0
-    by evening. A 2.5°C+ gap is therefore physically infeasible to close
-    regardless of when in the day we observe it.
+    Why forecast is safe: the forecast IS the meteorological best estimate of
+    tomorrow's high/low. If forecast says tomorrow's high tops out at 9.6°C
+    (Wellington) and the bucket asks "high >= 14°C", no model variance closes
+    that gap — it's physically impossible per the NWP consensus. Conversely,
+    if forecast=40.2°C and bucket is 39.4-40.0°C, we DO NOT emit impossible_NO
+    (the bucket will very likely be hit, possibly exceeded). The gap threshold
+    NEAR_RESOLUTION_PRE_MIN_GAP_C is the safety margin for forecast error.
     """
     city = market.detected_city
     if not city:
         _nr_note("pre_no_city")
         return None
 
+    # Running temps still useful as fallback and to confirm today's state.
     rt = fetch_running_temperatures(city)
     if rt is None or len(rt.hourly_temps) < 4:
         _nr_note("pre_running_temps_unavailable")
@@ -502,31 +506,46 @@ def _near_resolution_pre_signal(market: "PolyMarket",
     # (lack the peak_passed confirmation AND face a full diurnal cycle).
     pre_conf = max(0.75, conf - 0.10) if hours > 24.0 else max(0.78, conf - 0.05)
 
+    # v36c: choose physical reference for impossible-NO gap.
+    # Pre-resolution (>12h to next 12:00 UTC) → target-date forecast.
+    # Same-day twilight (<=12h, peak not yet passed for some cities) → today's
+    # running extremes (running temps ARE the day's monotonically-near-final
+    # extremes once the peak hour has passed locally).
+    use_forecast_ref = (
+        forecast is not None
+        and hours > getattr(config, 'NEAR_RESOLUTION_MAX_HOURS', 6.0)
+        and hours > 12.0
+    )
+    if use_forecast_ref:
+        heat_ref = forecast.temp_high_c  # forecasted tomorrow's high
+        cold_ref = forecast.temp_low_c   # forecasted tomorrow's low
+    else:
+        heat_ref = rt.max_so_far
+        cold_ref = rt.min_so_far
+
     cold_market = is_low or (kind == "below")
 
     if kind == "above":
-        if rt.max_so_far < threshold_c - pre_gap:
+        if heat_ref < threshold_c - pre_gap:
             return ("BUY_NO", pre_conf, "pre_trend_impossible_above_no", 0.0)
         _nr_note("pre_trend_above_gap_too_small")
         return None
 
     if kind == "below":
-        if rt.min_so_far > threshold_c + pre_gap:
+        if cold_ref > threshold_c + pre_gap:
             return ("BUY_NO", pre_conf, "pre_trend_impossible_below_no", 0.0)
         _nr_note("pre_trend_below_gap_too_small")
         return None
 
     # categorical / range
     if cold_market:
-        # Cold side — bucket impossible if min_so_far is ABOVE bucket by gap
-        # (warmer than bucket high edge → can't get cold enough to hit bucket).
-        if rt.min_so_far > high_c + pre_gap:
+        if cold_ref > high_c + pre_gap:
             return ("BUY_NO", pre_conf, "pre_bucket_impossible_no_cold", 0.0)
         _nr_note("pre_cold_bucket_gap_too_small")
         return None
 
-    # Heat side — bucket impossible if max_so_far is BELOW bucket by gap
-    if rt.max_so_far < low_c - pre_gap:
+    # Heat side — bucket impossible if heat_ref is BELOW bucket by gap
+    if heat_ref < low_c - pre_gap:
         return ("BUY_NO", pre_conf, "pre_bucket_impossible_no", 0.0)
     _nr_note("pre_heat_bucket_gap_too_small")
     return None
@@ -537,7 +556,8 @@ def near_resolution_signal(market: "PolyMarket",
                            high_c: float,
                            is_low: bool,
                            kind: str = "range",
-                           threshold_c: float = 0.0) -> Optional[Tuple[str, float, str, float]]:
+                           threshold_c: float = 0.0,
+                           forecast: Optional[WeatherForecast] = None) -> Optional[Tuple[str, float, str, float]]:
     """
     v32: Decide if the market is in a near-resolution execution-edge state.
     v33: extended to trend markets (`kind in ("above","below")`) — threshold pass.
@@ -584,11 +604,14 @@ def near_resolution_signal(market: "PolyMarket",
     # if extreme_so_far falls far enough below the bucket/threshold that no
     # conceivable late-day climb can close the gap before 12 UTC. We branch
     # early and never invoke the peak_passed gate below.
+    # v36c: forecast is passed to pre_signal so it can use forecast-based
+    # physical reference for tomorrow-resolving markets.
     if hours > max_h and hours <= pre_max_h:
         # Pre-resolution path: skip peak_passed entirely. Dispatch to the
         # IMPOSSIBLE_NO logic for the relevant kind with tightened gap.
         return _near_resolution_pre_signal(market, hours, pre_max_h, low_c, high_c,
-                                           is_low, kind, threshold_c)
+                                           is_low, kind, threshold_c,
+                                           forecast=forecast)
     if hours > pre_max_h:
         _nr_note("hours_out_of_range")
         return None
@@ -849,7 +872,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if kind in ("categorical", "range", "above", "below"):
         # threshold_c for trend; for bucket use low_c/high_c (sentinel).
         nr_threshold = threshold_c if kind in ("above", "below") else 0.0
-        nr = near_resolution_signal(market, low_c, high_c, is_low, kind=kind, threshold_c=nr_threshold)
+        nr = near_resolution_signal(market, low_c, high_c, is_low, kind=kind, threshold_c=nr_threshold, forecast=forecast)
         if nr is not None:
             nrs_dir, nrs_conf, nrs_reason_key, nrs_peak_hr = nr
             mkt_prob = market.best_ask_yes
