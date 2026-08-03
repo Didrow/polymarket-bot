@@ -490,10 +490,17 @@ def _near_resolution_pre_signal(market: "PolyMarket",
         return None
 
     pre_gap = getattr(config, 'NEAR_RESOLUTION_PRE_MIN_GAP_C', 2.5)
+    # v36b: For 24-36h horizon (full diurnal cycle still ahead), demand a
+    # bigger physical impossibility gap. A 2.5°C gap is bridgeable in 24h;
+    # 3.5°C is the safer threshold where even a strong late-day climb cannot
+    # close it before 12:00 UTC resolution.
+    pre_gap_long = getattr(config, 'NEAR_RESOLUTION_PRE_MIN_GAP_C_LONG', 3.5)
+    if hours > 24.0:
+        pre_gap = pre_gap_long
     conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
-    # Slightly discounted confidence for pre-resolution path — we lack the
-    # peak_passed confirmation, so the model gets a 5pt haircut.
-    pre_conf = max(0.78, conf - 0.05)
+    # v36b: 5pt haircut for pre-resolution path, 10pt for >24h horizon
+    # (lack the peak_passed confirmation AND face a full diurnal cycle).
+    pre_conf = max(0.75, conf - 0.10) if hours > 24.0 else max(0.78, conf - 0.05)
 
     cold_market = is_low or (kind == "below")
 

@@ -308,7 +308,7 @@ CITY_WHITELIST: List[str] = [
     "Moscow",
 ]
 
-MAX_PREFETCH_CITIES: int = 24  # v33: sync з CITY_WHITELIST
+MAX_PREFETCH_CITIES: int = 44  # v36b: 24→44 — prefetch all detected cities
 
 # ── DRY-RUN VALIDATION GATES ───────────────────────────────
 VALIDATION_REQUIRED_BEFORE_LIVE: bool = True
@@ -356,7 +356,7 @@ NEAR_RESOLUTION_MAX_HOURS: float = 12.0
 # 23.0°C and bucket low edge is 27.0°C, a 4°C climb in 20h before 12 UTC
 # is climatology-impossible (typical diurnal swing 5-8°C takes 8-10h, but
 # remaining swing budget after 16:00 BST peak ~14:00 is essentially zero).
-NEAR_RESOLUTION_PRE_MAX_HOURS: float = 24.0
+NEAR_RESOLUTION_PRE_MAX_HOURS: float = 36.0  # v36b: 24→36 capture tomorrow-noon markets
 
 # v36: Required gap (°C) below bucket/threshold for pre-resolution
 # IMPOSSIBLE_NO. Larger than post-peak gap (1.0°C) because we have NO
@@ -364,6 +364,11 @@ NEAR_RESOLUTION_PRE_MAX_HOURS: float = 24.0
 # conceivable late-day climb. 2.5°C ≥ 99th percentile of 6h diurnal
 # delta-warming in WMO climatology for temperate latitudes.
 NEAR_RESOLUTION_PRE_MIN_GAP_C: float = 2.5
+# v36b: tighter gap for 24-36h horizon (pre-pre path) — longer horizon demands
+# bigger physical impossibility buffer. Markets 24-36h from resolution still
+# have a full diurnal cycle of warming ahead; a 2.5°C gap is bridgeable.
+# 3.5°C is the safer threshold where even a strong late-day climb cannot close.
+NEAR_RESOLUTION_PRE_MIN_GAP_C_LONG: float = 3.5
 
 # Minimum hours-to-resolution — too close to close, spread widens illiquidly.
 NEAR_RESOLUTION_MIN_HOURS: float = 0.5
@@ -383,7 +388,7 @@ NEAR_RESOLUTION_PEAK_BUFFER_HOURS: float = 1.0
 # toward a wider window trades a small re-introduction of wraparound risk for
 # recovering real signal — the independent latest_declining/cold_passed check
 # already guards against acting on a stale/wrong peak.
-NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 12.0
+NEAR_RESOLUTION_PEAK_MAX_AGE_HOURS: float = 18.0  # v36b: 12→18 keep US/EU peaks alive longer (latest_declining still guards)
 
 # For BUCKET_LOCKED_YES: how many last observed hourly temps must be
 # flat or declining (each ≤ previous) to confirm peak is behind us.
@@ -405,7 +410,7 @@ NEAR_RES_CONFIDENCE_NO: float = 0.85
 # Price bands for near-resolution trades (independent of SNIPER_GRID_*):
 #   YES bucket-locked: market is pricing bucket high (0.50-0.95) — we ride it.
 #   NO  bucket-impossible: market still hopes for the bucket (0.05-0.20).
-NEAR_RES_YES_MIN_ASK: float = 0.50
+NEAR_RES_YES_MIN_ASK: float = 0.40  # v36b: 0.50→0.40 allow high-conf YES at mid price
 NEAR_RES_YES_MAX_ASK: float = 0.95
 NEAR_RES_NO_MIN_ASK: float = 0.03
 NEAR_RES_NO_MAX_ASK: float = 0.20
