@@ -29,6 +29,20 @@ CACHE_TTL = 1800  # 30 хвилин (прогноз на день не змін�
 _last_request_time: float = 0.0
 MIN_REQUEST_INTERVAL: float = 0.6  # 600ms між запитами
 
+# v38: Per-source timeouts для швидкого fallback при таймауті API.
+# Старі значення (timeout=10, retries=3, backoff=2) давали до 36с на місто,
+# якщо Open-Meteo ансамбль зависав (cycle #20 04.08: 29-31с/city).
+# Нові значення: ансамбль падає до ~8с/city, NOAA ~14с, NASA_POWER ~30с.
+ENSEMBLE_TIMEOUT: int = 4   # ансамбль — найчастіше 429/timeout; швидкий fallback на NOAA
+ENSEMBLE_RETRIES: int = 2   # 2 спроби замість 3
+ENSEMBLE_BACKOFF: int = 1   # 1с backoff (замість 2с) — не чекаємо довго
+NOAA_TIMEOUT: int = 6       # NOAA api.weather.gov зазвичай швидкий, але при таймауті швидко фолбекаєм
+NOAA_RETRIES: int = 2
+METAR_TIMEOUT: int = 6      # METAR лише для підтвердження — при таймауті пропускаємо (без conf-сигналу)
+METAR_RETRIES: int = 2
+NASA_TIMEOUT: int = 8       # NASA_POWER — fallback при даунтаймі інших джерел; також бере участь у near-res pre-window (12-36h) як мала вага в блендингу (src=Open-Meteo_ENSEMBLE+NASA_POWER)
+NASA_RETRIES: int = 2
+
 
 def _cache_set(key: str, val):
     _cache[key] = (time.time(), val)
@@ -503,7 +517,9 @@ def fetch_open_meteo_ensemble(city: str, hours_to_resolution: float = 24.0, targ
                 "timezone": "auto",
                 "forecast_days": 5,
             },
-            timeout=10
+            timeout=ENSEMBLE_TIMEOUT,
+            retries=ENSEMBLE_RETRIES,
+            backoff=ENSEMBLE_BACKOFF,
         )
         if not r:
             return None
@@ -577,7 +593,8 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0, target_dat
     try:
         r = _request_with_retry(
             f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}",
-            timeout=10,
+            timeout=NOAA_TIMEOUT,
+            retries=NOAA_RETRIES,
             headers={"User-Agent": "PolymarketWeatherBot/GridEdition"}
         )
         if not r:
@@ -587,7 +604,8 @@ def fetch_noaa_forecast(city: str, hours_to_resolution: float = 24.0, target_dat
 
         r2 = _request_with_retry(
             forecast_url,
-            timeout=10,
+            timeout=NOAA_TIMEOUT,
+            retries=NOAA_RETRIES,
             headers={"User-Agent": "PolymarketWeatherBot/GridEdition"}
         )
         if not r2:
@@ -673,7 +691,8 @@ def fetch_nasa_power(city: str, hours_to_resolution: float = 24.0) -> Optional[W
                 "end":        end_dt.strftime("%Y%m%d"),
                 "format":     "JSON",
             },
-            timeout=15
+            timeout=NASA_TIMEOUT,
+            retries=NASA_RETRIES,
         )
         r.raise_for_status()
         data = r.json()["properties"]["parameter"]
@@ -799,7 +818,8 @@ def fetch_metar(city: str) -> Optional[WeatherForecast]:
         r = _request_with_retry(
             "https://aviationweather.gov/api/data/metar",
             params={"ids": icao, "format": "json", "hours": 1},
-            timeout=8,
+            timeout=METAR_TIMEOUT,
+            retries=METAR_RETRIES,
             headers={"User-Agent": "PolymarketWeatherBot/ColdMath"}
         )
         r.raise_for_status()
@@ -905,7 +925,7 @@ def _fetch_running_temperatures(city: str, return_minmax_only: bool = False):
 
     lat, lon = coords
     try:
-        r = requests.get(
+        r = _request_with_retry(
             "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": lat,
@@ -915,9 +935,12 @@ def _fetch_running_temperatures(city: str, return_minmax_only: bool = False):
                 "forecast_hours": 0,
                 "timezone": "auto",
             },
-            timeout=10
+            timeout=5,
+            retries=2,
+            backoff=1,
         )
-        r.raise_for_status()
+        if r is None:
+            return None
         data = r.json()
         hourly = data.get("hourly", {})
         times = hourly.get("time", [])
