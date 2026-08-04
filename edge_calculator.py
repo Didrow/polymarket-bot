@@ -782,16 +782,20 @@ def near_resolution_signal(market: "PolyMarket",
 
 def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     if market.market_type != "temperature":
+        _nr_note("silent_not_temperature")
         return None
 
     city = market.detected_city
     if not city or (hasattr(config, 'CITY_WHITELIST') and city not in config.CITY_WHITELIST):
+        _nr_note("silent_no_city_or_not_in_whitelist")
         return None
 
     if market.hours_to_resolution < config.MIN_RESOLUTION_HOURS or market.hours_to_resolution > config.MAX_RESOLUTION_HOURS:
+        _nr_note("silent_hours_out_of_range")
         return None
 
     if market.volume_usd < config.MIN_MARKET_VOLUME_USD:
+        _nr_note("silent_low_volume")
         return None
 
     kind = market.kind or _detect_market_kind(market.question)
@@ -802,11 +806,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
 
     allowed = getattr(config, 'KINDS_ONLY', ['categorical', 'range', 'above', 'below'])
     if kind not in allowed:
+        _nr_note("silent_kind_not_allowed")
         return None
 
     t_date = get_target_date(market.question, market.end_date, city)
     forecast = get_best_forecast(city, hours_to_resolution=market.hours_to_resolution, target_date=t_date)
     if not forecast:
+        _nr_note("silent_no_forecast")
         return None
 
     is_low = 'lowest' in market.question.lower()
@@ -820,6 +826,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                 rl = market.range_low
                 rh = market.range_high
                 if rl is None or rh is None:
+                    _nr_note("silent_no_range")
                     return None
                 if unit == 'F':
                     range_c = (_f_to_c(rl), _f_to_c(rh))
@@ -830,6 +837,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             # uncertainty is essentially a coin flip on station noise.
             min_width = getattr(config, 'RANGE_MIN_BUCKET_WIDTH_C', 3.0)
             if (high_c - low_c) < min_width:
+                _nr_note("silent_range_too_narrow")
                 return None
             threshold_c = (low_c + high_c) / 2.0
         else:
@@ -837,6 +845,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             if threshold_value is None:
                 threshold_value = market.threshold_value
             if threshold_value is None:
+                _nr_note("silent_no_threshold")
                 return None
             if punit == 'F' or (punit == '' and unit == 'F'):
                 threshold_c = _f_to_c(threshold_value)
@@ -853,6 +862,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         if threshold_value is None:
             threshold_value = market.threshold_value
         if threshold_value is None:
+            _nr_note("silent_no_threshold_trend")
             return None
         if punit == 'F' or (punit == '' and unit == 'F'):
             threshold_c = _f_to_c(threshold_value)
@@ -879,6 +889,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             if mkt_prob is None or mkt_prob < 0.01:
                 mkt_prob = getattr(market, "midpoint_yes", 0.0)
             if mkt_prob <= 0.001 or mkt_prob >= 0.999:
+                _nr_note("silent_price_extreme")
                 return None
 
             # v33: trend markets use their own price bands (slightly wider NO).
@@ -897,11 +908,13 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
                     min_ask = getattr(config, 'NEAR_RES_NO_MIN_ASK', 0.03)
                     max_ask = getattr(config, 'NEAR_RES_NO_MAX_ASK', 0.20)
             if not (min_ask <= mkt_prob <= max_ask):
+                _nr_note("silent_price_band")
                 return None
 
-            eff_edge_nr = (nrs_conf - mkt_prob) if nrs_dir == "BUY_YES" else (mkt_prob - nrs_conf)
+            eff_edge_nr = (nrs_conf - mkt_prob) if nrs_dir == "BUY_YES" else (nrs_conf + mkt_prob - 1.0)
             eff_edge_nr = min(max(eff_edge_nr, 0.0), getattr(config, 'MAX_EDGE_CAP', 0.45))
             if eff_edge_nr <= 0.0:
+                _nr_note("silent_zero_edge")
                 return None
 
             max_sz = getattr(config, 'NEAR_RESOLUTION_MAX_SIZE_USD', 2.00)
@@ -936,12 +949,14 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # if we reach here, either it found nothing or kind isn't categorical/range.
     # When disabled, don't fall through into the disproven Gaussian/sigma path.
     if not getattr(config, 'FORECAST_EDGE_ENABLED', True):
+        _nr_note("silent_forecast_disabled")
         return None
 
     # v29: hard floor on recalibrated our_prob — blocks the entire 0-10% bucket
     # (calibration CSV: avg_pred 6.6% → actual 2.2%) from ever entering positions.
     iso_floor = getattr(config, 'ISOTONIC_MIN_PROB', 0.0)
     if iso_floor > 0.0 and our_prob < iso_floor:
+        _nr_note("silent_iso_floor")
         return None
 
     fc_temp = forecast.temp_low_c if is_low else forecast.temp_high_c
@@ -951,14 +966,17 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     max_dist_c = getattr(config, 'SNIPER_GRID_DISTANCE_C', 1.5)
     if kind in ("categorical", "range"):
         if distance_c > max_dist_c:
+            _nr_note("silent_distance_gate")
             return None
     else:
         trend_max_dist = getattr(config, 'TREND_MAX_DIST_C', 2.0)
         if distance_c > trend_max_dist:
+            _nr_note("silent_trend_distance")
             return None
         max_dist_sigma = getattr(config, 'MAX_DISTANCE_SIGMA', 2.5)
         sigma_edge = forecast._get_sigma(market.hours_to_resolution)
         if distance_c > max_dist_sigma * sigma_edge and our_prob > 0.50:
+            _nr_note("silent_sigma_distance")
             return None
 
     # v29: WING_BAN — eliminate any BUY_YES where forecast is not inside the
@@ -976,15 +994,18 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
     # ── QUALITY GATES (distance-aware, not blanket ban) ──
     max_tail_prob = getattr(config, 'MAX_TAIL_PROB', 0.08)
     if kind in ("categorical", "range") and our_prob < max_tail_prob:
+        _nr_note("silent_tail_prob")
         return None
 
     max_tail_dist = getattr(config, 'MAX_TAIL_DIST_C', 1.20)
     max_tail_combined = getattr(config, 'MAX_TAIL_COMBINED_PROB', 0.12)
     if distance_c > max_tail_dist and our_prob < max_tail_combined:
+        _nr_note("silent_tail_combined")
         return None
 
     min_prob_dist = _min_prob_for_distance(distance_c)
     if kind in ("categorical", "range") and our_prob < min_prob_dist:
+        _nr_note("silent_min_prob_dist")
         return None
 
     # Market price
@@ -994,6 +1015,7 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         if 0.01 <= midpoint <= 0.99:
             market_prob = midpoint
         else:
+            _nr_note("silent_no_market_price")
             return None
 
     if market_prob <= 0.001 or market_prob >= 0.999:

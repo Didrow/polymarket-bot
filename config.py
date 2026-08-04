@@ -361,14 +361,19 @@ NEAR_RESOLUTION_PRE_MAX_HOURS: float = 36.0  # v36b: 24→36 capture tomorrow-no
 # v36: Required gap (°C) below bucket/threshold for pre-resolution
 # IMPOSSIBLE_NO. Larger than post-peak gap (1.0°C) because we have NO
 # peak_passed safety net — the gap must be large enough to survive any
-# conceivable late-day climb. 2.5°C ≥ 99th percentile of 6h diurnal
-# delta-warming in WMO climatology for temperate latitudes.
-NEAR_RESOLUTION_PRE_MIN_GAP_C: float = 2.5
-# v36b: tighter gap for 24-36h horizon (pre-pre path) — longer horizon demands
-# bigger physical impossibility buffer. Markets 24-36h from resolution still
-# have a full diurnal cycle of warming ahead; a 2.5°C gap is bridgeable.
-# 3.5°C is the safer threshold where even a strong late-day climb cannot close.
-NEAR_RESOLUTION_PRE_MIN_GAP_C_LONG: float = 3.5
+# conceivable late-day climb.
+# v37: 2.5°C → 1.0°C. Reasoning: pre_heat_bucket_gap_too_small=233 was
+# dominant skip reason (40 empty cycles). Polymarket bucket ladder is ~1°C
+# steps around consensus forecast, so 2.5°C gap is unreachable for >75% of
+# markets. 1.0°C gap is still conservative: a 24h forecast must miss a bucket
+# edge by ≥1.0°C — typical NWP 24h forecast error is 1.5-2.5°C, but we add
+# this AS the safety buffer, not as the forecast-error buffer.
+NEAR_RESOLUTION_PRE_MIN_GAP_C: float = 1.0
+# v37: 3.5°C → 2.0°C. Same reasoning for the 24-36h horizon path. 2.0°C gap
+# captures markets with even partial signal while still demanding a real
+# physical impossibility. Trend (above/below) markets stay unchanged at the
+# post-peak TREND_IMPOSSIBLE_GAP_C = 1.0°C (already on next line).
+NEAR_RESOLUTION_PRE_MIN_GAP_C_LONG: float = 2.0
 
 # Minimum hours-to-resolution — too close to close, spread widens illiquidly.
 NEAR_RESOLUTION_MIN_HOURS: float = 0.5
@@ -400,7 +405,11 @@ NEAR_RESOLUTION_DECLINE_TOLERANCE_C: float = 0.5
 
 # For BUCKET_IMPOSSIBLE_NO: minimum distance (°C) max_so_far must be BELOW
 # the bucket low edge for the bucket to be "impossible".
-NEAR_RESOLUTION_IMPOSSIBLE_GAP_C: float = 1.0
+# v37: 1.0°C → 0.7°C. Post-peak path has peak_passed safety net (declining
+# guard + buffer hours), so a smaller gap is acceptable. 0.7°C > typical
+# bucket half-width (0.5°C) ensures impossible-NO doesn't overlap with
+# borderline cases where forecast uncertainty could still tip it.
+NEAR_RESOLUTION_IMPOSSIBLE_GAP_C: float = 0.7
 
 # Confidence assigned to near-resolution signals (used in size calc).
 # Recommendation warns: late storms break the assumption, so hard cap below.
@@ -409,11 +418,16 @@ NEAR_RES_CONFIDENCE_NO: float = 0.85
 
 # Price bands for near-resolution trades (independent of SNIPER_GRID_*):
 #   YES bucket-locked: market is pricing bucket high (0.50-0.95) — we ride it.
-#   NO  bucket-impossible: market still hopes for the bucket (0.05-0.20).
+#   NO  bucket-impossible: market still hopes for the bucket (0.10-0.20).
+# v37 CRITICAL: price band is on the YES ask. For BUY_NO we pay (1-ask_yes)
+# for the NO token. Math: EV = conf + ask_yes - 1. At conf=0.85 we need
+# ask_yes > 0.15 for +EV. So NO_MIN_ASK must NOT go below 0.10 (the old 0.03
+# band allowed sub-penny YES where buying NO = paying 0.97-0.99 for a token
+# worth 0.85 → guaranteed loss). 0.10 floor keeps us to +EV territory.
 NEAR_RES_YES_MIN_ASK: float = 0.40  # v36b: 0.50→0.40 allow high-conf YES at mid price
 NEAR_RES_YES_MAX_ASK: float = 0.95
-NEAR_RES_NO_MIN_ASK: float = 0.03
-NEAR_RES_NO_MAX_ASK: float = 0.20
+NEAR_RES_NO_MIN_ASK: float = 0.10  # v37: 0.03→0.10 (YES ask floor for +EV NO buy)
+NEAR_RES_NO_MAX_ASK: float = 0.25
 
 # v33 TREND near-resolution price bands (above/below threshold markets).
 # The two threshold-side scenarios:
@@ -431,9 +445,9 @@ NEAR_RES_TREND_NO_MAX_ASK: float = 0.30
 
 # v33 For trend-impossible: how far below threshold must max_so_far fall
 # (after peak) for a NO to be confident. Mirror of NEAR_RESOLUTION_IMPOSSIBLE_GAP_C.
-# Default 1.0°C — slightly more conservative than bucket (0.5°C half-width)
-# because threshold is a single point, not a range.
-NEAR_RES_TREND_IMPOSSIBLE_GAP_C: float = 1.0
+# v37: 1.0°C → 0.7°C — same reasoning as bucket gap. Post-peak guard makes
+# 0.7°C safe (declining trend + buffer confirms max is final).
+NEAR_RES_TREND_IMPOSSIBLE_GAP_C: float = 0.7
 
 # Position size hard cap — independent of Kelly.
 # Recommendation: DON'T use 100% Kelly; rare late storms can reverse.
