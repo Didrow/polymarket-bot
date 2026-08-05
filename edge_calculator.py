@@ -438,6 +438,25 @@ def _nr_note(reason: str) -> None:
     _NR_STATS[reason] = _NR_STATS.get(reason, 0) + 1
 
 
+def _dynamic_confidence(gap_c: float) -> float:
+    """
+    v39: Dynamic confidence scaling.
+    Instead of flat 0.85/0.92, scale confidence by the physical margin between
+    extreme_so_far and the bucket/threshold. A wide gap (>=3C) gives high
+    confidence; a tight gap (<=0C) gives only the base.
+    gap_c: absolute physical gap in C between the current extreme and the
+           nearest boundary of the bucket/threshold (always >=0).
+    """
+    base = getattr(config, 'NEAR_RES_CONF_BASE', 0.70)
+    bonus = getattr(config, 'NEAR_RES_CONF_BONUS', 0.20)
+    ref = getattr(config, 'NEAR_RES_CONF_MARGIN_REF_C', 3.0)
+    floor = getattr(config, 'NEAR_RES_CONF_FLOOR', 0.70)
+    cap = getattr(config, 'NEAR_RES_CONF_CAP', 0.95)
+    margin_f = min(1.0, max(0.0, gap_c) / max(ref, 0.01))
+    conf = base + bonus * margin_f
+    return max(floor, min(cap, conf))
+
+
 def _near_resolution_pre_signal(market: "PolyMarket",
                                 hours: float,
                                 pre_max_h: float,
@@ -501,10 +520,6 @@ def _near_resolution_pre_signal(market: "PolyMarket",
     pre_gap_long = getattr(config, 'NEAR_RESOLUTION_PRE_MIN_GAP_C_LONG', 3.5)
     if hours > 24.0:
         pre_gap = pre_gap_long
-    conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
-    # v36b: 5pt haircut for pre-resolution path, 10pt for >24h horizon
-    # (lack the peak_passed confirmation AND face a full diurnal cycle).
-    pre_conf = max(0.75, conf - 0.10) if hours > 24.0 else max(0.78, conf - 0.05)
 
     # v36c: choose physical reference for impossible-NO gap.
     # Pre-resolution (>12h to next 12:00 UTC) → target-date forecast.
@@ -527,26 +542,43 @@ def _near_resolution_pre_signal(market: "PolyMarket",
 
     if kind == "above":
         if heat_ref < threshold_c - pre_gap:
-            return ("BUY_NO", pre_conf, "pre_trend_impossible_above_no", 0.0)
+            # v39: dynamic confidence — margin = how far below threshold.
+            margin_c = threshold_c - heat_ref
+            conf = _dynamic_confidence(margin_c)
+            # v36b: 5pt haircut for pre-resolution, 10pt for >24h (no peak_passed).
+            conf = max(0.70, conf - (0.10 if hours > 24.0 else 0.05))
+            return ("BUY_NO", conf, "pre_trend_impossible_above_no", 0.0)
         _nr_note("pre_trend_above_gap_too_small")
         return None
 
     if kind == "below":
         if cold_ref > threshold_c + pre_gap:
-            return ("BUY_NO", pre_conf, "pre_trend_impossible_below_no", 0.0)
+            # v39: dynamic confidence — margin = how far above threshold.
+            margin_c = cold_ref - threshold_c
+            conf = _dynamic_confidence(margin_c)
+            conf = max(0.70, conf - (0.10 if hours > 24.0 else 0.05))
+            return ("BUY_NO", conf, "pre_trend_impossible_below_no", 0.0)
         _nr_note("pre_trend_below_gap_too_small")
         return None
 
     # categorical / range
     if cold_market:
         if cold_ref > high_c + pre_gap:
-            return ("BUY_NO", pre_conf, "pre_bucket_impossible_no_cold", 0.0)
+            # v39: dynamic confidence — margin = how far above bucket high.
+            margin_c = cold_ref - high_c
+            conf = _dynamic_confidence(margin_c)
+            conf = max(0.70, conf - (0.10 if hours > 24.0 else 0.05))
+            return ("BUY_NO", conf, "pre_bucket_impossible_no_cold", 0.0)
         _nr_note("pre_cold_bucket_gap_too_small")
         return None
 
     # Heat side — bucket impossible if heat_ref is BELOW bucket by gap
     if heat_ref < low_c - pre_gap:
-        return ("BUY_NO", pre_conf, "pre_bucket_impossible_no", 0.0)
+        # v39: dynamic confidence — margin = how far below bucket low.
+        margin_c = low_c - heat_ref
+        conf = _dynamic_confidence(margin_c)
+        conf = max(0.70, conf - (0.10 if hours > 24.0 else 0.05))
+        return ("BUY_NO", conf, "pre_bucket_impossible_no", 0.0)
     _nr_note("pre_heat_bucket_gap_too_small")
     return None
 
@@ -683,14 +715,18 @@ def near_resolution_signal(market: "PolyMarket",
         gap = getattr(config, 'NEAR_RES_TREND_IMPOSSIBLE_GAP_C', 1.0)
         # v33d: impossible-NO safe without declining gate (gap > 1°C hard to climb)
         if extreme_so_far < threshold_c - gap:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+            # v39: dynamic confidence — margin = how far below threshold we are.
+            margin_c = threshold_c - extreme_so_far
+            conf = _dynamic_confidence(margin_c)
             return ("BUY_NO", conf, "trend_impossible_above_no", empirical_extreme_hour)
         # For YES_locked we DO require declining (peak-passed safety).
         if not rt.latest_declining:
             _nr_note("trend_above_not_declining")
             return None
         if extreme_so_far >= threshold_c:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            # v39: YES_locked — margin = how far above threshold (capped at ref).
+            margin_c = extreme_so_far - threshold_c
+            conf = _dynamic_confidence(margin_c)
             return ("BUY_YES", conf, "trend_locked_above_yes", empirical_extreme_hour)
         _nr_note("trend_above_ambiguous")
         return None
@@ -707,10 +743,14 @@ def near_resolution_signal(market: "PolyMarket",
             return None
         gap = getattr(config, 'NEAR_RES_TREND_IMPOSSIBLE_GAP_C', 1.0)
         if extreme_so_far <= threshold_c:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            # v39: YES_locked — margin = how far below threshold.
+            margin_c = threshold_c - extreme_so_far
+            conf = _dynamic_confidence(margin_c)
             return ("BUY_YES", conf, "trend_locked_below_yes", empirical_extreme_hour)
         if extreme_so_far > threshold_c + gap:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+            # v39: NO — margin = how far above threshold (still cold-side).
+            margin_c = extreme_so_far - threshold_c
+            conf = _dynamic_confidence(margin_c)
             return ("BUY_NO", conf, "trend_impossible_below_no", empirical_extreme_hour)
         _nr_note("trend_below_ambiguous")
         return None
@@ -733,11 +773,15 @@ def near_resolution_signal(market: "PolyMarket",
         gap = getattr(config, 'NEAR_RESOLUTION_IMPOSSIBLE_GAP_C', 1.0)
         # Bucket locked (cold already hit bucket): min_so_far in [low, high]
         if low_c <= extreme_so_far <= high_c:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+            # v39: YES_locked — margin = distance from bucket edges (use min).
+            margin_c = min(extreme_so_far - low_c, high_c - extreme_so_far)
+            conf = _dynamic_confidence(margin_c)
             return ("BUY_YES", conf, "bucket_locked_yes_cold", empirical_extreme_hour)
         # Bucket impossible (cold already warmer than bucket by gap → bucket can't be hit)
         if extreme_so_far > high_c + gap:
-            conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+            # v39: NO — margin = how far above bucket high.
+            margin_c = extreme_so_far - high_c
+            conf = _dynamic_confidence(margin_c)
             return ("BUY_NO", conf, "bucket_impossible_no_cold", empirical_extreme_hour)
         _nr_note("cold_bucket_ambiguous")
         return None
@@ -751,7 +795,9 @@ def near_resolution_signal(market: "PolyMarket",
     # a >1.0°C climb from max_so_far to low_c in <4h is climatology-impossible.
     # So skip the declining gate for this branch.
     if extreme_so_far < low_c - gap:
-        conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+        # v39: NO — margin = how far below bucket low.
+        margin_c = low_c - extreme_so_far
+        conf = _dynamic_confidence(margin_c)
         return ("BUY_NO", conf, "bucket_impossible_no", empirical_extreme_hour)
 
     # For BUY_YES_locked and BUY_NO_exceeded we DO require declining=True,
@@ -764,7 +810,9 @@ def near_resolution_signal(market: "PolyMarket",
     # in bucket (we'd need a new higher reading after the peak hour, which the
     # safety buffer + decline-window check protects against).
     if low_c <= extreme_so_far <= high_c:
-        conf = getattr(config, 'NEAR_RES_CONFIDENCE_YES', 0.92)
+        # v39: YES_locked — margin = distance to nearest bucket edge (use min).
+        margin_c = min(extreme_so_far - low_c, high_c - extreme_so_far)
+        conf = _dynamic_confidence(margin_c)
         return ("BUY_YES", conf, "bucket_locked_yes", empirical_extreme_hour)
     # v32 FIX: bucket ALREADY EXCEEDED from above — max_so_far is monotonically
     # non-decreasing through the day, so once it's past high_c the final daily
@@ -772,7 +820,9 @@ def near_resolution_signal(market: "PolyMarket",
     # signal (doesn't even depend on the peak-passed timing check), and was
     # missing entirely before this patch.
     if extreme_so_far > high_c + gap:
-        conf = getattr(config, 'NEAR_RES_CONFIDENCE_NO', 0.85)
+        # v39: NO — margin = how far above bucket high.
+        margin_c = extreme_so_far - high_c
+        conf = _dynamic_confidence(margin_c)
         return ("BUY_NO", conf, "bucket_impossible_no_exceeded", empirical_extreme_hour)
     _nr_note("heat_bucket_ambiguous")
     return None
@@ -885,6 +935,21 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
         nr = near_resolution_signal(market, low_c, high_c, is_low, kind=kind, threshold_c=nr_threshold, forecast=forecast)
         if nr is not None:
             nrs_dir, nrs_conf, nrs_reason_key, nrs_peak_hr = nr
+
+            # v39: PER-CITY EXPOSURE LOCK — only 1 open near-res position per city.
+            # Prevents correlated tail risk (e.g. Moscow 26+28°C doubling exposure
+            # to the same physical peak). Lazy import to avoid circular dep.
+            try:
+                from trader import get_positions_count_by_city
+                city_count = get_positions_count_by_city(market.detected_city)
+                max_per_city = getattr(config, 'NEAR_RES_MAX_OPEN_PER_CITY', 1)
+                if city_count >= max_per_city:
+                    _nr_note("silent_city_exposure_lock")
+                    return None
+            except Exception:
+                # If trader not initialized (e.g. in isolation), skip the check.
+                pass
+
             mkt_prob = market.best_ask_yes
             if mkt_prob is None or mkt_prob < 0.01:
                 mkt_prob = getattr(market, "midpoint_yes", 0.0)
@@ -916,10 +981,19 @@ def calculate_edge(market: PolyMarket) -> Optional[EdgeResult]:
             if eff_edge_nr <= 0.0:
                 _nr_note("silent_zero_edge")
                 return None
+            # v39: MIN EDGE GATE — kill 1-7% edge signals with no margin of safety.
+            min_edge_gate = getattr(config, 'NEAR_RES_MIN_EDGE', 0.08)
+            if eff_edge_nr < min_edge_gate:
+                _nr_note("silent_below_min_edge")
+                return None
 
             max_sz = getattr(config, 'NEAR_RESOLUTION_MAX_SIZE_USD', 2.00)
             min_sz = getattr(config, 'NEAR_RESOLUTION_MIN_SIZE_USD', 0.75)
-            size_nr = round(max(min_sz, min(max_sz, eff_edge_nr * 3.0)), 2)
+            size_mult = getattr(config, 'NEAR_RES_SIZE_EDGE_MULT', 10.0)
+            # v39: Kelly-style sizing — size scales with edge, not flat.
+            # Old: edge*3.0 (8% edge = $0.24 → min floor; 33%+ edge = $2.00 cap)
+            # New: edge*10.0 (8% edge = $0.80; 20% edge = $2.00 cap)
+            size_nr = round(max(min_sz, min(max_sz, eff_edge_nr * size_mult)), 2)
 
             logger.info(
                 f"✅ NEAR-RES {nrs_reason_key}: {market.question[:55]} | "

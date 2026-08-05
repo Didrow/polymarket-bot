@@ -465,6 +465,39 @@ NEAR_RESOLUTION_MAX_PER_CYCLE: int = 4
 # same market twice). Still avoids piling duplicates.
 NEAR_RESOLUTION_MAX_PER_CITY: int = 2
 
+# v39: PER-CITY EXPOSURE LOCK — only 1 OPEN near-res position per city at a time.
+# Prevents correlated tail risk (e.g. Moscow 26+28°C doubling exposure to the
+# same physical peak). Applied in edge_calculator.near_resolution_signal()
+# BEFORE returning a tradeable signal.
+NEAR_RES_MAX_OPEN_PER_CITY: int = 1
+
+# v39: MIN EDGE GATE — kills 1-7% edge signals that have no margin of safety.
+# With flat conf=0.85 and entries at 0.80-0.85, theoretical edge ≤5%, but
+# realized edge after calibration must be ≥8% to be +EV (calibration shaved
+# off phantom confidence). Below this → silent skip.
+NEAR_RES_MIN_EDGE: float = 0.08
+
+# v39: DYNAMIC CONFIDENCE — instead of flat 0.85/0.92, scale confidence by the
+# physical margin between extreme_so_far and the bucket/threshold.
+# conf = base + bonus * margin_factor
+#   base       = NEAR_RES_CONF_BASE (0.70)
+#   bonus_max  = NEAR_RES_CONF_BONUS (0.20) — caps at +20%
+#   margin_f   = min(1.0, abs_gap / NEAR_RES_CONF_MARGIN_REF_C)
+# A signal with gap ≥3°C gets full bonus (conf=0.90); tight gap (≤0°C) gets base only.
+NEAR_RES_CONF_BASE: float = 0.70
+NEAR_RES_CONF_BONUS: float = 0.20
+NEAR_RES_CONF_MARGIN_REF_C: float = 3.0
+# Floor/cap so dynamic confidence stays in a sane band regardless of margin.
+NEAR_RES_CONF_FLOOR: float = 0.70
+NEAR_RES_CONF_CAP: float = 0.90
+
+# v39: KELLY-STYLE SIZING — size scales with edge, not flat.
+# size = max(min_sz, min(max_sz, edge * NEAR_RES_SIZE_EDGE_MULT))
+# Old: edge*3.0 → 8% edge = $0.75 (min), 33%+ edge = $2.00 (max)
+# New: edge*10.0 → 8% edge = $0.80 (min floor), 20% edge = $2.00 (cap)
+# Forces true edge-proportional exposure below the cap.
+NEAR_RES_SIZE_EDGE_MULT: float = 10.0
+
 # Empirical local peak-hour by city (LOCAL solar/clock hour, float for half-hours).
 # Source: 22-month climatology for daily temperature maximum.
 # These are APPROXIMATE — the safety buffer absorbs the variance.
