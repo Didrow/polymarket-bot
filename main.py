@@ -304,7 +304,17 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
         _raw_size = getattr(edge_result, 'size_usd', 0.0)
         if _raw_size <= 0:
             _raw_size = edge_result.edge * current_capital * config.MAX_POSITION_PCT
-        size = max(config.MIN_POSITION_USD, min(_raw_size, config.MAX_POSITION_USD))
+        # v40: near-res signals bypass MAX_POSITION_USD=1.50 clamp (same logic as trader.py).
+        # Detection: distance_c==0.0 AND size_usd>0 (set in edge_calculator.py:1009-1011).
+        # Otherwise exposure accounting would understate real near-res size (up to $2.00)
+        # and MAX_TOTAL_EXPOSURE_PCT check becomes inconsistent with actual deploy.
+        _is_nr_exp = (getattr(edge_result, 'distance_c', 0.0) == 0.0) and (_raw_size > 0.0)
+        if _is_nr_exp:
+            _nr_max = float(getattr(config, 'NEAR_RESOLUTION_MAX_SIZE_USD', 2.00))
+            _nr_min = float(getattr(config, 'NEAR_RESOLUTION_MIN_SIZE_USD', 0.75))
+            size = max(_nr_min, min(_raw_size, _nr_max))
+        else:
+            size = max(config.MIN_POSITION_USD, min(_raw_size, config.MAX_POSITION_USD))
         logger.debug(
             f"💰 Size: ${size:.2f} | dist={getattr(edge_result, 'distance_c', 0):.1f}°C | "
             f"{edge_result.market.question[:50]} (edge={edge_result.edge:.1%})"

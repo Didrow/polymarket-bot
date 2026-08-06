@@ -369,6 +369,28 @@ def decide_position_size(edge_result: EdgeResult, current_capital: float, portfo
     confidence = edge_result.confidence
     distance_c = getattr(edge_result, "distance_c", 0.0) or 0.0
 
+    # v40: Near-resolution signals bypass legacy Kelly blend + MAX_POSITION_USD clamp.
+    # Detection: edge_calculator sets distance_c=0.0 AND size_usd>0 for near-res EdgeResult.
+    # Rationale: near-res `size_usd` already encodes edge-proportional Kelly sizing
+    # (size = edge * NEAR_RES_SIZE_EDGE_MULT), clamped to NEAR_RESOLUTION_*_SIZE limits.
+    # Applying legacy blend + $1.50 clamp here would silently flatten that to $1.50
+    # regardless of edge — making v39 dynamic sizing ineffective.
+    is_near_res_signal = (distance_c == 0.0) and (suggested > 0.0)
+
+    if is_near_res_signal:
+        nrs_min = float(getattr(config, "NEAR_RESOLUTION_MIN_SIZE_USD", 0.75))
+        nrs_max = float(getattr(config, "NEAR_RESOLUTION_MAX_SIZE_USD", 2.00))
+        # Drawdown-aware haircut: scale 1.0 (no DD) → 0.5 (at DD limit)
+        dd_factor_nr = max(0.5, 1.0 - min(drawdown, 0.5))
+        final = suggested * dd_factor_nr
+        final = max(nrs_min, min(final, nrs_max, current_capital * config.MAX_POSITION_PCT))
+        logger.info(
+            f"📐 [v40] near-res sizing: edge→${suggested:.2f} suggested, "
+            f"dd_factor={dd_factor_nr:.2f}, final=${final:.2f} "
+            f"(bypass legacy Kelly + MAX_POSITION_USD clamp)"
+        )
+        return round(final, 2)
+
     # Peak / wing multiplier (coldmath: peak pays, wings are cheap insurance)
     peak_d = getattr(config, "PEAK_DIST_C", 0.60)
     near_d = getattr(config, "NEAR_WING_DIST_C", 1.10)
