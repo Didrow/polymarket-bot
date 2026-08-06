@@ -1258,19 +1258,49 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
             city_market_count[c] = city_market_count.get(c, 0) + 1
     max_prefetch = getattr(config, 'MAX_PREFETCH_CITIES', 20)
     unique_cities = [c for c, _ in sorted(city_market_count.items(), key=lambda x: -x[1])[:max_prefetch]]
+
+    # v38.2: Prefetch має гріти ТОЧНІ (city, h_bucket, target_date) комбо, які
+    # скан реально запросить через get_target_date(). Раніше гріли тільки
+    # target_date=None → кеш-ключ consensus_{city}_mid_ ніколи не збігався з
+    # ключем скану consensus_{city}_mid_{real_date} → кожен ринок робив повний
+    # HTTP-ланцюг (METAR+ENSEMBLE+NOAA+NASA+running temps) → 40+ хв на цикл.
     if city_market_count:
-        logger.info(
-            f"🌤️ Prefetch forecast для {len(unique_cities)}/{len(city_market_count)} міст "
-            f"(cap={max_prefetch}, топ за обсягом)..."
-        )
-        for i, city in enumerate(unique_cities, 1):
+        # Збираємо унікальні (city, h_bucket, target_date) з реальних ринків
+        _prefetch_combos: Dict[tuple, float] = {}
+        for _m in markets:
+            _c = _m.detected_city
+            if _c not in unique_cities:
+                continue
+            _hours = getattr(_m, 'hours_to_resolution', 24.0) or 24.0
+            _h_b = "short" if _hours <= 12 else ("mid" if _hours <= 24 else "long")
             try:
-                get_best_forecast(city, hours_to_resolution=24.0, target_date=None)
+                _t_date = get_target_date(_m.question, _m.end_date, _c)
+            except Exception:
+                _t_date = None
+            _key = (_c, _h_b, _t_date)
+            _prefetch_combos.setdefault(_key, _hours)
+        logger.info(
+            f"🌤️ Prefetch {len(_prefetch_combos)} (city,bucket,date)-комбо "
+            f"для {len(unique_cities)}/{len(city_market_count)} міст (cap={max_prefetch})..."
+        )
+        _done = 0
+        for (_city, _h_b, _t_date), _hours in _prefetch_combos.items():
+            try:
+                get_best_forecast(_city, hours_to_resolution=_hours, target_date=_t_date)
             except Exception as e:
-                logger.debug(f"Prefetch {city} skip: {e}")
-            if i % 10 == 0:
-                logger.info(f"  prefetch: {i}/{len(unique_cities)} міст done")
-        logger.info(f"  prefetch завершено ({len(unique_cities)} міст)")
+                logger.debug(f"Prefetch {_city} {_h_b} {_t_date} skip: {e}")
+            _done += 1
+            if _done % 40 == 0:
+                logger.info(f"  prefetch: {_done}/{len(_prefetch_combos)} комбо done")
+        # v38.2: прогріваємо running temps теж (near-res path робить це на кожен ринок)
+        _rt_warmed = 0
+        for _city in unique_cities:
+            try:
+                fetch_running_temperatures(_city)
+                _rt_warmed += 1
+            except Exception as e:
+                logger.debug(f"Prefetch running temps {_city} skip: {e}")
+        logger.info(f"  prefetch завершено ({len(_prefetch_combos)} комбо, running temps: {_rt_warmed}/{len(unique_cities)})")
 
     for idx, market in enumerate(markets):
         if len(markets) > 400 and idx % 200 == 0 and idx > 0:
