@@ -463,6 +463,8 @@ NEAR_RESOLUTION_MAX_PER_CYCLE: int = 4
 # v33: 1->2 per city. Allows one categorical/bucket + one trend signal per
 # city per cycle (different condition_ids, same physical reality — not the
 # same market twice). Still avoids piling duplicates.
+# NOTE: orphaned as of v41.1 city-exposure-lock fix — was bypassed by main.py
+# near-res path. Kept for backwards compatibility / reference only.
 NEAR_RESOLUTION_MAX_PER_CITY: int = 2
 
 # v39: PER-CITY EXPOSURE LOCK — only 1 OPEN near-res position per city at a time.

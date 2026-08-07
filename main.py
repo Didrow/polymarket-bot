@@ -294,9 +294,11 @@ def run_scan_cycle(safeguard: SafeguardManager, clob_client, cycle_count: int = 
             nr_max_cycle = getattr(config, 'NEAR_RESOLUTION_MAX_PER_CYCLE', 2)
             if near_res_opened_this_cycle >= nr_max_cycle:
                 continue
-            nr_max_city = getattr(config, 'NEAR_RESOLUTION_MAX_PER_CITY', 1)
-            if city and near_res_city_counts_this_cycle.get(city, 0) >= nr_max_city:
-                continue
+            nr_max_city = getattr(config, 'NEAR_RES_MAX_OPEN_PER_CITY', 1)
+            if city:
+                _nr_city_count = _trader.get_positions_count_by_city(city) + near_res_city_counts_this_cycle.get(city, 0)
+                if _nr_city_count >= nr_max_city:
+                    continue
 
         if not safeguard.check_hourly_trade_limit():
             break

@@ -1346,13 +1346,25 @@ def scan_all_edges(markets: List[PolyMarket]) -> List[EdgeResult]:
 
     # Cap rungs per city in the result list (still allow main to re-check)
     max_per_city = getattr(config, 'SNIPER_GRID_MAX_PER_CITY_CYCLE', 5)
+    # Near-res path is capped tighter: NEAR_RES_MAX_OPEN_PER_CITY (default 1).
+    # Without this dedup, two near-res candidates for the same city both pass
+    # scan_all_edges and main.py's in-cycle counter check (line 297-299) misses
+    # the 2nd because place_trade hasn't run yet when the 1st opens.
+    nr_max_per_city = getattr(config, 'NEAR_RES_MAX_OPEN_PER_CITY', 1)
     city_seen: Dict[str, int] = {}
+    nr_city_seen: Dict[str, int] = {}
     capped: List[EdgeResult] = []
     for r in results:
         c = r.market.detected_city or "?"
-        if city_seen.get(c, 0) >= max_per_city:
-            continue
-        city_seen[c] = city_seen.get(c, 0) + 1
+        is_nr = r.forecast is None
+        if is_nr:
+            if nr_city_seen.get(c, 0) >= nr_max_per_city:
+                continue
+            nr_city_seen[c] = nr_city_seen.get(c, 0) + 1
+        else:
+            if city_seen.get(c, 0) >= max_per_city:
+                continue
+            city_seen[c] = city_seen.get(c, 0) + 1
         capped.append(r)
     results = capped
 
